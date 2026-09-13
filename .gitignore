@@ -1,0 +1,49 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Tt]est[Rr]esults/
+
+# IDE and user-specific state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+_ReSharper*/
+*.DotSettings.user
+
+# Local AIMaster settings and environment files
+/settings.json
+/ai-manager.json
+.env
+.env.*
+!.env.example
+
+# Secrets and signing material
+*.pfx
+*.p12
+*.snk
+*.pem
+*.key
+
+# Logs, diagnostics, and temporary files
+*.log
+*.dmp
+*.tmp
+*.bak
+*.cache
+~$*
+
+# OS metadata
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Generated release artifacts. Attach ZIP files to GitHub Releases instead of
+# committing large binaries to repository history.
+/release/AIMaster-*/
+/release/*.zip

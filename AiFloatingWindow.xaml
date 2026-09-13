@@ -1,0 +1,150 @@
+<Window x:Class="AIMaster.AiFloatingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AI 任务悬浮监控" Width="200" MinWidth="180" MaxWidth="260" Height="98"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
+        Background="Transparent" Icon="Resources/AIMaster.ico" ShowInTaskbar="True" Topmost="True"
+        FontFamily="Microsoft YaHei UI" Loaded="Window_Loaded" Closed="Window_Closed"
+        MouseEnter="Window_MouseEnter" MouseLeave="Window_MouseLeave">
+    <Window.ContextMenu>
+        <ContextMenu x:Name="FloatingMenu" Opened="FloatingMenu_Opened">
+            <MenuItem x:Name="RefreshNowMenuItem" Header="立即刷新" Click="RefreshNow_Click"/>
+            <MenuItem x:Name="CollapseToggleMenuItem" Header="立即收起" Click="CollapseToggle_Click"/>
+            <MenuItem x:Name="AutoCollapseMenuItem" Header="靠边自动收起" IsCheckable="True"
+                      Click="AutoCollapseMenuItem_Click"/>
+            <Separator/>
+            <MenuItem x:Name="TaskNameSourceMenuItem" Header="任务名称显示">
+                <MenuItem x:Name="ConversationTitleMenuItem" Header="对话标题" Tag="conversationTitle"
+                          IsCheckable="True" Click="TaskNameSource_Click"/>
+                <MenuItem x:Name="LatestUserMessageMenuItem" Header="最后发送内容" Tag="latestUserMessage"
+                          IsCheckable="True" Click="TaskNameSource_Click"/>
+            </MenuItem>
+            <Separator/>
+            <MenuItem x:Name="RefreshFrequencyMenuItem" Header="刷新频率">
+                <MenuItem Header="1 秒" Tag="1" IsCheckable="True" Click="RefreshFrequency_Click"/>
+                <MenuItem Header="2 秒" Tag="2" IsCheckable="True" Click="RefreshFrequency_Click"/>
+                <MenuItem Header="5 秒" Tag="5" IsCheckable="True" Click="RefreshFrequency_Click"/>
+                <MenuItem Header="10 秒" Tag="10" IsCheckable="True" Click="RefreshFrequency_Click"/>
+                <MenuItem Header="30 秒" Tag="30" IsCheckable="True" Click="RefreshFrequency_Click"/>
+            </MenuItem>
+        </ContextMenu>
+    </Window.ContextMenu>
+    <Window.Resources>
+        <SolidColorBrush x:Key="FloatInk" Color="#EDF6F3"/>
+        <SolidColorBrush x:Key="FloatMuted" Color="#829996"/>
+        <SolidColorBrush x:Key="FloatSignal" Color="#38D7B2"/>
+        <Style x:Key="ChromeButton" TargetType="Button">
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="17"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource FloatMuted}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontFamily" Value="Cascadia Mono"/>
+            <Setter Property="FontSize" Value="9"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonSurface" Background="{TemplateBinding Background}" CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonSurface" Property="Background" Value="#283740"/>
+                                <Setter Property="Foreground" Value="{StaticResource FloatInk}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="Transparent">
+    <Border x:Name="Shell" Margin="4" Background="#F51A232B" BorderBrush="#40515A"
+            BorderThickness="1" CornerRadius="10" MouseLeftButtonDown="Shell_MouseLeftButtonDown">
+        <Border.Effect>
+            <DropShadowEffect Color="#000000" BlurRadius="18" ShadowDepth="4" Opacity="0.52"/>
+        </Border.Effect>
+        <Grid>
+            <Grid Margin="8,3,5,5">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="17"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="1"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="{StaticResource FloatSignal}" Margin="0,0,6,0"/>
+                        <TextBlock x:Name="BrandText" Text="CODEX / LIVE" Foreground="{StaticResource FloatSignal}" FontFamily="Cascadia Mono"
+                                   FontWeight="SemiBold" FontSize="7.5"/>
+                        <TextBlock x:Name="SyncAgeText" Text="连接中" Foreground="{StaticResource FloatMuted}"
+                                   FontFamily="Cascadia Mono" FontSize="7" Margin="6,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button x:Name="RefreshButton" Content="↻" ToolTip="立即刷新" Style="{StaticResource ChromeButton}" Click="RefreshNow_Click"/>
+                        <Button x:Name="PinButton" Content="●" ToolTip="取消置顶" Style="{StaticResource ChromeButton}" Click="PinButton_Click"/>
+                        <Button Content="×" ToolTip="关闭悬浮窗" Style="{StaticResource ChromeButton}" Click="CloseButton_Click"/>
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel x:Name="TaskRowsPanel" Grid.Row="1" Margin="0,0,2,1">
+                    <Grid Height="27">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border x:Name="TaskStatusBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                Background="#173A32" CornerRadius="5" Padding="4,1">
+                            <TextBlock x:Name="TaskStatusText" Text="正在连接" Foreground="{StaticResource FloatSignal}"
+                                       FontSize="7" FontWeight="SemiBold"/>
+                        </Border>
+                        <TextBlock x:Name="TaskNameText" Grid.Column="1" Text="读取最近任务…" Foreground="{StaticResource FloatInk}"
+                                   FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center" Margin="5,0,0,0" ToolTip="读取最近任务…"/>
+                    </Grid>
+                    <StackPanel x:Name="SecondaryTasksPanel"/>
+                </StackPanel>
+
+                <Border Grid.Row="2" Background="#33434B"/>
+
+                <Grid Grid.Row="3" Margin="0,3,2,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="剩余额度" Foreground="{StaticResource FloatMuted}" FontSize="7"/>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="RemainingQuotaText" Text="--" Foreground="{StaticResource FloatInk}"
+                                       FontFamily="Cascadia Mono" FontSize="14" FontWeight="SemiBold"/>
+                            <TextBlock Text="%" Foreground="{StaticResource FloatMuted}" FontFamily="Cascadia Mono"
+                                       FontSize="8" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <Border Grid.Column="1" Background="#33434B" Margin="0,1,0,1"/>
+                    <StackPanel Grid.Column="2" Margin="6,0,0,0">
+                        <TextBlock Text="当前推理模型" Foreground="{StaticResource FloatMuted}" FontSize="7"/>
+                        <Grid Margin="0,2,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ModelText" Text="--" Foreground="{StaticResource FloatInk}" FontFamily="Cascadia Mono"
+                                       FontSize="9" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="ReasoningText" Grid.Column="1" Text="" Foreground="{StaticResource FloatMuted}"
+                                       FontFamily="Cascadia Mono" FontSize="7" Margin="4,1,0,0"/>
+                        </Grid>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Border>
+
+    <!-- 靠边收起后唯一保留的轻量触发面；方向由代码随吸附边缘调整。 -->
+    <Border x:Name="PeekHandle" Width="8" Height="56" HorizontalAlignment="Left"
+            VerticalAlignment="Center" Visibility="Collapsed" Cursor="Hand"
+            Background="#70304448" BorderThickness="0"
+            CornerRadius="6,0,0,6" ToolTip="悬停展开" MouseLeftButtonDown="PeekHandle_MouseLeftButtonDown">
+        <Rectangle x:Name="PeekSignal" Width="2" Height="34" RadiusX="1" RadiusY="1" Fill="#D938D7B2">
+            <Rectangle.Effect>
+                <DropShadowEffect Color="#38D7B2" BlurRadius="5" ShadowDepth="0" Opacity="0.28"/>
+            </Rectangle.Effect>
+        </Rectangle>
+    </Border>
+    </Grid>
+</Window>
