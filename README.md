@@ -41,7 +41,7 @@ AIMaster 是一个可独立运行的 Windows Codex 用量与任务监控工具�
 - 读取额度和在线任务时，Codex App Server 需要可用。
 
 ## 悬浮窗
-<img width="390" height="201" alt="image" src="https://github.com/user-attachments/assets/42590959-dfa9-4eaa-88bd-91ab6c170de0" />
+<img width="390" height="201" alt="image" src="https://github.com/user-attachments/assets/6180a8ed-1cda-46e2-bb99-8d75c5c12071" />
 
 在主窗口点击“悬浮监控”打开悬浮窗：
 
