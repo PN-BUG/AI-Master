@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="AI 任务悬浮监控" Width="200" MinWidth="180" MaxWidth="260" Height="98"
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
-        Background="Transparent" Icon="Resources/AIMaster.ico" ShowInTaskbar="True" Topmost="True"
+        Background="Transparent" Icon="Resources/AIMaster.ico" ShowInTaskbar="False" Topmost="True"
         FontFamily="Microsoft YaHei UI" Loaded="Window_Loaded" Closed="Window_Closed"
         MouseEnter="Window_MouseEnter" MouseLeave="Window_MouseLeave">
     <Window.ContextMenu>

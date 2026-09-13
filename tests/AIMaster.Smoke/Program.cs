@@ -26,7 +26,7 @@ internal static partial class Program
 
         Check(app.IsTrayIconVisible, "AIMaster creates a visible Windows tray icon");
         Check(main.ShowInTaskbar, "main window is shown in the taskbar");
-        Check(floating.ShowInTaskbar, "floating window is shown in the taskbar");
+        Check(!floating.ShowInTaskbar, "floating window stays out of the taskbar");
         Check(main.Icon != null, "main window has the AIMaster icon");
         Check(floating.Icon != null, "floating window has the AIMaster icon");
         var shell = (Border)floating.FindName("Shell");
