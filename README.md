@@ -7,6 +7,7 @@
 AIMaster 是一个可独立运行的 Windows Codex 用量与任务监控工具。它集中展示剩余额度、额度重置时间、消耗预测、最近任务、执行状态、当前模型与推理强度，并提供紧凑的桌面悬浮窗。
 
 ## 主要功能
+<img width="2550" height="1524" alt="image" src="https://github.com/user-attachments/assets/d5f48d4c-cee0-4a47-b707-e58d71af8d56" />
 
 - 显示 Codex 总额度、7 天窗口、5 小时窗口与重置时间。
 - 根据近期消耗速度预测额度是否会提前耗尽。
@@ -40,6 +41,7 @@ AIMaster 是一个可独立运行的 Windows Codex 用量与任务监控工具�
 - 读取额度和在线任务时，Codex App Server 需要可用。
 
 ## 悬浮窗
+<img width="390" height="201" alt="image" src="https://github.com/user-attachments/assets/42590959-dfa9-4eaa-88bd-91ab6c170de0" />
 
 在主窗口点击“悬浮监控”打开悬浮窗：
 
