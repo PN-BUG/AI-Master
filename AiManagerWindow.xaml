@@ -4,7 +4,7 @@
         Title="AIMaster" Icon="Resources/AIMaster.ico" ShowInTaskbar="True"
         Width="1180" Height="790" MinWidth="960" MinHeight="650"
         WindowStartupLocation="CenterOwner" Background="#0F151B"
-        FontFamily="Microsoft YaHei UI" Loaded="Window_Loaded" Closed="Window_Closed">
+        FontFamily="Microsoft YaHei UI" Loaded="Window_Loaded" Closing="Window_Closing" Closed="Window_Closed">
     <Window.Resources>
         <SolidColorBrush x:Key="Panel" Color="#172028"/>
         <SolidColorBrush x:Key="PanelRaised" Color="#1D2832"/>

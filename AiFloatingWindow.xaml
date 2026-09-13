@@ -63,9 +63,6 @@
     <Grid Background="Transparent">
     <Border x:Name="Shell" Margin="4" Background="#F51A232B" BorderBrush="#40515A"
             BorderThickness="1" CornerRadius="10" MouseLeftButtonDown="Shell_MouseLeftButtonDown">
-        <Border.Effect>
-            <DropShadowEffect Color="#000000" BlurRadius="18" ShadowDepth="4" Opacity="0.52"/>
-        </Border.Effect>
         <Grid>
             <Grid Margin="8,3,5,5">
                 <Grid.RowDefinitions>
@@ -140,11 +137,7 @@
             VerticalAlignment="Center" Visibility="Collapsed" Cursor="Hand"
             Background="#70304448" BorderThickness="0"
             CornerRadius="6,0,0,6" ToolTip="悬停展开" MouseLeftButtonDown="PeekHandle_MouseLeftButtonDown">
-        <Rectangle x:Name="PeekSignal" Width="2" Height="34" RadiusX="1" RadiusY="1" Fill="#D938D7B2">
-            <Rectangle.Effect>
-                <DropShadowEffect Color="#38D7B2" BlurRadius="5" ShadowDepth="0" Opacity="0.28"/>
-            </Rectangle.Effect>
-        </Rectangle>
+        <Rectangle x:Name="PeekSignal" Width="2" Height="34" RadiusX="1" RadiusY="1" Fill="#D938D7B2"/>
     </Border>
     </Grid>
 </Window>

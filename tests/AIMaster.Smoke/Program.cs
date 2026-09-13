@@ -17,14 +17,22 @@ internal static partial class Program
         var app = new App();
         app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        Check(app.ShutdownMode == ShutdownMode.OnExplicitShutdown,
+            "closing the last window does not terminate background monitoring");
 
         var main = new AiManagerWindow();
         var floating = new AiFloatingWindow();
+        app.InitializeTrayIcon();
 
+        Check(app.IsTrayIconVisible, "AIMaster creates a visible Windows tray icon");
         Check(main.ShowInTaskbar, "main window is shown in the taskbar");
         Check(floating.ShowInTaskbar, "floating window is shown in the taskbar");
         Check(main.Icon != null, "main window has the AIMaster icon");
         Check(floating.Icon != null, "floating window has the AIMaster icon");
+        var shell = (Border)floating.FindName("Shell");
+        Check(shell.Effect is null, "floating window has no outer shadow");
+        var peekSignal = (System.Windows.Shapes.Rectangle)floating.FindName("PeekSignal");
+        Check(peekSignal.Effect is null, "collapsed handle has no glow shadow");
         Check(new AiManagerSettings().TaskNameSource == TaskNameSources.ConversationTitle,
             "conversation title is the default task-name source");
         Check(TaskNameSources.Normalize(TaskNameSources.LatestUserMessage) == TaskNameSources.LatestUserMessage,
@@ -71,9 +79,7 @@ internal static partial class Program
                 ? "English quota, task status, reset time, and fallback text are localized"
                 : $"untranslated dynamic text: {string.Join(" | ", untranslatedDynamicText)}");
 
-        floating.Close();
-        main.Close();
-        app.Shutdown();
+        app.ExitApplication();
         Console.WriteLine("All AIMaster smoke checks passed.");
         return 0;
     }

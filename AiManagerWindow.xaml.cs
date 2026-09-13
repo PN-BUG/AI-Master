@@ -45,6 +45,14 @@ public partial class AiManagerWindow : Window
         _lifetime.Dispose();
     }
 
+    private void Window_Closing(object? sender, CancelEventArgs e)
+    {
+        if (App.Current.IsExiting) return;
+        e.Cancel = true;
+        Hide();
+        App.Current.NotifyRunningInBackground();
+    }
+
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync(showErrors: true);
 
     private void FloatingWindow_Click(object sender, RoutedEventArgs e) => AiFloatingWindow.ShowOrActivate();
