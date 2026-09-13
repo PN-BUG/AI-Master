@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using AIMaster;
 using AIMaster.Models;
 using AIMaster.Services;
+using SharedUpdates;
 
 internal static partial class Program
 {
@@ -19,6 +20,28 @@ internal static partial class Program
         LocalizationService.Initialize(LocalizationService.English);
         Check(app.ShutdownMode == ShutdownMode.OnExplicitShutdown,
             "closing the last window does not terminate background monitoring");
+        Check(GitHubUpdateChecker.IsNewerVersion("v1.1.0", "1.0.0"),
+            "update checker detects a newer semantic version");
+        Check(!GitHubUpdateChecker.IsNewerVersion("v1.0.0", "1.0.0"),
+            "update checker accepts an equal v-prefixed version");
+        Check(GitHubUpdateChecker.BuildLatestReleaseApiUrl("PN-BUG", "AI-Master") ==
+              "https://api.github.com/repos/PN-BUG/AI-Master/releases/latest",
+            "update checker targets the AIMaster GitHub release feed");
+        var updateAssets = new List<GitHubReleaseAsset>
+        {
+            new("AIMaster-win-x64-lightweight.zip", "https://github.com/example/lightweight", 100, null),
+            new("AIMaster-win-x64-standalone.zip", "https://github.com/example/standalone", 200, null)
+        };
+        Check(ApplicationUpdater.SelectAsset(updateAssets, "AIMaster", "win-x64", "lightweight")?.SizeBytes == 100,
+            "self-updater selects the matching lightweight package");
+        Check(ApplicationUpdater.SelectAsset(updateAssets, "AIMaster", "win-x64", "standalone")?.SizeBytes == 200,
+            "self-updater selects the matching standalone package");
+        var parsedRelease = GitHubUpdateChecker.ParseReleaseJson(
+            "{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/PN-BUG/AI-Master/releases/tag/v1.2.0\",\"assets\":[{\"name\":\"AIMaster-win-x64-lightweight.zip\",\"browser_download_url\":\"https://github.com/PN-BUG/AI-Master/releases/download/v1.2.0/AIMaster-win-x64-lightweight.zip\",\"size\":123,\"digest\":\"sha256:abcd\"}]}",
+            "1.0.0", "PN-BUG", "AI-Master");
+        Check(parsedRelease.UpdateAvailable && parsedRelease.ReleaseAssets.Count == 1 &&
+              parsedRelease.ReleaseAssets[0].Digest == "sha256:abcd",
+            "update checker parses release assets and SHA-256 digests");
 
         var main = new AiManagerWindow();
         var floating = new AiFloatingWindow();
@@ -27,6 +50,12 @@ internal static partial class Program
         Check(app.IsTrayIconVisible, "AIMaster creates a visible Windows tray icon");
         Check(main.ShowInTaskbar, "main window is shown in the taskbar");
         Check(!floating.ShowInTaskbar, "floating window stays out of the taskbar");
+        Check(main.FindName("CheckUpdateButton") is Button updateButton &&
+              Equals(updateButton.Content, "⇩ Check for updates"),
+            "main window exposes the localized manual update check");
+        Check(main.FindName("InstallUpdateButton") is Button installButton &&
+              Equals(installButton.Content, "⇩ Update now") && installButton.Visibility == Visibility.Collapsed,
+            "main window exposes the localized direct-update action on demand");
         Check(main.Icon != null, "main window has the AIMaster icon");
         Check(floating.Icon != null, "floating window has the AIMaster icon");
         var shell = (Border)floating.FindName("Shell");

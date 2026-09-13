@@ -105,6 +105,10 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock x:Name="SyncStatusText" Text="等待连接" Foreground="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <Button x:Name="CheckUpdateButton" Content="⇩ 检查更新" ToolTip="检查 GitHub 新版本"
+                        Style="{StaticResource ActionButton}" Click="CheckUpdate_Click" Margin="0,0,8,0"/>
+                <Button x:Name="InstallUpdateButton" Content="⇩ 立即更新" ToolTip="下载并安装新版本"
+                        Style="{StaticResource SignalButton}" Click="InstallUpdate_Click" Margin="0,0,8,0" Visibility="Collapsed"/>
                 <Button x:Name="LanguageButton" Content="EN" ToolTip="切换语言" Style="{StaticResource ActionButton}" Click="LanguageButton_Click" Margin="0,0,8,0"/>
                 <Button x:Name="FloatingWindowButton" Content="▣ 悬浮监控" Style="{StaticResource ActionButton}" Click="FloatingWindow_Click" Margin="0,0,8,0"/>
                 <Button x:Name="RefreshButton" Content="↻ 立即同步" Style="{StaticResource SignalButton}" Click="Refresh_Click"/>

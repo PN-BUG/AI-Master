@@ -101,6 +101,9 @@ public static class LocalizationService
         ["输出目录（留空使用默认 publish 目录）"] = "Output directory (blank uses the default publish directory)",
         ["编译输出"] = "Build output", ["正在编译..."] = "Building…", ["📁 打开目录"] = "📁 Open folder", ["📂 打开 EXE"] = "📂 Open EXE",
 
+        ["检查更新"] = "Check for updates", ["正在检查…"] = "Checking…",
+        ["⇩ 检查更新"] = "⇩ Check for updates", ["检查 GitHub 新版本"] = "Check GitHub for a new version",
+        ["立即更新"] = "Update now", ["⇩ 立即更新"] = "⇩ Update now", ["下载并安装新版本"] = "Download and install the new version",
         ["显示主窗口"] = "Show main window", ["AI 悬浮监控"] = "AI floating monitor", ["退出"] = "Exit"
         , ["设置已保存。"] = "Settings saved.", ["保存成功"] = "Saved"
     };

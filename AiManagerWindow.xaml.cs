@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -6,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using AIMaster.Models;
 using AIMaster.Services;
+using SharedUpdates;
 
 namespace AIMaster;
 
@@ -18,6 +20,8 @@ public partial class AiManagerWindow : Window
     private bool _localGuardPaused;
     private bool _overrideCurrentBreach;
     private bool _alertedForCurrentBreach;
+    private bool _checkingForUpdates;
+    private UpdateCheckResult? _availableUpdate;
 
     public AiManagerWindow()
     {
@@ -33,6 +37,7 @@ public partial class AiManagerWindow : Window
         LoadPolicyControls();
         _timer.Interval = TimeSpan.FromSeconds(Math.Clamp(_service.Settings.RefreshSeconds, 30, 600));
         _timer.Start();
+        _ = CheckForUpdatesAsync(showUpToDate: false);
         await RefreshAsync(showErrors: true);
     }
 
@@ -56,6 +61,113 @@ public partial class AiManagerWindow : Window
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync(showErrors: true);
 
     private void FloatingWindow_Click(object sender, RoutedEventArgs e) => AiFloatingWindow.ShowOrActivate();
+
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e) =>
+        await CheckForUpdatesAsync(showUpToDate: true);
+
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e) =>
+        await InstallUpdateAsync(confirm: true);
+
+    private async Task CheckForUpdatesAsync(bool showUpToDate)
+    {
+        if (_checkingForUpdates) return;
+        _checkingForUpdates = true;
+        CheckUpdateButton.IsEnabled = false;
+        try
+        {
+            var result = await GitHubUpdateChecker.CheckAsync(
+                "PN-BUG", "AI-Master", typeof(AiManagerWindow).Assembly, _lifetime.Token);
+            if (!result.ReleaseFound)
+            {
+                _availableUpdate = null;
+                InstallUpdateButton.Visibility = Visibility.Collapsed;
+                if (showUpToDate)
+                    WpfMessageBox.Show(this,
+                        L("AIMaster 目前还没有已发布的 GitHub Release。",
+                          "AIMaster does not have a published GitHub Release yet."),
+                        L("检查更新", "Check for updates"), MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (!result.UpdateAvailable)
+            {
+                _availableUpdate = null;
+                InstallUpdateButton.Visibility = Visibility.Collapsed;
+                if (showUpToDate)
+                    WpfMessageBox.Show(this,
+                        L($"AIMaster 已是最新版（{result.CurrentVersion}）。", $"AIMaster is up to date ({result.CurrentVersion})."),
+                        L("检查更新", "Check for updates"), MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            _availableUpdate = result;
+            InstallUpdateButton.Visibility = Visibility.Visible;
+            FooterStatusText.Text = L($"发现 AIMaster {result.LatestVersion}，可立即更新。",
+                $"AIMaster {result.LatestVersion} is available. Ready to update.");
+            if (!showUpToDate)
+            {
+                var install = WpfMessageBox.Show(this,
+                    L($"AIMaster {result.LatestVersion} 已发布（当前：{result.CurrentVersion}）。\n\n是否立即下载、安装并重启？",
+                      $"AIMaster {result.LatestVersion} is available (current: {result.CurrentVersion}).\n\nDownload, install, and restart now?"),
+                    L("发现新版本", "Update available"), MessageBoxButton.YesNo, MessageBoxImage.Information);
+                if (install == MessageBoxResult.Yes) await InstallUpdateAsync(confirm: false);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (showUpToDate)
+                WpfMessageBox.Show(this,
+                    L($"无法检查更新：{ex.Message}", $"Unable to check for updates: {ex.Message}"),
+                    L("检查更新", "Check for updates"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _checkingForUpdates = false;
+            CheckUpdateButton.IsEnabled = true;
+        }
+    }
+
+    private async Task InstallUpdateAsync(bool confirm)
+    {
+        if (_availableUpdate is null) return;
+        var update = _availableUpdate;
+        if (confirm)
+        {
+            var confirmed = WpfMessageBox.Show(this,
+                L($"现在下载并安装 AIMaster {update.LatestVersion}？\n\n程序将关闭并自动重启，本地设置会保留。",
+                  $"Download and install AIMaster {update.LatestVersion} now?\n\nThe app will close and restart. Local settings will be preserved."),
+                L("安装更新", "Install update"), MessageBoxButton.YesNo, MessageBoxImage.Information);
+            if (confirmed != MessageBoxResult.Yes) return;
+        }
+
+        CheckUpdateButton.IsEnabled = false;
+        InstallUpdateButton.IsEnabled = false;
+        var progress = new Progress<double>(value =>
+            SyncStatusText.Text = L($"下载更新 {value:P0}", $"Downloading {value:P0}"));
+        try
+        {
+            await ApplicationUpdater.PrepareAndLaunchAsync(update,
+                new SelfUpdateOptions("AIMaster", "lightweight", PreserveToolkitConfiguration: false,
+                    LocalizationService.IsEnglish), progress, _lifetime.Token);
+            App.Current.ExitApplication();
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            SyncStatusText.Text = L("更新失败", "Update failed");
+            var open = WpfMessageBox.Show(this,
+                L($"自动更新失败：{ex.Message}\n\n是否改为打开下载页面？",
+                  $"Automatic update failed: {ex.Message}\n\nOpen the download page instead?"),
+                L("更新失败", "Update failed"), MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (open == MessageBoxResult.Yes)
+                Process.Start(new ProcessStartInfo(update.ReleasePageUrl) { UseShellExecute = true });
+        }
+        finally
+        {
+            CheckUpdateButton.IsEnabled = true;
+            InstallUpdateButton.IsEnabled = true;
+        }
+    }
 
     private void LanguageButton_Click(object sender, RoutedEventArgs e)
     {
