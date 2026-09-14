@@ -1,0 +1,10 @@
+AIMaster
+
+1. Install and sign in to Codex.
+2. Run AIMaster.exe.
+{{RUNTIME_NOTE}}
+
+1. 安装并登录 Codex。
+2. 运行 AIMaster.exe。
+
+Documentation: https://github.com/PN-BUG/AI-Master

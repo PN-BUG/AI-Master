@@ -40,7 +40,7 @@
             <Setter Property="Foreground" Value="{StaticResource FloatMuted}"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="FontFamily" Value="Cascadia Mono"/>
-            <Setter Property="FontSize" Value="9"/>
+            <Setter Property="FontSize" Value="{DynamicResource FloatFontButton}"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -77,9 +77,9 @@
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="{StaticResource FloatSignal}" Margin="0,0,6,0"/>
                         <TextBlock x:Name="BrandText" Text="CODEX / LIVE" Foreground="{StaticResource FloatSignal}" FontFamily="Cascadia Mono"
-                                   FontWeight="SemiBold" FontSize="7.5"/>
+                                   FontWeight="SemiBold" FontSize="{DynamicResource FloatFontBrand}"/>
                         <TextBlock x:Name="SyncAgeText" Text="连接中" Foreground="{StaticResource FloatMuted}"
-                                   FontFamily="Cascadia Mono" FontSize="7" Margin="6,0,0,0"/>
+                                   FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontSmall}" Margin="6,0,0,0"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                         <Button x:Name="RefreshButton" Content="↻" ToolTip="立即刷新" Style="{StaticResource ChromeButton}" Click="RefreshNow_Click"/>
@@ -94,10 +94,10 @@
                         <Border x:Name="TaskStatusBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
                                 Background="#173A32" CornerRadius="5" Padding="4,1">
                             <TextBlock x:Name="TaskStatusText" Text="正在连接" Foreground="{StaticResource FloatSignal}"
-                                       FontSize="7" FontWeight="SemiBold"/>
+                                       FontSize="{DynamicResource FloatFontSmall}" FontWeight="SemiBold"/>
                         </Border>
                         <TextBlock x:Name="TaskNameText" Grid.Column="1" Text="读取最近任务…" Foreground="{StaticResource FloatInk}"
-                                   FontSize="10" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                   FontSize="{DynamicResource FloatFontTask}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                                    VerticalAlignment="Center" Margin="5,0,0,0" ToolTip="读取最近任务…"/>
                     </Grid>
                     <StackPanel x:Name="SecondaryTasksPanel"/>
@@ -108,23 +108,23 @@
                 <Grid Grid.Row="3" Margin="0,3,2,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <StackPanel>
-                        <TextBlock Text="剩余额度" Foreground="{StaticResource FloatMuted}" FontSize="7"/>
+                        <TextBlock Text="剩余额度" Foreground="{StaticResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
                         <StackPanel Orientation="Horizontal">
                             <TextBlock x:Name="RemainingQuotaText" Text="--" Foreground="{StaticResource FloatInk}"
-                                       FontFamily="Cascadia Mono" FontSize="14" FontWeight="SemiBold"/>
+                                       FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
                             <TextBlock Text="%" Foreground="{StaticResource FloatMuted}" FontFamily="Cascadia Mono"
-                                       FontSize="8" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                                       FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
                         </StackPanel>
                     </StackPanel>
                     <Border Grid.Column="1" Background="#33434B" Margin="0,1,0,1"/>
                     <StackPanel Grid.Column="2" Margin="6,0,0,0">
-                        <TextBlock Text="当前推理模型" Foreground="{StaticResource FloatMuted}" FontSize="7"/>
+                        <TextBlock Text="当前推理模型" Foreground="{StaticResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
                         <Grid Margin="0,2,0,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBlock x:Name="ModelText" Text="--" Foreground="{StaticResource FloatInk}" FontFamily="Cascadia Mono"
-                                       FontSize="9" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                       FontSize="{DynamicResource FloatFontModel}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                             <TextBlock x:Name="ReasoningText" Grid.Column="1" Text="" Foreground="{StaticResource FloatMuted}"
-                                       FontFamily="Cascadia Mono" FontSize="7" Margin="4,1,0,0"/>
+                                       FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontSmall}" Margin="4,1,0,0"/>
                         </Grid>
                     </StackPanel>
                 </Grid>

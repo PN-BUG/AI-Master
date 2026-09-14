@@ -28,6 +28,7 @@ public partial class AiFloatingWindow : Window
     private double _expandedTop;
     private double _secondaryTaskNaturalWidth;
     private bool _autoCollapse;
+    private double _fontScale;
     private Rect _dockWorkArea = Rect.Empty;
 
     private const double DockThreshold = 30;
@@ -39,6 +40,7 @@ public partial class AiFloatingWindow : Window
     {
         InitializeComponent();
         _autoCollapse = _service.Settings.FloatingAutoCollapse;
+        ApplyFontScale(_service.Settings.FloatingFontScale);
         ApplyRefreshInterval(_service.Settings.FloatingRefreshSeconds);
         _timer.Tick += async (_, _) =>
         {
@@ -63,6 +65,22 @@ public partial class AiFloatingWindow : Window
         }
         _instance = new AiFloatingWindow();
         _instance.Show();
+    }
+
+    internal static void ApplySavedFontScale(double scale) => _instance?.ApplyFontScale(scale);
+
+    private void ApplyFontScale(double scale)
+    {
+        _fontScale = FloatingFontScales.Normalize(scale);
+        Resources["FloatFontButton"] = 9d * _fontScale;
+        Resources["FloatFontBrand"] = 7.5d * _fontScale;
+        Resources["FloatFontSmall"] = 7d * _fontScale;
+        Resources["FloatFontTask"] = 10d * _fontScale;
+        Resources["FloatFontQuota"] = 14d * _fontScale;
+        Resources["FloatFontPercent"] = 8d * _fontScale;
+        Resources["FloatFontModel"] = 9d * _fontScale;
+
+        if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -151,14 +169,14 @@ public partial class AiFloatingWindow : Window
             var dot = new Ellipse { Width = 4, Height = 4, Fill = color, VerticalAlignment = VerticalAlignment.Center };
             var title = new TextBlock
             {
-                Text = task.DisplayTitle, Foreground = Brush("#B8C9C6"), FontSize = 8.5,
+                Text = task.DisplayTitle, Foreground = Brush("#B8C9C6"), FontSize = 8.5 * _fontScale,
                 TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(5, 0, 5, 0)
             };
             Grid.SetColumn(title, 1);
             var status = new TextBlock
             {
-                Text = LocalizedStatus(task.Status), Foreground = color, FontSize = 6.5,
+                Text = LocalizedStatus(task.Status), Foreground = color, FontSize = 6.5 * _fontScale,
                 VerticalAlignment = VerticalAlignment.Center
             };
             Grid.SetColumn(status, 2);

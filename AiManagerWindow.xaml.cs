@@ -3,7 +3,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using System.Windows.Threading;
 using AIMaster.Models;
 using AIMaster.Services;
@@ -22,10 +25,40 @@ public partial class AiManagerWindow : Window
     private bool _alertedForCurrentBreach;
     private bool _checkingForUpdates;
     private UpdateCheckResult? _availableUpdate;
+    private IReadOnlyList<AiRemainingForecastPoint> _weeklyRemainingForecast =
+        Array.Empty<AiRemainingForecastPoint>();
+    private readonly Dictionary<string, DashboardCardState> _dashboardCards =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _collapsedDashboardCards =
+        new(StringComparer.OrdinalIgnoreCase);
+    private StackPanel _leftDashboardColumn = null!;
+    private StackPanel _rightDashboardColumn = null!;
+    private Point _cardDragStart;
+    private Border? _draggedCard;
+    private const double MinimumCardWidth = 280;
+    private const double MinimumCardHeight = 88;
+    private const double MaximumCardHeight = 1200;
+
+    private static readonly string[] DefaultDashboardLayout =
+    [
+        "left:quota", "left:limits", "left:threads", "left:localUsage",
+        "right:guard", "right:forecast", "right:settings"
+    ];
+
+    private sealed record DashboardCardState(
+        string Id,
+        string Title,
+        Border Card,
+        UIElement Body,
+        TextBlock HeaderTitle,
+        Button ToggleButton,
+        Thumb ResizeThumb,
+        double ExpandedMinHeight);
 
     public AiManagerWindow()
     {
         InitializeComponent();
+        InitializeDashboardCards();
         _timer.Tick += async (_, _) => await RefreshAsync(showErrors: false);
         LocalizationService.LanguageChanged += LocalizationService_LanguageChanged;
         LocalizationService.Apply(this);
@@ -184,6 +217,408 @@ public partial class AiManagerWindow : Window
         LanguageButton.ToolTip = LocalizationService.IsEnglish ? "Switch to Chinese" : "切换到英语";
     }
 
+    private void InitializeDashboardCards()
+    {
+        var definitions = new[]
+        {
+            ("quota", "主额度跑道", QuotaCard),
+            ("guard", "任务闸门", GuardCard),
+            ("limits", "额度窗口", LimitsCard),
+            ("forecast", "消耗预测 / 本周", ForecastCard),
+            ("threads", "最近任务", ThreadsCard),
+            ("settings", "保护策略", SettingsCard),
+            ("localUsage", "本机消耗", LocalUsageCard)
+        };
+
+        foreach (var (id, title, card) in definitions)
+        {
+            DashboardGrid.Children.Remove(card);
+            WrapDashboardCard(id, title, card);
+        }
+
+        DashboardGrid.RowDefinitions.Clear();
+        DashboardGrid.ColumnDefinitions.Clear();
+        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        _leftDashboardColumn = CreateDashboardColumn();
+        _rightDashboardColumn = CreateDashboardColumn();
+        Grid.SetColumn(_rightDashboardColumn, 2);
+        DashboardGrid.Children.Add(_leftDashboardColumn);
+        DashboardGrid.Children.Add(_rightDashboardColumn);
+        ApplyDashboardLayout();
+    }
+
+    private StackPanel CreateDashboardColumn()
+    {
+        var column = new StackPanel { AllowDrop = true, Background = Brushes.Transparent };
+        column.DragOver += DashboardColumn_DragOver;
+        column.Drop += DashboardColumn_Drop;
+        column.SizeChanged += (_, args) =>
+        {
+            if (args.NewSize.Width <= 0) return;
+            foreach (var card in column.Children.OfType<Border>()) card.MaxWidth = args.NewSize.Width;
+        };
+        return column;
+    }
+
+    private void WrapDashboardCard(string id, string title, Border card)
+    {
+        if (card.Child is not UIElement body) return;
+        var originalTitle = FindTextBlock(body, title);
+        if (originalTitle is not null) originalTitle.Visibility = Visibility.Collapsed;
+
+        card.Child = null;
+        card.Tag = id;
+        card.Margin = new Thickness(0, 0, 0, 8);
+        card.MinWidth = MinimumCardWidth;
+        card.ClipToBounds = true;
+        card.AllowDrop = true;
+        card.DragOver += DashboardCard_DragOver;
+        card.Drop += DashboardCard_Drop;
+
+        var frame = new Grid();
+        frame.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        frame.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var header = new Grid
+        {
+            Tag = id,
+            Background = Brushes.Transparent,
+            Cursor = Cursors.SizeAll,
+            Margin = new Thickness(0, 0, 0, 4),
+            ToolTip = L("拖动调整布局", "Drag to rearrange")
+        };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.PreviewMouseLeftButtonDown += CardHeader_MouseLeftButtonDown;
+        header.MouseMove += CardHeader_MouseMove;
+
+        var headerTitle = new TextBlock
+        {
+            Text = title,
+            Style = (Style)FindResource("Label"),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var grip = new TextBlock
+        {
+            Text = "⋮⋮",
+            Foreground = Brush("#667881"),
+            FontFamily = new FontFamily("Cascadia Mono"),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Margin = new Thickness(8, 0, 7, 0)
+        };
+        Grid.SetColumn(grip, 1);
+        var toggle = new Button
+        {
+            Content = "⌃",
+            Tag = id,
+            Style = (Style)FindResource("CardChromeButton"),
+            ToolTip = L("折叠卡片", "Collapse card")
+        };
+        toggle.Click += CardToggle_Click;
+        Grid.SetColumn(toggle, 2);
+        var resizeThumb = new Thumb
+        {
+            Tag = id,
+            Style = (Style)FindResource("CardResizeThumb"),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            ToolTip = L("拖动自由调整卡片大小；双击恢复自适应", "Drag to resize; double-click to reset")
+        };
+        resizeThumb.DragStarted += CardResize_DragStarted;
+        resizeThumb.DragDelta += CardResize_DragDelta;
+        resizeThumb.DragCompleted += CardResize_DragCompleted;
+        resizeThumb.PreviewMouseDoubleClick += CardResize_MouseDoubleClick;
+        Grid.SetRowSpan(resizeThumb, 2);
+        Panel.SetZIndex(resizeThumb, 2);
+        header.Children.Add(headerTitle);
+        header.Children.Add(grip);
+        header.Children.Add(toggle);
+        frame.Children.Add(header);
+        Grid.SetRow(body, 1);
+        frame.Children.Add(body);
+        frame.Children.Add(resizeThumb);
+        card.Child = frame;
+
+        _dashboardCards[id] = new DashboardCardState(
+            id, title, card, body, headerTitle, toggle, resizeThumb, card.MinHeight);
+    }
+
+    private static TextBlock? FindTextBlock(DependencyObject root, string text)
+    {
+        if (root is TextBlock block && string.Equals(block.Text, text, StringComparison.Ordinal)) return block;
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+        {
+            var match = FindTextBlock(child, text);
+            if (match is not null) return match;
+        }
+        return null;
+    }
+
+    private void ApplyDashboardLayout()
+    {
+        var layout = NormalizeDashboardLayout(_service.Settings.DashboardCardLayout);
+        foreach (var state in _dashboardCards.Values) RemoveCardFromParent(state.Card);
+        foreach (var entry in layout)
+        {
+            var parts = entry.Split(':', 2);
+            if (!_dashboardCards.TryGetValue(parts[1], out var state)) continue;
+            var column = parts[0] == "right" ? _rightDashboardColumn : _leftDashboardColumn;
+            column.Children.Add(state.Card);
+        }
+
+        _collapsedDashboardCards.Clear();
+        foreach (var id in _service.Settings.CollapsedDashboardCards)
+            if (_dashboardCards.ContainsKey(id)) _collapsedDashboardCards.Add(id);
+        foreach (var state in _dashboardCards.Values)
+            SetCardCollapsed(state, _collapsedDashboardCards.Contains(state.Id));
+    }
+
+    internal static AiDashboardCardSize? NormalizeDashboardCardSize(AiDashboardCardSize? size)
+    {
+        if (size is null || !double.IsFinite(size.Width) || !double.IsFinite(size.Height) ||
+            size.Width <= 0 || size.Height <= 0) return null;
+        return new AiDashboardCardSize
+        {
+            Width = Math.Clamp(size.Width, MinimumCardWidth, 1600),
+            Height = Math.Clamp(size.Height, MinimumCardHeight, MaximumCardHeight)
+        };
+    }
+
+    internal static IReadOnlyList<string> NormalizeDashboardLayout(IEnumerable<string>? savedLayout)
+    {
+        var validIds = DefaultDashboardLayout
+            .Select(entry => entry.Split(':', 2)[1])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>();
+        foreach (var entry in savedLayout ?? Array.Empty<string>())
+        {
+            var parts = entry.Split(':', 2);
+            if (parts.Length != 2 || parts[0] is not ("left" or "right") ||
+                !validIds.Contains(parts[1]) || !seen.Add(parts[1])) continue;
+            result.Add($"{parts[0]}:{parts[1]}");
+        }
+        foreach (var entry in DefaultDashboardLayout)
+        {
+            var id = entry.Split(':', 2)[1];
+            if (seen.Add(id)) result.Add(entry);
+        }
+        return result;
+    }
+
+    private static void RemoveCardFromParent(Border card)
+    {
+        if (card.Parent is Panel panel) panel.Children.Remove(card);
+    }
+
+    private void CardHeader_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || !_dashboardCards.TryGetValue(id, out var state)) return;
+        if (FindAncestor<Button>(e.OriginalSource as DependencyObject) is not null) return;
+        _cardDragStart = e.GetPosition(this);
+        _draggedCard = state.Card;
+    }
+
+    private void CardHeader_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_draggedCard is null || e.LeftButton != MouseButtonState.Pressed) return;
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - _cardDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(current.Y - _cardDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        var card = _draggedCard;
+        _draggedCard = null;
+        card.Opacity = 0.6;
+        DragDrop.DoDragDrop(card, card, DragDropEffects.Move);
+        card.Opacity = 1;
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T match) return match;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
+    private void DashboardCard_DragOver(object sender, DragEventArgs e) => SetMoveEffect(e);
+
+    private void DashboardColumn_DragOver(object sender, DragEventArgs e) => SetMoveEffect(e);
+
+    private static void SetMoveEffect(DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(typeof(Border)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void DashboardCard_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is not Border target || e.Data.GetData(typeof(Border)) is not Border source ||
+            ReferenceEquals(source, target) || target.Parent is not StackPanel column) return;
+        var targetIndex = column.Children.IndexOf(target);
+        MoveDashboardCard(source, column, targetIndex);
+        e.Handled = true;
+    }
+
+    private void DashboardColumn_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is not StackPanel column || e.Data.GetData(typeof(Border)) is not Border source) return;
+        MoveDashboardCard(source, column, column.Children.Count);
+        e.Handled = true;
+    }
+
+    private void MoveDashboardCard(Border card, StackPanel targetColumn, int targetIndex)
+    {
+        if (card.Parent is StackPanel currentColumn)
+        {
+            var oldIndex = currentColumn.Children.IndexOf(card);
+            currentColumn.Children.Remove(card);
+            if (ReferenceEquals(currentColumn, targetColumn) && oldIndex < targetIndex) targetIndex--;
+        }
+        targetColumn.Children.Insert(Math.Clamp(targetIndex, 0, targetColumn.Children.Count), card);
+        if (targetColumn.ActualWidth > 0) card.MaxWidth = targetColumn.ActualWidth;
+        SaveDashboardLayout();
+    }
+
+    private void CardResize_DragStarted(object sender, DragStartedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } ||
+            !_dashboardCards.TryGetValue(id, out var state) || _collapsedDashboardCards.Contains(id)) return;
+        state.Card.MinHeight = MinimumCardHeight;
+        state.Card.Width = Math.Max(MinimumCardWidth, state.Card.ActualWidth);
+        state.Card.Height = Math.Max(MinimumCardHeight, state.Card.ActualHeight);
+        state.Card.HorizontalAlignment = HorizontalAlignment.Left;
+    }
+
+    private void CardResize_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } ||
+            !_dashboardCards.TryGetValue(id, out var state) || _collapsedDashboardCards.Contains(id)) return;
+        var availableWidth = (state.Card.Parent as FrameworkElement)?.ActualWidth ?? state.Card.ActualWidth;
+        var maximumWidth = Math.Max(MinimumCardWidth, availableWidth);
+        state.Card.Width = Math.Clamp(state.Card.Width + e.HorizontalChange, MinimumCardWidth, maximumWidth);
+        state.Card.Height = Math.Clamp(state.Card.Height + e.VerticalChange, MinimumCardHeight, MaximumCardHeight);
+    }
+
+    private void CardResize_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string id } && _dashboardCards.TryGetValue(id, out var state))
+            SaveDashboardCardSize(state);
+    }
+
+    private void CardResize_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || !_dashboardCards.TryGetValue(id, out var state)) return;
+        var settings = _service.ReloadSettings();
+        settings.DashboardCardSizes.Remove(id);
+        _service.SaveSettings(settings);
+        state.Card.Width = double.NaN;
+        state.Card.Height = double.NaN;
+        state.Card.MaxWidth = double.PositiveInfinity;
+        state.Card.MinHeight = state.ExpandedMinHeight;
+        state.Card.HorizontalAlignment = HorizontalAlignment.Stretch;
+        e.Handled = true;
+    }
+
+    private void SaveDashboardCardSize(DashboardCardState state)
+    {
+        var size = NormalizeDashboardCardSize(new AiDashboardCardSize
+        {
+            Width = state.Card.ActualWidth,
+            Height = state.Card.ActualHeight
+        });
+        if (size is null) return;
+        var settings = _service.ReloadSettings();
+        settings.DashboardCardSizes[state.Id] = size;
+        _service.SaveSettings(settings);
+    }
+
+    private void ApplyDashboardCardSize(DashboardCardState state)
+    {
+        var size = _service.Settings.DashboardCardSizes.TryGetValue(state.Id, out var saved)
+            ? NormalizeDashboardCardSize(saved)
+            : null;
+        if (size is null)
+        {
+            state.Card.Width = double.NaN;
+            state.Card.Height = double.NaN;
+            state.Card.MaxWidth = double.PositiveInfinity;
+            state.Card.MinHeight = state.ExpandedMinHeight;
+            state.Card.HorizontalAlignment = HorizontalAlignment.Stretch;
+            return;
+        }
+        state.Card.MinHeight = MinimumCardHeight;
+        state.Card.Width = size.Width;
+        state.Card.Height = size.Height;
+        state.Card.HorizontalAlignment = HorizontalAlignment.Left;
+    }
+
+    private void CardToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id } || !_dashboardCards.TryGetValue(id, out var state)) return;
+        var collapsed = !_collapsedDashboardCards.Contains(id);
+        if (collapsed) _collapsedDashboardCards.Add(id);
+        else _collapsedDashboardCards.Remove(id);
+        SetCardCollapsed(state, collapsed);
+        SaveDashboardLayout();
+    }
+
+    private void SetCardCollapsed(DashboardCardState state, bool collapsed)
+    {
+        state.Body.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        state.ResizeThumb.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        if (collapsed)
+        {
+            state.Card.Height = double.NaN;
+            state.Card.MinHeight = 0;
+        }
+        else
+        {
+            ApplyDashboardCardSize(state);
+        }
+        state.Card.Padding = collapsed ? new Thickness(10, 7, 9, 7) : new Thickness(12);
+        state.ToggleButton.Content = collapsed ? "⌄" : "⌃";
+        state.ToggleButton.ToolTip = collapsed
+            ? L("展开卡片", "Expand card")
+            : L("折叠卡片", "Collapse card");
+    }
+
+    private void SaveDashboardLayout()
+    {
+        var settings = _service.ReloadSettings();
+        settings.DashboardCardLayout = CaptureDashboardColumn(_leftDashboardColumn, "left")
+            .Concat(CaptureDashboardColumn(_rightDashboardColumn, "right"))
+            .ToList();
+        settings.CollapsedDashboardCards = _collapsedDashboardCards.OrderBy(id => id).ToList();
+        _service.SaveSettings(settings);
+    }
+
+    private static IEnumerable<string> CaptureDashboardColumn(Panel column, string name) =>
+        column.Children.OfType<Border>()
+            .Select(card => card.Tag as string)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => $"{name}:{id}");
+
+    private void UpdateDashboardChromeLanguage()
+    {
+        foreach (var state in _dashboardCards.Values)
+        {
+            state.HeaderTitle.Text = LocalizationService.T(state.Title);
+            var collapsed = _collapsedDashboardCards.Contains(state.Id);
+            state.ToggleButton.ToolTip = collapsed
+                ? L("展开卡片", "Expand card")
+                : L("折叠卡片", "Collapse card");
+            state.ResizeThumb.ToolTip = L("拖动自由调整卡片大小；双击恢复自适应",
+                "Drag to resize; double-click to reset");
+        }
+    }
+
     private async Task RefreshAsync(bool showErrors)
     {
         if (_refreshing) return;
@@ -251,7 +686,14 @@ public partial class AiManagerWindow : Window
         ForecastSummaryText.Foreground = Brush(forecast.ExhaustsBeforeReset ? "#FFB36A" : "#F1F5F2");
         DailyTokensText.Text = FormatTokens(forecast.DailyTokens);
         DailyPercentText.Text = forecast.DailyPercent > 0 ? $"{forecast.DailyPercent:0.#}%" : "--";
+        _weeklyRemainingForecast = AiManagerService.BuildWeeklyRemainingForecast(snapshot, forecast);
+        RenderRemainingForecastChart();
         RenderUsageBars(snapshot.DailyUsage);
+        var weeklyLimit = snapshot.Limits
+            .Where(item => item.WindowDurationMinutes is >= 6 * 24 * 60 and <= 8 * 24 * 60)
+            .OrderBy(item => Math.Abs(item.WindowDurationMinutes - 7 * 24 * 60))
+            .FirstOrDefault();
+        RenderLocalUsage(snapshot.LocalUsage, weeklyLimit?.UsedPercent);
         FooterStatusText.Text = snapshot.LifetimeTokens is { } lifetime
             ? (LocalizationService.IsEnglish ? $"Lifetime {FormatTokens(lifetime)} tokens · From Codex App Server" : $"累计 {FormatTokens(lifetime)} tokens · 数据来自 Codex App Server")
             : L("数据来自 Codex App Server；认证由 Codex 管理。", "Data comes from Codex App Server; authentication is managed by Codex.");
@@ -370,11 +812,12 @@ public partial class AiManagerWindow : Window
     private async void SavePolicy_Click(object sender, RoutedEventArgs e)
     {
         if (!TryReadPercent(WarningPercentBox.Text, out var warning) ||
-            !TryReadPercent(PausePercentBox.Text, out var pause) || warning >= pause)
+            !TryReadPercent(PausePercentBox.Text, out var pause) || warning >= pause ||
+            !TryReadFloatingFontPercent(FloatingFontPercentBox.Text, out var floatingFontScale))
         {
             WpfMessageBox.Show(this,
-                L("请输入 1–99 之间的百分比，并确保预警线低于暂停线。",
-                    "Enter percentages from 1 to 99 and keep the warning limit below the pause limit."),
+                L("请输入 1–99 之间的预警百分比、100–150 之间的浮窗字号，并确保预警线低于暂停线。",
+                    "Enter guard percentages from 1 to 99, a floating font size from 100 to 150, and keep the warning limit below the pause limit."),
                 L("策略无效", "Invalid guard policy"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
@@ -383,8 +826,10 @@ public partial class AiManagerWindow : Window
         settings.WarningPercent = warning;
         settings.PausePercent = pause;
         settings.AutoPause = AutoPauseCheck.IsChecked == true;
+        settings.FloatingFontScale = floatingFontScale;
         _service.SaveSettings(settings);
-        FooterStatusText.Text = L("保护策略已保存并应用", "Guard policy saved and applied");
+        AiFloatingWindow.ApplySavedFontScale(floatingFontScale);
+        FooterStatusText.Text = L("设置已保存并应用", "Settings saved and applied");
         if (_service.LastSnapshot is { } snapshot)
         {
             ApplyQuotaVisual(snapshot.MainLimit?.UsedPercent ?? 0);
@@ -396,6 +841,8 @@ public partial class AiManagerWindow : Window
     {
         WarningPercentBox.Text = _service.Settings.WarningPercent.ToString("0.#", CultureInfo.InvariantCulture);
         PausePercentBox.Text = _service.Settings.PausePercent.ToString("0.#", CultureInfo.InvariantCulture);
+        FloatingFontPercentBox.Text = (_service.Settings.FloatingFontScale * 100)
+            .ToString("0", CultureInfo.InvariantCulture);
         AutoPauseCheck.IsChecked = _service.Settings.AutoPause;
     }
 
@@ -433,8 +880,143 @@ public partial class AiManagerWindow : Window
         }
     }
 
+    private void RenderLocalUsage(AiLocalUsageSummary usage, double? weeklyUsedPercent)
+    {
+        LocalUsageTokensText.Text = FormatTokens(usage.TotalTokens);
+        LocalUsageDetailText.Text = LocalizationService.IsEnglish
+            ? $"{usage.SessionCount} local sessions · {usage.Projects.Count} projects"
+            : $"{usage.SessionCount} 个本机会话 · {usage.Projects.Count} 个项目";
+        ProjectUsageCountText.Text = usage.Projects.Count > 6
+            ? (LocalizationService.IsEnglish ? $"Top 6 of {usage.Projects.Count}" : $"前 6 / 共 {usage.Projects.Count}")
+            : (LocalizationService.IsEnglish ? $"{usage.Projects.Count} projects" : $"共 {usage.Projects.Count} 个项目");
+        var visibleProjects = BuildProjectQuotaUsage(usage, weeklyUsedPercent).Take(6).ToList();
+        ProjectUsageItems.ItemsSource = visibleProjects;
+        ProjectUsageItems.Visibility = visibleProjects.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        LocalUsageEmptyText.Visibility = visibleProjects.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    internal static IReadOnlyList<AiProjectUsage> BuildProjectQuotaUsage(
+        AiLocalUsageSummary usage, double? weeklyUsedPercent)
+    {
+        var normalizedWeeklyUsage = weeklyUsedPercent is { } value
+            ? Math.Clamp(value, 0, 100)
+            : (double?)null;
+        return usage.Projects.Select(item => new AiProjectUsage
+        {
+            ProjectName = item.ProjectName,
+            ProjectPath = item.ProjectPath,
+            Tokens = item.Tokens,
+            SharePercent = item.SharePercent,
+            SessionCount = item.SessionCount,
+            WeeklyQuotaPercent = normalizedWeeklyUsage * item.SharePercent / 100d
+        }).ToList();
+    }
+
+    private void RemainingForecastCanvas_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        RenderRemainingForecastChart();
+
+    private void RenderRemainingForecastChart()
+    {
+        RemainingForecastCanvas.Children.Clear();
+        var width = RemainingForecastCanvas.ActualWidth;
+        var height = RemainingForecastCanvas.ActualHeight;
+        if (width < 100 || height < 60 || _weeklyRemainingForecast.Count == 0) return;
+
+        const double left = 27;
+        const double top = 7;
+        const double right = 6;
+        const double bottom = 20;
+        var plotWidth = width - left - right;
+        var plotHeight = height - top - bottom;
+
+        foreach (var percent in new[] { 100d, 50d, 0d })
+        {
+            var y = top + (100 - percent) / 100 * plotHeight;
+            RemainingForecastCanvas.Children.Add(new Line
+            {
+                X1 = left, X2 = left + plotWidth, Y1 = y, Y2 = y,
+                Stroke = Brush("#293640"), StrokeThickness = 1
+            });
+            AddChartText($"{percent:0}", 0, y - 6, "#71838A", 8);
+        }
+
+        var points = _weeklyRemainingForecast
+            .Select((item, index) => new Point(
+                left + plotWidth * index / Math.Max(1, _weeklyRemainingForecast.Count - 1),
+                top + (100 - item.RemainingPercent) / 100 * plotHeight))
+            .ToList();
+        var todayIndex = _weeklyRemainingForecast.TakeWhile(item => !item.IsProjected).Count() - 1;
+        todayIndex = Math.Clamp(todayIndex, 0, points.Count - 1);
+
+        AddForecastLine(points.Take(todayIndex + 1), "#22C58B", null);
+        AddForecastLine(points.Skip(todayIndex), "#FFB36A", new DoubleCollection { 4, 3 });
+
+        for (var index = 0; index < points.Count; index++)
+        {
+            var item = _weeklyRemainingForecast[index];
+            var point = points[index];
+            var isToday = index == todayIndex;
+            var marker = new Ellipse
+            {
+                Width = isToday ? 7 : 5,
+                Height = isToday ? 7 : 5,
+                Fill = Brush(item.IsProjected ? "#FFB36A" : "#22C58B"),
+                Stroke = isToday ? Brush("#F1F5F2") : null,
+                StrokeThickness = isToday ? 1.5 : 0,
+                ToolTip = LocalizationService.IsEnglish
+                    ? $"{item.Date.ToString("MMM d", CultureInfo.InvariantCulture)} · {item.RemainingPercent:0.#}% remaining"
+                    : $"{item.Date:M月d日} · 剩余 {item.RemainingPercent:0.#}%"
+            };
+            Canvas.SetLeft(marker, point.X - marker.Width / 2);
+            Canvas.SetTop(marker, point.Y - marker.Height / 2);
+            RemainingForecastCanvas.Children.Add(marker);
+
+            var dayLabel = LocalizationService.IsEnglish
+                ? item.Date.DayOfWeek.ToString()[..3]
+                : "一二三四五六日"[index].ToString();
+            AddChartText(dayLabel, point.X - (isToday ? 7 : 5), height - bottom + 4,
+                isToday ? "#F1F5F2" : "#71838A", isToday ? 9 : 8);
+        }
+    }
+
+    private void AddForecastLine(IEnumerable<Point> source, string color, DoubleCollection? dashArray)
+    {
+        var points = new PointCollection(source);
+        if (points.Count < 2) return;
+        RemainingForecastCanvas.Children.Add(new Polyline
+        {
+            Points = points,
+            Stroke = Brush(color),
+            StrokeThickness = 2,
+            StrokeLineJoin = PenLineJoin.Round,
+            StrokeDashArray = dashArray
+        });
+    }
+
+    private void AddChartText(string text, double left, double top, string color, double fontSize)
+    {
+        var label = new TextBlock
+        {
+            Text = text,
+            Foreground = Brush(color),
+            FontFamily = new FontFamily("Cascadia Mono"),
+            FontSize = fontSize
+        };
+        Canvas.SetLeft(label, left);
+        Canvas.SetTop(label, top);
+        RemainingForecastCanvas.Children.Add(label);
+    }
+
     internal static bool TryReadPercent(string? text, out double value) =>
         double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && value is >= 1 and <= 99;
+
+    internal static bool TryReadFloatingFontPercent(string? text, out double scale)
+    {
+        var valid = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var percent) &&
+                    percent is >= 100 and <= 150;
+        scale = valid ? percent / 100d : FloatingFontScales.Default;
+        return valid;
+    }
 
     internal static string FormatTokens(double tokens) => tokens switch
     {
@@ -468,5 +1050,6 @@ public partial class AiManagerWindow : Window
         if (_service.LastSnapshot is { } snapshot) RenderSnapshot(snapshot);
         LocalizationService.Apply(this);
         UpdateLanguageButton();
+        UpdateDashboardChromeLanguage();
     }
 }

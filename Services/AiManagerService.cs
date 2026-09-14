@@ -12,6 +12,8 @@ internal sealed class AiManagerService : IAsyncDisposable
     private readonly string _settingsPath;
     private readonly ConcurrentDictionary<string, RolloutCursor> _rolloutCursors =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, LocalUsageCursor> _localUsageCursors =
+        new(StringComparer.OrdinalIgnoreCase);
     private List<AiLimitWindow> _floatingLimits = new();
     private DateTimeOffset _floatingLimitsAt;
     private JsonElement? _floatingModelsRoot;
@@ -31,6 +33,17 @@ internal sealed class AiManagerService : IAsyncDisposable
         public string? ThreadSource;
     }
 
+    private sealed class LocalUsageCursor
+    {
+        public readonly object Sync = new();
+        public readonly MemoryStream PendingLine = new();
+        public readonly List<LocalUsageRecord> Records = new();
+        public long Offset;
+        public string? ProjectPath;
+    }
+
+    private sealed record LocalUsageRecord(DateOnly Date, string ProjectPath, long Tokens);
+
     public AiManagerService()
     {
         _settingsPath = AppPaths.GetSettingsFile();
@@ -43,17 +56,26 @@ internal sealed class AiManagerService : IAsyncDisposable
     public async Task<AiManagerSnapshot> RefreshAsync(CancellationToken cancellationToken = default)
     {
         await _client.ConnectAsync(cancellationToken);
-        // Read the small, essential quota response first. A large thread/list response can
-        // otherwise queue ahead of it in app-server and make the whole dashboard look offline.
-        var rate = await _client.RequestAsync("account/rateLimits/read",
+        // These requests are independent. Starting them together removes a full optional-request
+        // round trip from first paint while the local JSONL work stays off the UI thread.
+        var rateTask = _client.RequestAsync("account/rateLimits/read",
             cancellationToken: cancellationToken, timeout: TimeSpan.FromSeconds(45));
         var usageTask = TryRequestAsync("account/usage/read", null, TimeSpan.FromSeconds(12), cancellationToken);
         var threadsTask = TryRequestAsync("thread/list", BuildThreadListParameters(), TimeSpan.FromSeconds(12), cancellationToken);
+        var localDataTask = Task.Run(() =>
+        {
+            var tasks = DiscoverLocalTasks(48, 12, cancellationToken);
+            var usage = DiscoverLocalUsage(cancellationToken);
+            return (Tasks: tasks, Usage: usage);
+        }, cancellationToken);
+
+        var rate = await rateTask;
         var usage = await usageTask;
         var threads = await threadsTask;
+        var localData = await localDataTask;
 
         var serverThreads = threads is { } threadValue ? ParseThreads(threadValue) : new();
-        var mergedThreads = MergeFloatingTasks(serverThreads, DiscoverLocalTasks(48))
+        var mergedThreads = MergeFloatingTasks(serverThreads, localData.Tasks)
             .Where(IsUsefulFloatingTask)
             .OrderByDescending(item => item.UpdatedAt)
             .Take(12)
@@ -65,6 +87,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             LifetimeTokens = usage is { } usageSummary ? ParseLifetimeTokens(usageSummary) : null,
             Threads = mergedThreads,
             ResetCredits = ParseResetCredits(rate),
+            LocalUsage = localData.Usage,
             CapturedAt = DateTimeOffset.Now
         };
         return LastSnapshot;
@@ -79,6 +102,7 @@ internal sealed class AiManagerService : IAsyncDisposable
 
         // Start from the fast state database so a cold floating-window launch does not wait for
         // a full rollout scan. Each visible task is enriched below from thread/read and its rollout.
+        var localTasksTask = Task.Run(() => DiscoverLocalTasks(24, 8, cancellationToken), cancellationToken);
         var threadsTask = appServerAvailable
             ? TryRequestAsync("thread/list", BuildLatestThreadParameters(), TimeSpan.FromSeconds(10), cancellationToken)
             : Task.FromResult<JsonElement?>(null);
@@ -119,7 +143,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         // A packaged app-server can temporarily return an empty state database or `notLoaded`
         // for sessions owned by another Codex process. Rollout JSONL files are shared persisted
         // state, so merge them in as an independent source instead of showing a false empty state.
-        var localTasks = DiscoverLocalTasks(48);
+        var localTasks = await localTasksTask;
         var visibleTasks = MergeFloatingTasks(enrichedServerTasks, localTasks)
             .Where(IsUsefulFloatingTask)
             .OrderByDescending(item => item.UpdatedAt)
@@ -165,7 +189,8 @@ internal sealed class AiManagerService : IAsyncDisposable
         !string.IsNullOrWhiteSpace(thread.Id) &&
         !thread.Title.StartsWith("The following is the Codex agent history", StringComparison.OrdinalIgnoreCase);
 
-    private List<AiThreadSummary> DiscoverLocalTasks(int scanLimit)
+    private List<AiThreadSummary> DiscoverLocalTasks(int scanLimit, int resultLimit,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -176,16 +201,21 @@ internal sealed class AiManagerService : IAsyncDisposable
             var sessionsRoot = Path.Combine(codexHome, "sessions");
             if (!Directory.Exists(sessionsRoot)) return new();
 
-            return Directory.EnumerateFiles(sessionsRoot, "*.jsonl", SearchOption.AllDirectories)
+            var candidates = Directory.EnumerateFiles(sessionsRoot, "*.jsonl", SearchOption.AllDirectories)
                 .Select(path => new { Path = path, UpdatedAt = File.GetLastWriteTimeUtc(path) })
                 .OrderByDescending(item => item.UpdatedAt)
                 .Take(scanLimit)
-                .Select(item => ReadLocalTask(item.Path, item.UpdatedAt))
-                .Where(item => item is not null)
-                .Cast<AiThreadSummary>()
-                .Where(IsUsefulFloatingTask)
-                .GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.OrderByDescending(item => item.UpdatedAt).First())
+                .ToList();
+            var tasks = new Dictionary<string, AiThreadSummary>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in candidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var task = ReadLocalTask(item.Path, item.UpdatedAt);
+                if (task is null || !IsUsefulFloatingTask(task) || tasks.ContainsKey(task.Id)) continue;
+                tasks[task.Id] = task;
+                if (tasks.Count >= resultLimit) break;
+            }
+            return tasks.Values
                 .OrderByDescending(item => item.UpdatedAt)
                 .ToList();
         }
@@ -369,6 +399,176 @@ internal sealed class AiManagerService : IAsyncDisposable
         return new AiForecast(dailyTokens, dailyPercent, exhaustion, beforeReset, summary);
     }
 
+    private AiLocalUsageSummary DiscoverLocalUsage(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var configuredHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+            var codexHome = string.IsNullOrWhiteSpace(configuredHome)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex")
+                : configuredHome;
+            var sessionsRoot = Path.Combine(codexHome, "sessions");
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            var monday = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
+            return ReadLocalUsageSummary(sessionsRoot, monday, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AiManager] Local usage unavailable: {ex.Message}");
+            return new AiLocalUsageSummary();
+        }
+    }
+
+    internal AiLocalUsageSummary ReadLocalUsageSummary(string sessionsRoot, DateOnly weekStart,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Directory.Exists(sessionsRoot)) return new AiLocalUsageSummary();
+        var weekEnd = weekStart.AddDays(6);
+        var earliestWriteUtc = weekStart.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
+        var sessionRecords = new List<(string SessionPath, LocalUsageRecord Record)>();
+
+        foreach (var path in Directory.EnumerateFiles(sessionsRoot, "*.jsonl", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var updatedAt = File.GetLastWriteTimeUtc(path);
+            if (updatedAt < earliestWriteUtc) continue;
+            ScanLocalUsageFile(path, DateOnly.FromDateTime(updatedAt.ToLocalTime()), cancellationToken);
+            if (!_localUsageCursors.TryGetValue(path, out var cursor)) continue;
+            lock (cursor.Sync)
+            {
+                sessionRecords.AddRange(cursor.Records
+                    .Where(item => item.Date >= weekStart && item.Date <= weekEnd)
+                    .Select(item => (path, item)));
+            }
+        }
+
+        var total = sessionRecords.Sum(item => item.Record.Tokens);
+        var projects = sessionRecords
+            .GroupBy(item => item.Record.ProjectPath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new AiProjectUsage
+            {
+                ProjectName = ProjectDisplayName(group.Key),
+                ProjectPath = group.Key,
+                Tokens = group.Sum(item => item.Record.Tokens),
+                SharePercent = total > 0 ? group.Sum(item => item.Record.Tokens) * 100d / total : 0,
+                SessionCount = group.Select(item => item.SessionPath).Distinct(StringComparer.OrdinalIgnoreCase).Count()
+            })
+            .OrderByDescending(item => item.Tokens)
+            .ThenBy(item => item.ProjectName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        return new AiLocalUsageSummary
+        {
+            TotalTokens = total,
+            SessionCount = sessionRecords.Select(item => item.SessionPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            Projects = projects
+        };
+    }
+
+    private void ScanLocalUsageFile(string path, DateOnly fallbackDate, CancellationToken cancellationToken)
+    {
+        var cursor = _localUsageCursors.GetOrAdd(path, _ => new LocalUsageCursor());
+        lock (cursor.Sync)
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
+            if (stream.Length < cursor.Offset)
+            {
+                cursor.Offset = 0;
+                cursor.ProjectPath = null;
+                cursor.Records.Clear();
+                cursor.PendingLine.SetLength(0);
+            }
+            stream.Position = cursor.Offset;
+            var buffer = new byte[64 * 1024];
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var segmentStart = 0;
+                for (var index = 0; index < read; index++)
+                {
+                    if (buffer[index] != (byte)'\n') continue;
+                    cursor.PendingLine.Write(buffer, segmentStart, index - segmentStart);
+                    ParseLocalUsageLine(cursor, fallbackDate);
+                    cursor.PendingLine.SetLength(0);
+                    segmentStart = index + 1;
+                }
+                if (segmentStart < read)
+                    cursor.PendingLine.Write(buffer, segmentStart, read - segmentStart);
+                cursor.Offset += read;
+            }
+        }
+    }
+
+    private static void ParseLocalUsageLine(LocalUsageCursor cursor, DateOnly fallbackDate)
+    {
+        if (cursor.PendingLine.Length == 0) return;
+        var line = Encoding.UTF8.GetString(cursor.PendingLine.GetBuffer(), 0, (int)cursor.PendingLine.Length);
+        try
+        {
+            using var document = JsonDocument.Parse(line, new JsonDocumentOptions { MaxDepth = 128 });
+            var root = document.RootElement;
+            if (!root.TryGetProperty("payload", out var payload)) return;
+            var type = ReadString(root, "type");
+            if (type is "session_meta" or "turn_context")
+            {
+                cursor.ProjectPath = NormalizeProjectPath(ReadString(payload, "cwd")) ?? cursor.ProjectPath;
+                return;
+            }
+            if (type != "token_usage_record" ||
+                !payload.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
+                return;
+            var tokens = ReadLong(usage, "total_tokens");
+            if (tokens <= 0) return;
+            var date = DateTimeOffset.TryParse(ReadString(root, "timestamp"), out var timestamp)
+                ? DateOnly.FromDateTime(timestamp.LocalDateTime)
+                : fallbackDate;
+            cursor.Records.Add(new LocalUsageRecord(date,
+                cursor.ProjectPath ?? LocalizationService.L("未归属项目", "Unassigned"), tokens));
+        }
+        catch (JsonException)
+        {
+            // An incomplete or malformed record does not invalidate the rest of the session.
+        }
+    }
+
+    private static string? NormalizeProjectPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) path = path[4..];
+        return Path.TrimEndingDirectorySeparator(path.Trim());
+    }
+
+    private static string ProjectDisplayName(string path)
+    {
+        if (path == "未归属项目" || path == "Unassigned")
+            return LocalizationService.L("未归属项目", "Unassigned");
+        var name = Path.GetFileName(path);
+        return string.IsNullOrWhiteSpace(name) ? path : name;
+    }
+
+    internal static IReadOnlyList<AiRemainingForecastPoint> BuildWeeklyRemainingForecast(
+        AiManagerSnapshot snapshot, AiForecast forecast)
+    {
+        var main = snapshot.MainLimit;
+        if (main is null) return Array.Empty<AiRemainingForecastPoint>();
+
+        var today = DateOnly.FromDateTime(snapshot.CapturedAt.LocalDateTime);
+        var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
+        var monday = today.AddDays(-daysFromMonday);
+        return Enumerable.Range(0, 7)
+            .Select(index =>
+            {
+                var date = monday.AddDays(index);
+                var distanceFromToday = index - daysFromMonday;
+                var remaining = Math.Clamp(
+                    main.RemainingPercent - forecast.DailyPercent * distanceFromToday, 0, 100);
+                return new AiRemainingForecastPoint(date, remaining, date > today);
+            })
+            .ToList();
+    }
+
     public async Task<int> PauseActiveThreadsAsync(CancellationToken cancellationToken = default)
     {
         if (!_client.IsConnected) await _client.ConnectAsync(cancellationToken);
@@ -421,6 +621,13 @@ internal sealed class AiManagerService : IAsyncDisposable
             var settings = JsonSerializer.Deserialize<AiManagerSettings>(File.ReadAllText(_settingsPath))
                            ?? new AiManagerSettings();
             settings.TaskNameSource = TaskNameSources.Normalize(settings.TaskNameSource);
+            settings.FloatingFontScale = FloatingFontScales.Normalize(settings.FloatingFontScale);
+            settings.DashboardCardLayout ??= new List<string>();
+            settings.CollapsedDashboardCards ??= new List<string>();
+            settings.DashboardCardSizes = settings.DashboardCardSizes is null
+                ? new Dictionary<string, AiDashboardCardSize>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, AiDashboardCardSize>(settings.DashboardCardSizes,
+                    StringComparer.OrdinalIgnoreCase);
             return settings;
         }
         catch
@@ -831,6 +1038,8 @@ internal sealed class AiManagerService : IAsyncDisposable
     {
         foreach (var cursor in _rolloutCursors.Values) cursor.PendingLine.Dispose();
         _rolloutCursors.Clear();
+        foreach (var cursor in _localUsageCursors.Values) cursor.PendingLine.Dispose();
+        _localUsageCursors.Clear();
         await _client.DisposeAsync();
     }
 }

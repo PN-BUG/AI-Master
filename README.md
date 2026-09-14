@@ -12,10 +12,13 @@ AIMaster 是一个可独立运行的 Windows Codex 用量与任务监控工具�
 - 显示 Codex 总额度、7 天窗口、5 小时窗口与重置时间。
 - 根据近期消耗速度预测额度是否会提前耗尽。
 - 设置预警线和暂停线，越线时提醒并暂停当前连接可见的任务。
+- 用折线图展示本周一至周日的剩余额度估算与未来预测。
+- 汇总本周本机 Codex Token 消耗，并按工作目录估算各项目所占周额度。
+- 支持折叠仪表盘卡片，并通过拖动标题栏调整双列布局；布局会自动保存。
 - 显示最近执行的最多 3 个任务，包括进行中、暂停/中断和已完成状态。
 - 任务名称可选择显示 Codex 对话标题或该任务最后发送的用户内容。
 - 显示任务当前使用的模型与推理强度。
-- 提供 180–260 px 自适应紧凑悬浮窗。
+- 提供 180–260 px 自适应紧凑悬浮窗，浮窗字号可在主窗口设置中调整。
 - 支持多显示器靠边收起；收起时停止刷新，悬停展开后立即刷新。
 - 支持手动刷新、1/2/5/10/30 秒刷新频率和右键自动收起开关。
 - 支持简体中文与英文即时切换。
@@ -77,6 +80,14 @@ dotnet build .\AIMaster.sln -c Release
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
+
+一键生成完整版、轻量版两个发布目录和对应的两个 ZIP：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -All
+```
+
+Windows 下也可以直接双击 `package-all.cmd`。输出统一位于 `release` 目录。
 
 生成 Windows x64 轻量版：
 

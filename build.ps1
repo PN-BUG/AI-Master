@@ -3,12 +3,51 @@ param(
     [ValidateSet('Release', 'Debug')][string]$Configuration = 'Release',
     [ValidateSet('win-x64', 'win-arm64')][string]$Runtime = 'win-x64',
     [Alias('FrameworkDependent')][switch]$Lightweight,
+    [switch]$All,
     [switch]$NoZip
 )
 
 $ErrorActionPreference = 'Stop'
 $projectPath = Join-Path $PSScriptRoot 'AIMaster.csproj'
 $releaseRoot = Join-Path $PSScriptRoot 'release'
+
+if ($All) {
+    if ($Lightweight) {
+        throw '-All cannot be combined with -Lightweight or -FrameworkDependent.'
+    }
+
+    $commonArguments = @{
+        Configuration = $Configuration
+        Runtime = $Runtime
+    }
+    if ($NoZip) { $commonArguments.NoZip = $true }
+
+    Write-Host "Packaging AIMaster standalone and lightweight builds..." -ForegroundColor Cyan
+    & $PSCommandPath @commonArguments
+    & $PSCommandPath @commonArguments -Lightweight
+
+    $expectedPaths = @(
+        (Join-Path $releaseRoot "AIMaster-$Runtime-standalone"),
+        (Join-Path $releaseRoot "AIMaster-$Runtime-lightweight")
+    )
+    if (-not $NoZip) {
+        $expectedPaths += @(
+            (Join-Path $releaseRoot "AIMaster-$Runtime-standalone.zip"),
+            (Join-Path $releaseRoot "AIMaster-$Runtime-lightweight.zip")
+        )
+    }
+    foreach ($path in $expectedPaths) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw "Expected package output was not created: $path"
+        }
+    }
+
+    Write-Host ''
+    Write-Host 'ALL PACKAGES CREATED' -ForegroundColor Green
+    foreach ($path in $expectedPaths) { Write-Host "  $path" }
+    return
+}
+
 $mode = if ($Lightweight) { 'lightweight' } else { 'standalone' }
 $packageName = "AIMaster-$Runtime-$mode"
 $outputDir = Join-Path $releaseRoot $packageName
@@ -50,18 +89,18 @@ $runtimeNote = if ($Lightweight) {
     'The standalone build includes the .NET runtime.'
 }
 
-Set-Content -LiteralPath (Join-Path $outputDir 'START-HERE.txt') -Encoding UTF8 -Value @"
-AIMaster
-
-1. Install and sign in to Codex.
-2. Run AIMaster.exe.
-$runtimeNote
-
-1. 安装并登录 Codex。
-2. 运行 AIMaster.exe。
-
-Documentation: https://github.com/PN-BUG/AI-Master
-"@
+$startHereTemplate = Join-Path $PSScriptRoot 'Resources\START-HERE.template.txt'
+if (-not (Test-Path -LiteralPath $startHereTemplate -PathType Leaf)) {
+    throw "Missing START-HERE template: $startHereTemplate"
+}
+$utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+$utf8WithBom = New-Object System.Text.UTF8Encoding($true)
+$startHereText = [IO.File]::ReadAllText($startHereTemplate, $utf8WithoutBom)
+$startHereText = $startHereText.Replace('{{RUNTIME_NOTE}}', $runtimeNote)
+[IO.File]::WriteAllText(
+    (Join-Path $outputDir 'START-HERE.txt'),
+    $startHereText,
+    $utf8WithBom)
 
 if (-not $NoZip) {
     Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem

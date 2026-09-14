@@ -14,6 +14,16 @@ public static class TaskNameSources
             : ConversationTitle;
 }
 
+public static class FloatingFontScales
+{
+    public const double Default = 1.2;
+    public const double Minimum = 1.0;
+    public const double Maximum = 1.5;
+
+    public static double Normalize(double value) =>
+        double.IsFinite(value) ? Math.Clamp(value, Minimum, Maximum) : Default;
+}
+
 public sealed class AiManagerSettings
 {
     [JsonPropertyName("warningPercent")]
@@ -34,11 +44,33 @@ public sealed class AiManagerSettings
     [JsonPropertyName("floatingAutoCollapse")]
     public bool FloatingAutoCollapse { get; set; } = true;
 
+    [JsonPropertyName("floatingFontScale")]
+    public double FloatingFontScale { get; set; } = FloatingFontScales.Default;
+
+    [JsonPropertyName("dashboardCardLayout")]
+    public List<string> DashboardCardLayout { get; set; } = new();
+
+    [JsonPropertyName("collapsedDashboardCards")]
+    public List<string> CollapsedDashboardCards { get; set; } = new();
+
+    [JsonPropertyName("dashboardCardSizes")]
+    public Dictionary<string, AiDashboardCardSize> DashboardCardSizes { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     [JsonPropertyName("taskNameSource")]
     public string TaskNameSource { get; set; } = TaskNameSources.ConversationTitle;
 
     [JsonPropertyName("language")]
     public string? Language { get; set; }
+}
+
+public sealed class AiDashboardCardSize
+{
+    [JsonPropertyName("width")]
+    public double Width { get; set; }
+
+    [JsonPropertyName("height")]
+    public double Height { get; set; }
 }
 
 public sealed class AiLimitWindow
@@ -67,6 +99,40 @@ public sealed class AiDailyUsage
     public long Tokens { get; init; }
 }
 
+public sealed class AiProjectUsage
+{
+    public string ProjectName { get; init; } = string.Empty;
+    public string ProjectPath { get; init; } = string.Empty;
+    public long Tokens { get; init; }
+    public double SharePercent { get; init; }
+    public double? WeeklyQuotaPercent { get; init; }
+    public int SessionCount { get; init; }
+    public string TokensText => FormatTokens(Tokens);
+    public string ShareText => $"{SharePercent:0.#}%";
+    public double WeeklyQuotaBarValue => WeeklyQuotaPercent ?? 0;
+    public string QuotaShareText => WeeklyQuotaPercent is { } quota
+        ? LocalizationService.IsEnglish
+            ? $"~{quota:0.##}% weekly quota · {SharePercent:0.#}% local"
+            : $"约 {quota:0.##}% 周额度 · 本机占比 {SharePercent:0.#}%"
+        : LocalizationService.L($"周额度 -- · 本机占比 {SharePercent:0.#}%",
+            $"Weekly quota -- · {SharePercent:0.#}% local");
+
+    private static string FormatTokens(long tokens) => tokens switch
+    {
+        >= 1_000_000_000 => $"{tokens / 1_000_000_000d:0.##}B",
+        >= 1_000_000 => $"{tokens / 1_000_000d:0.##}M",
+        >= 1_000 => $"{tokens / 1_000d:0.#}K",
+        _ => $"{tokens}"
+    };
+}
+
+public sealed class AiLocalUsageSummary
+{
+    public long TotalTokens { get; init; }
+    public int SessionCount { get; init; }
+    public List<AiProjectUsage> Projects { get; init; } = new();
+}
+
 public sealed class AiThreadSummary
 {
     public string Id { get; init; } = string.Empty;
@@ -91,6 +157,7 @@ public sealed class AiManagerSnapshot
     public List<AiThreadSummary> Threads { get; init; } = new();
     public long? LifetimeTokens { get; init; }
     public int ResetCredits { get; init; }
+    public AiLocalUsageSummary LocalUsage { get; init; } = new();
     public DateTimeOffset CapturedAt { get; init; } = DateTimeOffset.Now;
 
     public AiLimitWindow? MainLimit => Limits
@@ -105,6 +172,11 @@ public sealed record AiForecast(
     DateTimeOffset? ExhaustsAt,
     bool ExhaustsBeforeReset,
     string Summary);
+
+public sealed record AiRemainingForecastPoint(
+    DateOnly Date,
+    double RemainingPercent,
+    bool IsProjected);
 
 public sealed class AiFloatingSnapshot
 {

@@ -21,7 +21,8 @@ Services/                App Server 客户端、数据聚合、本地化与路�
 Resources/               PNG 原图与多尺寸 ICO
 docs/                    用户、开发和排错文档
 tests/AIMaster.Smoke/    任务栏、图标与英文完整性回归测试
-build.ps1                自包含发布与 ZIP 打包
+build.ps1                单版本或双版本发布与 ZIP 打包
+package-all.cmd          可双击的一键双版本打包工具
 release/                 完整独立版和轻量版发布包
 ```
 
@@ -55,16 +56,18 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release
 | `-Runtime win-arm64` | 发布 ARM64 版本 |
 | `-Lightweight` | 生成不携带 .NET 运行时的轻量多文件版 |
 | `-FrameworkDependent` | `-Lightweight` 的兼容别名 |
+| `-All` | 一次生成完整版、轻量版及各自的 ZIP |
 | `-NoZip` | 只生成目录，不创建 ZIP |
 
 输出固定在 `release/AIMaster-<runtime>-<mode>`，重复构建只清理这个经过校验的目标目录。
 
-同时生成 Windows x64 完整版与轻量版：
+一键同时生成 Windows x64 完整版、轻量版及两个 ZIP：
 
 ```powershell
-.\build.ps1
-.\build.ps1 -Lightweight
+.\build.ps1 -All
 ```
+
+也可以直接双击仓库根目录的 `package-all.cmd`。完成后会保留窗口供检查结果。
 
 ## 数据流
 
@@ -90,4 +93,4 @@ App Server 请求使用独立超时；任务、模型或历史用量等可选请
 3. 悬浮窗能显示任务、模型、推理强度和额度。
 4. 在主屏、副屏分别验证上/左/右靠边收起。
 5. 切换中英文，检查窗口尺寸和右键菜单。
-6. 分别运行 `build.ps1` 和 `build.ps1 -Lightweight`，确认两个 ZIP 中均含 `AIMaster.exe` 和 `START-HERE.txt`。
+6. 运行 `build.ps1 -All`，确认两个发布目录和两个 ZIP 均已生成，且 ZIP 中包含 `AIMaster.exe` 和 `START-HERE.txt`。

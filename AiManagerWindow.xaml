@@ -16,8 +16,8 @@
             <Setter Property="Background" Value="{StaticResource Panel}"/>
             <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="20"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="12"/>
         </Style>
         <Style x:Key="Label" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource Muted}"/>
@@ -59,6 +59,29 @@
             <Setter Property="Foreground" Value="#FFB4B8"/>
             <Setter Property="BorderBrush" Value="#714047"/>
         </Style>
+        <Style x:Key="CardChromeButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
+            <Setter Property="Width" Value="24"/>
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontFamily" Value="Cascadia Mono"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+        <Style x:Key="CardResizeThumb" TargetType="Thumb">
+            <Setter Property="Width" Value="16"/>
+            <Setter Property="Height" Value="16"/>
+            <Setter Property="Cursor" Value="SizeNWSE"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Path Data="M 3,13 L 13,3 M 8,13 L 13,8" Stroke="#71838A"
+                                  StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="TextBox">
             <Setter Property="Background" Value="#10181E"/>
             <Setter Property="Foreground" Value="{StaticResource Ink}"/>
@@ -87,7 +110,7 @@
         </Style>
     </Window.Resources>
 
-    <Grid Margin="28,22,28,22">
+    <Grid Margin="16,12,16,12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -95,13 +118,13 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Margin="0,0,0,16">
+        <Grid Grid.Row="0" Margin="0,0,0,11">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="AI / CONTROL DESK" Foreground="{StaticResource Signal}" FontFamily="Cascadia Mono"
                            FontSize="11" FontWeight="SemiBold"/>
-                <TextBlock Text="AIMaster" Foreground="{StaticResource Ink}" FontSize="28" FontWeight="Bold" Margin="0,4,0,0"/>
-                <TextBlock Text="看清额度跑道，在撞线之前停下来。" Foreground="{StaticResource Muted}" FontSize="13" Margin="0,4,0,0"/>
+                <TextBlock Text="AIMaster" Foreground="{StaticResource Ink}" FontSize="26" FontWeight="Bold" Margin="0,2,0,0"/>
+                <TextBlock Text="看清额度跑道，在撞线之前停下来。" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,2,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock x:Name="SyncStatusText" Text="等待连接" Foreground="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
@@ -116,16 +139,17 @@
         </Grid>
 
         <Border x:Name="ConnectionBanner" Grid.Row="1" Background="#2B2417" BorderBrush="#665128" BorderThickness="1"
-                CornerRadius="8" Padding="12,8" Margin="0,0,0,14" Visibility="Collapsed">
+                CornerRadius="8" Padding="10,7" Margin="0,0,0,9" Visibility="Collapsed">
             <TextBlock x:Name="ConnectionText" Foreground="#F2CD7D" TextWrapping="Wrap"/>
         </Border>
 
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <Grid>
-                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <ScrollViewer x:Name="DashboardScrollViewer" Grid.Row="2"
+                      VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
+            <Grid x:Name="DashboardGrid">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.35*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="1*"/></Grid.ColumnDefinitions>
 
-                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource PanelCard}" MinHeight="220">
+                <Border x:Name="QuotaCard" Grid.Row="0" Grid.Column="0" Style="{StaticResource PanelCard}" MinHeight="168">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <Grid>
@@ -134,16 +158,16 @@
                                 <TextBlock x:Name="QuotaStateText" Text="正在同步" Foreground="#68E0B2" FontSize="11" FontWeight="SemiBold"/>
                             </Border>
                         </Grid>
-                        <Grid Grid.Row="1" Margin="0,18,0,14">
+                        <Grid Grid.Row="1" Margin="0,8,0,7">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
-                                    <TextBlock x:Name="RemainingText" Text="--" Foreground="{StaticResource Ink}" FontFamily="Cascadia Mono" FontSize="58" FontWeight="SemiBold"/>
-                                    <TextBlock Text="%" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="20" Margin="5,0,0,9"/>
+                                    <TextBlock x:Name="RemainingText" Text="--" Foreground="{StaticResource Ink}" FontFamily="Cascadia Mono" FontSize="50" FontWeight="SemiBold"/>
+                                    <TextBlock Text="%" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="18" Margin="4,0,0,8"/>
                                 </StackPanel>
                                 <TextBlock Text="REMAINING" Style="{StaticResource Label}" FontFamily="Cascadia Mono"/>
                             </StackPanel>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="30,0,0,0">
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="22,0,0,0">
                                 <Grid><TextBlock Text="0" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
                                     <TextBlock Text="LIMIT" Foreground="#667881" FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Center"/>
                                     <TextBlock Text="100" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right"/></Grid>
@@ -158,14 +182,14 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource PanelCard}" MinHeight="220">
+                <Border x:Name="GuardCard" Grid.Row="0" Grid.Column="2" Style="{StaticResource PanelCard}" MinHeight="154">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <TextBlock Text="任务闸门" Style="{StaticResource Label}"/>
-                        <StackPanel Grid.Row="1" VerticalAlignment="Center">
-                            <TextBlock x:Name="GuardGlyph" Text="GO" Foreground="{StaticResource Signal}" FontFamily="Cascadia Mono" FontSize="44" FontWeight="Bold"/>
-                            <TextBlock x:Name="GuardStatusText" Text="额度安全，当前无需暂停" Foreground="{StaticResource Ink}" FontSize="15" FontWeight="SemiBold" Margin="0,3,0,0"/>
-                            <TextBlock x:Name="GuardDetailText" Text="达到暂停线后中断当前连接可见任务" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                        <StackPanel Grid.Row="1" Margin="0,5,0,6">
+                            <TextBlock x:Name="GuardGlyph" Text="GO" Foreground="{StaticResource Signal}" FontFamily="Cascadia Mono" FontSize="38" FontWeight="Bold"/>
+                            <TextBlock x:Name="GuardStatusText" Text="额度安全，当前无需暂停" Foreground="{StaticResource Ink}" FontSize="14" FontWeight="SemiBold" Margin="0,1,0,0"/>
+                            <TextBlock x:Name="GuardDetailText" Text="达到暂停线后中断当前连接可见任务" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,2,0,0"/>
                         </StackPanel>
                         <StackPanel Grid.Row="2" Orientation="Horizontal">
                             <Button x:Name="PauseNowButton" Content="暂停可见任务" Style="{StaticResource DangerButton}" Click="PauseNow_Click"/>
@@ -174,16 +198,16 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource PanelCard}" Margin="0,12,0,0" MinHeight="235">
+                <Border x:Name="LimitsCard" Grid.Row="1" Grid.Column="0" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="190">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <Grid><TextBlock Text="额度窗口" Style="{StaticResource Label}"/>
                             <TextBlock x:Name="ResetCreditText" Text="" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right"/></Grid>
-                        <TextBlock Grid.Row="1" Text="账户可能同时返回总额度和特定模型额度；守卫以最高占用为准。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,7,0,10"/>
+                        <TextBlock Grid.Row="1" Text="账户可能同时返回总额度和特定模型额度；守卫以最高占用为准。" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,5"/>
                         <ItemsControl x:Name="LimitItems" Grid.Row="2">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Margin="0,5,0,8">
+                                    <Grid Margin="0,3,0,6">
                                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <StackPanel Orientation="Horizontal">
@@ -202,13 +226,33 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource PanelCard}" Margin="0,12,0,0" MinHeight="235">
+                <Border x:Name="ForecastCard" Grid.Row="1" Grid.Column="2" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="350">
                     <Grid>
-                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                        <TextBlock Text="消耗预测 / 近 7 日" Style="{StaticResource Label}"/>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <TextBlock Text="消耗预测 / 本周" Style="{StaticResource Label}"/>
                         <TextBlock x:Name="ForecastSummaryText" Grid.Row="1" Text="等待数据" Foreground="{StaticResource Ink}" FontSize="15" FontWeight="SemiBold" Margin="0,9,0,0" TextWrapping="Wrap"/>
-                        <StackPanel x:Name="UsageBarsPanel" Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,18,0,8" Height="88"/>
-                        <Grid Grid.Row="3">
+                        <Grid Grid.Row="2" Margin="0,15,0,0">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="118"/></Grid.RowDefinitions>
+                            <Grid>
+                                <TextBlock Text="本周剩余额度" Style="{StaticResource Label}"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Rectangle Width="15" Height="2" Fill="{StaticResource Signal}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="估算" Foreground="{StaticResource Muted}" FontSize="9" Margin="4,0,9,0"/>
+                                    <Rectangle Width="15" Height="2" Fill="#FFB36A" VerticalAlignment="Center"/>
+                                    <TextBlock Text="预测" Foreground="{StaticResource Muted}" FontSize="9" Margin="4,0,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                            <Border Grid.Row="1" Margin="0,7,0,0" Background="#10181E" BorderBrush="#26343E"
+                                    BorderThickness="1" CornerRadius="7" Padding="5">
+                                <Canvas x:Name="RemainingForecastCanvas" ClipToBounds="True"
+                                        SizeChanged="RemainingForecastCanvas_SizeChanged"/>
+                            </Border>
+                        </Grid>
+                        <Grid Grid.Row="3" Margin="0,13,0,8">
+                            <TextBlock Text="近 7 日 TOKEN" Style="{StaticResource Label}"/>
+                            <StackPanel x:Name="UsageBarsPanel" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,18,0,0" Height="78"/>
+                        </Grid>
+                        <Grid Grid.Row="4">
                             <StackPanel><TextBlock Text="日均 TOKEN" Style="{StaticResource Label}" FontFamily="Cascadia Mono"/>
                                 <TextBlock x:Name="DailyTokensText" Text="--" Foreground="{StaticResource Ink}" FontFamily="Cascadia Mono" FontSize="17" Margin="0,3,0,0"/></StackPanel>
                             <StackPanel HorizontalAlignment="Right"><TextBlock Text="日均额度" Style="{StaticResource Label}" FontFamily="Cascadia Mono" HorizontalAlignment="Right"/>
@@ -217,12 +261,13 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource PanelCard}" Margin="0,12,0,0" MinHeight="215">
+                <Border x:Name="ThreadsCard" Grid.Row="2" Grid.Column="0" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="170">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <TextBlock Text="最近任务" Style="{StaticResource Label}"/>
                         <TextBlock Grid.Row="1" Text="运行态只对当前 App Server 连接可见；其他 Codex 窗口可能显示为历史记录。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,7,0,9"/>
-                        <ListBox x:Name="ThreadList" Grid.Row="2" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox x:Name="ThreadList" Grid.Row="2" Background="Transparent" BorderThickness="0"
+                                 ScrollViewer.VerticalScrollBarVisibility="Hidden" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <Grid Margin="0,5" ToolTip="{Binding Id}">
@@ -237,26 +282,79 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="2" Grid.Column="2" Style="{StaticResource PanelCard}" Margin="0,12,0,0" MinHeight="215">
+                <Border x:Name="SettingsCard" Grid.Row="2" Grid.Column="2" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="195">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <TextBlock Text="保护策略" Style="{StaticResource Label}"/>
                         <Grid Grid.Row="1" Margin="0,12,0,8">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="86"/></Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <TextBlock Text="预警线" Foreground="{StaticResource Ink}" VerticalAlignment="Center"/>
                             <TextBox x:Name="WarningPercentBox" Grid.Column="1" Text="70" FontFamily="Cascadia Mono" HorizontalContentAlignment="Right"/>
                             <TextBlock Grid.Row="1" Text="暂停线" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,10,0,0"/>
                             <TextBox x:Name="PausePercentBox" Grid.Row="1" Grid.Column="1" Text="90" FontFamily="Cascadia Mono" HorizontalContentAlignment="Right" Margin="0,10,0,0"/>
-                            <CheckBox x:Name="AutoPauseCheck" Grid.Row="2" Grid.ColumnSpan="2" Content="超出暂停线时中断可见任务并提示（窗口打开时监控）" Foreground="{StaticResource Ink}" Margin="0,14,0,0"/>
+                            <TextBlock Grid.Row="2" Text="浮窗字号（100–150%）" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,10,0,0"/>
+                            <TextBox x:Name="FloatingFontPercentBox" Grid.Row="2" Grid.Column="1" Text="120" FontFamily="Cascadia Mono"
+                                     HorizontalContentAlignment="Right" Margin="0,10,0,0"/>
+                            <CheckBox x:Name="AutoPauseCheck" Grid.Row="3" Grid.ColumnSpan="2" Content="超出暂停线时中断可见任务并提示（窗口打开时监控）" Foreground="{StaticResource Ink}" Margin="0,14,0,0"/>
                         </Grid>
                         <Button Grid.Row="2" Content="保存并应用" Style="{StaticResource SignalButton}" HorizontalAlignment="Right" Click="SavePolicy_Click"/>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="LocalUsageCard" Grid.Row="3" Grid.ColumnSpan="3" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="210">
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="本机消耗" Style="{StaticResource Label}"/>
+                            <TextBlock x:Name="LocalUsageTokensText" Text="--" Foreground="{StaticResource Ink}"
+                                       FontFamily="Cascadia Mono" FontSize="31" FontWeight="SemiBold" Margin="0,14,0,0"/>
+                            <TextBlock Text="TOKEN / 本周" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
+                            <TextBlock x:Name="LocalUsageDetailText" Text="等待本地记录" Foreground="{StaticResource Muted}"
+                                       FontSize="11" TextWrapping="Wrap" Margin="0,13,18,0"/>
+                            <TextBlock Text="仅统计本机 Codex 会话，不代表账户官方额度。" Foreground="#71838A"
+                                       FontSize="10" TextWrapping="Wrap" Margin="0,8,18,0"/>
+                            <TextBlock Text="项目周额度占比按本机 Token 比例估算。" Foreground="#71838A"
+                                       FontSize="10" TextWrapping="Wrap" Margin="0,5,18,0"/>
+                        </StackPanel>
+                        <Border Grid.Column="1" Background="{StaticResource Line}"/>
+                        <Grid Grid.Column="2" Margin="20,0,0,0">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Grid>
+                                <TextBlock Text="项目消耗分布" Style="{StaticResource Label}"/>
+                                <TextBlock x:Name="ProjectUsageCountText" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right"/>
+                            </Grid>
+                            <Grid Grid.Row="1" Margin="0,9,0,0">
+                                <TextBlock x:Name="LocalUsageEmptyText" Text="本周暂无本地 Token 记录" Foreground="{StaticResource Muted}"
+                                           VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                <ItemsControl x:Name="ProjectUsageItems">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,3,0,7" ToolTip="{Binding ProjectPath}">
+                                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding ProjectName}" Foreground="{StaticResource Ink}" FontSize="11"
+                                                           FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding TokensText}" Foreground="{StaticResource Ink}"
+                                                           FontFamily="Cascadia Mono" FontSize="10" Margin="12,0,0,0"/>
+                                                <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,5,0,0">
+                                                    <ProgressBar Style="{StaticResource Meter}" Maximum="100"
+                                                                 Value="{Binding WeeklyQuotaBarValue, Mode=OneWay}"/>
+                                                    <TextBlock Text="{Binding QuotaShareText}" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono"
+                                                               FontSize="8" HorizontalAlignment="Right" Margin="0,8,0,0"/>
+                                                </Grid>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+                        </Grid>
                     </Grid>
                 </Border>
             </Grid>
         </ScrollViewer>
 
-        <Grid Grid.Row="3" Margin="2,13,2,0">
+        <Grid Grid.Row="3" Margin="2,8,2,0">
             <TextBlock x:Name="FooterStatusText" Text="数据只保存在本机；认证由 Codex 管理。" Foreground="#71838A" FontSize="11"/>
             <TextBlock x:Name="LastSyncText" Text="" Foreground="#71838A" FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right"/>
         </Grid>
