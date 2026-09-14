@@ -109,7 +109,13 @@ public partial class AiManagerWindow : Window
         try
         {
             var result = await GitHubUpdateChecker.CheckAsync(
-                "PN-BUG", "AI-Master", typeof(AiManagerWindow).Assembly, _lifetime.Token);
+                "PN-BUG", "AI-Master", typeof(AiManagerWindow).Assembly, _lifetime.Token,
+                [
+                    "AIMaster-win-x64-lightweight.zip",
+                    "AIMaster-win-x64-standalone.zip",
+                    "AIMaster-win-arm64-lightweight.zip",
+                    "AIMaster-win-arm64-standalone.zip"
+                ]);
             if (!result.ReleaseFound)
             {
                 _availableUpdate = null;
@@ -437,14 +443,24 @@ public partial class AiManagerWindow : Window
         card.Opacity = 1;
     }
 
-    private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
+    internal static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
     {
         while (current is not null)
         {
             if (current is T match) return match;
-            current = VisualTreeHelper.GetParent(current);
+            current = GetParent(current);
         }
         return null;
+    }
+
+    private static DependencyObject? GetParent(DependencyObject current)
+    {
+        if (current is ContentElement content)
+            return ContentOperations.GetParent(content) ??
+                   (content as FrameworkContentElement)?.Parent;
+        if (current is Visual or System.Windows.Media.Media3D.Visual3D)
+            return VisualTreeHelper.GetParent(current);
+        return LogicalTreeHelper.GetParent(current);
     }
 
     private void DashboardCard_DragOver(object sender, DragEventArgs e) => SetMoveEffect(e);

@@ -120,7 +120,7 @@ public static class ApplicationUpdater
             uri.Scheme != Uri.UriSchemeHttps ||
             !uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException(Message(options, "更新包下载地址无效。", "The update download URL is invalid."));
-        if (asset.SizeBytes is <= 0 or > MaxAssetBytes)
+        if (asset.SizeBytes is < 0 or > MaxAssetBytes)
             throw new InvalidDataException(Message(options, "更新包大小无效。", "The update package size is invalid."));
     }
 
@@ -136,7 +136,7 @@ public static class ApplicationUpdater
             request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         var expectedBytes = response.Content.Headers.ContentLength ?? asset.SizeBytes;
-        if (expectedBytes is <= 0 or > MaxAssetBytes) throw new InvalidDataException("Invalid update download size.");
+        if (expectedBytes > MaxAssetBytes) throw new InvalidDataException("Invalid update download size.");
 
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using var output = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
@@ -149,9 +149,12 @@ public static class ApplicationUpdater
             received += count;
             if (received > MaxAssetBytes) throw new InvalidDataException("Update download exceeded the allowed size.");
             await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
-            progress?.Report(Math.Min(0.9, received / (double)expectedBytes * 0.9));
+            if (expectedBytes > 0)
+                progress?.Report(Math.Min(0.9, received / (double)expectedBytes * 0.9));
         }
-        if (received != asset.SizeBytes)
+        if (received <= 0)
+            throw new InvalidDataException("The downloaded update package is empty.");
+        if (asset.SizeBytes > 0 && received != asset.SizeBytes)
             throw new InvalidDataException($"Update download size mismatch: expected {asset.SizeBytes}, received {received}.");
     }
 
@@ -283,4 +286,3 @@ public static class ApplicationUpdater
         try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { }
     }
 }
-

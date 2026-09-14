@@ -38,6 +38,9 @@ internal static partial class Program
         Check(GitHubUpdateChecker.BuildLatestReleaseApiUrl("PN-BUG", "AI-Master") ==
               "https://api.github.com/repos/PN-BUG/AI-Master/releases/latest",
             "update checker targets the AIMaster GitHub release feed");
+        Check(GitHubUpdateChecker.BuildLatestReleasePageUrl("PN-BUG", "AI-Master") ==
+              "https://github.com/PN-BUG/AI-Master/releases/latest",
+            "update checker has a non-API fallback for GitHub rate limits");
         var updateAssets = new List<GitHubReleaseAsset>
         {
             new("AIMaster-win-x64-lightweight.zip", "https://github.com/example/lightweight", 100, null),
@@ -55,6 +58,34 @@ internal static partial class Program
         Check(parsedRelease.UpdateAvailable && parsedRelease.ReleaseAssets.Count == 1 &&
               parsedRelease.ReleaseAssets[0].Digest == "sha256:abcd",
             "update checker parses release assets and SHA-256 digests");
+        var fallbackRelease = GitHubUpdateChecker.ParseLatestReleasePageUri(
+            new Uri("https://github.com/PN-BUG/AI-Master/releases/tag/v1.2.0"),
+            "1.0.0", "PN-BUG", "AI-Master",
+            ["AIMaster-win-x64-lightweight.zip", "AIMaster-win-x64-standalone.zip"]);
+        Check(fallbackRelease.UpdateAvailable && fallbackRelease.LatestVersion == "v1.2.0" &&
+              fallbackRelease.ReleaseAssets.Count == 2 &&
+              fallbackRelease.ReleaseAssets[0].DownloadUrl ==
+              "https://github.com/PN-BUG/AI-Master/releases/latest/download/AIMaster-win-x64-lightweight.zip",
+            "rate-limit fallback resolves the latest tag and direct-update packages");
+        using (var protocolValues = System.Text.Json.JsonDocument.Parse(
+                   "{\"requestId\":\"42\",\"usedPercent\":\"12.5\",\"tokens\":\"123456\"}"))
+        {
+            var protocolRoot = protocolValues.RootElement;
+            using var numericResponse = System.Text.Json.JsonDocument.Parse("{\"id\":\"42\"}");
+            using var serverRequest = System.Text.Json.JsonDocument.Parse(
+                "{\"id\":\"server-request\",\"method\":\"item/tool/call\"}");
+            Check(CodexAppServerClient.TryReadResponseId(
+                      numericResponse.RootElement, out var requestId) &&
+                  requestId == 42 &&
+                  JsonProtocolValue.TryGetDouble(protocolRoot.GetProperty("usedPercent"), out var usedPercent) &&
+                  Math.Abs(usedPercent - 12.5) < 0.001 &&
+                  JsonProtocolValue.TryGetInt64(protocolRoot.GetProperty("tokens"), out var tokens) &&
+                  tokens == 123456,
+                "Codex protocol accepts numeric values encoded as strings");
+            Check(!CodexAppServerClient.TryReadResponseId(
+                    serverRequest.RootElement, out _),
+                "Codex server requests with string IDs do not tear down the response reader");
+        }
 
         var main = new AiManagerWindow();
         var floating = new AiFloatingWindow();
@@ -74,6 +105,11 @@ internal static partial class Program
         Check(main.FindName("DashboardScrollViewer") is ScrollViewer
               { VerticalScrollBarVisibility: ScrollBarVisibility.Hidden },
             "dashboard scrollbar is hidden while scrolling remains available");
+        var inlineHost = new TextBlock();
+        var inlineRun = new System.Windows.Documents.Run("Drag handle");
+        inlineHost.Inlines.Add(inlineRun);
+        Check(ReferenceEquals(AiManagerWindow.FindAncestor<TextBlock>(inlineRun), inlineHost),
+            "dashboard drag handles content-element mouse sources without crashing");
         VerifyDashboardLayout();
         VerifyDashboardCardResize(main);
         VerifyProjectUsageTemplate(main);

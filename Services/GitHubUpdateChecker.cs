@@ -33,7 +33,8 @@ public static class GitHubUpdateChecker
         string owner,
         string repository,
         Assembly assembly,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? fallbackAssetNames = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         ArgumentException.ThrowIfNullOrWhiteSpace(repository);
@@ -55,10 +56,41 @@ public static class GitHubUpdateChecker
                 $"https://github.com/{owner}/{repository}/releases",
                 UpdateAvailable: false,
                 ReleaseFound: false);
+        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+            return await CheckReleasePageAsync(
+                owner, repository, currentVersion, fallbackAssetNames, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return ParseReleaseJson(json, currentVersion, owner, repository);
+    }
+
+    private static async Task<UpdateCheckResult> CheckReleasePageAsync(
+        string owner,
+        string repository,
+        string currentVersion,
+        IReadOnlyList<string>? fallbackAssetNames,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, BuildLatestReleasePageUrl(owner, repository));
+        request.Headers.UserAgent.ParseAdd($"{repository}-update-check/1.0");
+        request.Headers.Accept.ParseAdd("text/html");
+
+        using var response = await Client.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return new UpdateCheckResult(
+                currentVersion,
+                currentVersion,
+                $"https://github.com/{owner}/{repository}/releases",
+                UpdateAvailable: false,
+                ReleaseFound: false);
+        response.EnsureSuccessStatusCode();
+
+        var resolvedUri = response.RequestMessage?.RequestUri
+            ?? throw new InvalidOperationException("GitHub did not return the latest release location.");
+        return ParseLatestReleasePageUri(
+            resolvedUri, currentVersion, owner, repository, fallbackAssetNames);
     }
 
     public static UpdateCheckResult ParseReleaseJson(
@@ -109,6 +141,50 @@ public static class GitHubUpdateChecker
     public static string BuildLatestReleaseApiUrl(string owner, string repository) =>
         $"https://api.github.com/repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repository)}/releases/latest";
 
+    public static string BuildLatestReleasePageUrl(string owner, string repository) =>
+        $"https://github.com/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repository)}/releases/latest";
+
+    public static UpdateCheckResult ParseLatestReleasePageUri(
+        Uri resolvedUri,
+        string currentVersion,
+        string owner,
+        string repository,
+        IReadOnlyList<string>? assetNames = null)
+    {
+        ArgumentNullException.ThrowIfNull(resolvedUri);
+        var segments = resolvedUri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (!resolvedUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !resolvedUri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
+            segments.Length != 5 ||
+            !Uri.UnescapeDataString(segments[0]).Equals(owner, StringComparison.OrdinalIgnoreCase) ||
+            !Uri.UnescapeDataString(segments[1]).Equals(repository, StringComparison.OrdinalIgnoreCase) ||
+            !segments[2].Equals("releases", StringComparison.OrdinalIgnoreCase) ||
+            !segments[3].Equals("tag", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("GitHub did not return a valid latest release location.");
+
+        var latestVersion = Uri.UnescapeDataString(segments[4]).Trim();
+        if (string.IsNullOrWhiteSpace(latestVersion))
+            throw new InvalidOperationException("The latest GitHub release has no version tag.");
+
+        var assets = (assetNames ?? Array.Empty<string>())
+            .Where(name => !string.IsNullOrWhiteSpace(name) && Path.GetFileName(name) == name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(name => new GitHubReleaseAsset(
+                name,
+                $"https://github.com/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repository)}/releases/latest/download/{Uri.EscapeDataString(name)}",
+                0,
+                null))
+            .ToArray();
+
+        return new UpdateCheckResult(
+            currentVersion,
+            latestVersion,
+            resolvedUri.AbsoluteUri,
+            IsNewerVersion(latestVersion, currentVersion),
+            ReleaseFound: true,
+            Assets: assets);
+    }
+
     public static string GetCurrentVersion(Assembly assembly)
     {
         var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
@@ -156,4 +232,3 @@ public static class GitHubUpdateChecker
         return true;
     }
 }
-

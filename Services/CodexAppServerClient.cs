@@ -235,17 +235,27 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
     private void HandleMessage(JsonElement root)
     {
-        if (!root.TryGetProperty("id", out var idElement) || !idElement.TryGetInt64(out var id)) return;
+        if (!TryReadResponseId(root, out var id)) return;
         if (!_pending.TryGetValue(id, out var completion)) return;
         if (root.TryGetProperty("error", out var error))
         {
-            var message = error.TryGetProperty("message", out var text) ? text.GetString() : error.GetRawText();
+            var message = error.TryGetProperty("message", out var text) && text.ValueKind == JsonValueKind.String
+                ? text.GetString()
+                : error.GetRawText();
             completion.TrySetException(new InvalidOperationException(message ?? "Codex App Server 请求失败。"));
         }
         else if (root.TryGetProperty("result", out var result))
         {
             completion.TrySetResult(result.Clone());
         }
+    }
+
+    internal static bool TryReadResponseId(JsonElement root, out long id)
+    {
+        id = 0;
+        return root.ValueKind == JsonValueKind.Object &&
+               root.TryGetProperty("id", out var idElement) &&
+               JsonProtocolValue.TryGetInt64(idElement, out id);
     }
 
     internal static IReadOnlyList<string> ExtractJsonMessages(string line)

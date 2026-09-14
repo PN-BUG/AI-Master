@@ -724,7 +724,7 @@ internal sealed class AiManagerService : IAsyncDisposable
     {
         if (!root.TryGetProperty("summary", out var summary) || summary.ValueKind != JsonValueKind.Object ||
             !summary.TryGetProperty("lifetimeTokens", out var value) || value.ValueKind == JsonValueKind.Null) return null;
-        return value.TryGetInt64(out var tokens) ? tokens : null;
+        return JsonProtocolValue.TryGetInt64(value, out var tokens) ? tokens : null;
     }
 
     private static int ParseResetCredits(JsonElement root)
@@ -1028,11 +1028,11 @@ internal sealed class AiManagerService : IAsyncDisposable
     private static string? ReadString(JsonElement element, string property) =>
         element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static int ReadInt(JsonElement element, string property) =>
-        element.TryGetProperty(property, out var value) && value.TryGetInt32(out var number) ? number : 0;
+        element.TryGetProperty(property, out var value) && JsonProtocolValue.TryGetInt32(value, out var number) ? number : 0;
     private static long ReadLong(JsonElement element, string property) =>
-        element.TryGetProperty(property, out var value) && value.TryGetInt64(out var number) ? number : 0;
+        element.TryGetProperty(property, out var value) && JsonProtocolValue.TryGetInt64(value, out var number) ? number : 0;
     private static double ReadDouble(JsonElement element, string property) =>
-        element.TryGetProperty(property, out var value) && value.TryGetDouble(out var number) ? number : 0;
+        element.TryGetProperty(property, out var value) && JsonProtocolValue.TryGetDouble(value, out var number) ? number : 0;
 
     public async ValueTask DisposeAsync()
     {
