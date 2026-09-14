@@ -15,11 +15,20 @@ using SharedUpdates;
 internal static partial class Program
 {
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
         var app = new App();
         app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--capture-docs", StringComparer.OrdinalIgnoreCase))
+        {
+            var outputDirectory = args.SkipWhile(arg => !string.Equals(arg, "--output", StringComparison.OrdinalIgnoreCase))
+                .Skip(1)
+                .FirstOrDefault() ?? Path.Combine(Environment.CurrentDirectory, "docs", "images");
+            DocumentationScreenshotCapture.Capture(outputDirectory);
+            app.ExitApplication();
+            return 0;
+        }
         Check(app.ShutdownMode == ShutdownMode.OnExplicitShutdown,
             "closing the last window does not terminate background monitoring");
         Check(GitHubUpdateChecker.IsNewerVersion("v1.1.0", "1.0.0"),
@@ -39,6 +48,7 @@ internal static partial class Program
         Check(ApplicationUpdater.SelectAsset(updateAssets, "AIMaster", "win-x64", "standalone")?.SizeBytes == 200,
             "self-updater selects the matching standalone package");
         VerifyOneClickPackager();
+        VerifyBilingualDocumentation();
         var parsedRelease = GitHubUpdateChecker.ParseReleaseJson(
             "{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/PN-BUG/AI-Master/releases/tag/v1.2.0\",\"assets\":[{\"name\":\"AIMaster-win-x64-lightweight.zip\",\"browser_download_url\":\"https://github.com/PN-BUG/AI-Master/releases/download/v1.2.0/AIMaster-win-x64-lightweight.zip\",\"size\":123,\"digest\":\"sha256:abcd\"}]}",
             "1.0.0", "PN-BUG", "AI-Master");
@@ -189,6 +199,29 @@ internal static partial class Program
               buildScript.Contains("UTF8Encoding($true)", StringComparison.Ordinal) &&
               startHereTemplate.Contains("安装并登录 Codex", StringComparison.Ordinal),
             "one-click packager targets both release folders and both ZIP archives");
+    }
+
+    private static void VerifyBilingualDocumentation()
+    {
+        var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var chineseReadme = File.ReadAllText(Path.Combine(repositoryRoot, "README.md"));
+        var englishReadme = File.ReadAllText(Path.Combine(repositoryRoot, "README.en.md"));
+        var chineseGuide = File.ReadAllText(Path.Combine(repositoryRoot, "docs", "USER-GUIDE.md"));
+        var englishGuide = File.ReadAllText(Path.Combine(repositoryRoot, "docs", "USER-GUIDE.en.md"));
+        var imageDirectory = Path.Combine(repositoryRoot, "docs", "images");
+        var imageNames = new[] { "dashboard-zh.png", "dashboard-en.png", "floating-zh.png", "floating-en.png" };
+        var pngSignature = new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 };
+        var validImages = imageNames.All(name =>
+        {
+            var path = Path.Combine(imageDirectory, name);
+            return File.Exists(path) && new FileInfo(path).Length > 1_000 &&
+                   File.ReadAllBytes(path).Take(pngSignature.Length).SequenceEqual(pngSignature);
+        });
+        Check(chineseReadme.Contains("README.en.md", StringComparison.Ordinal) &&
+              englishReadme.Contains("README.md", StringComparison.Ordinal) &&
+              chineseGuide.Contains("USER-GUIDE.en.md", StringComparison.Ordinal) &&
+              englishGuide.Contains("USER-GUIDE.md", StringComparison.Ordinal) && validImages,
+            "Chinese and English documentation cross-link four valid UI screenshots");
     }
 
     private static void VerifyDashboardLayout()

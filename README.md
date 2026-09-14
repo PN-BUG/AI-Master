@@ -1,20 +1,25 @@
 # AIMaster
 
 <p align="center">
+  <strong>简体中文</strong> · <a href="README.en.md">English</a>
+</p>
+
+<p align="center">
   <img src="Resources/AIMaster.png" width="144" alt="AIMaster icon">
 </p>
 
 AIMaster 是一个可独立运行的 Windows Codex 用量与任务监控工具。它集中展示剩余额度、额度重置时间、消耗预测、最近任务、执行状态、当前模型与推理强度，并提供紧凑的桌面悬浮窗。
 
 ## 主要功能
-<img width="2550" height="1524" alt="image" src="https://github.com/user-attachments/assets/d5f48d4c-cee0-4a47-b707-e58d71af8d56" />
+
+![AIMaster 中文主面板](docs/images/dashboard-zh.png)
 
 - 显示 Codex 总额度、7 天窗口、5 小时窗口与重置时间。
 - 根据近期消耗速度预测额度是否会提前耗尽。
 - 设置预警线和暂停线，越线时提醒并暂停当前连接可见的任务。
 - 用折线图展示本周一至周日的剩余额度估算与未来预测。
 - 汇总本周本机 Codex Token 消耗，并按工作目录估算各项目所占周额度。
-- 支持折叠仪表盘卡片，并通过拖动标题栏调整双列布局；布局会自动保存。
+- 支持折叠仪表盘卡片、拖动标题栏调整双列布局，以及拖动右下角自由调整卡片宽高；布局和尺寸会自动保存。
 - 显示最近执行的最多 3 个任务，包括进行中、暂停/中断和已完成状态。
 - 任务名称可选择显示 Codex 对话标题或该任务最后发送的用户内容。
 - 显示任务当前使用的模型与推理强度。
@@ -48,7 +53,8 @@ AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“�
 - 读取额度和在线任务时，Codex App Server 需要可用。
 
 ## 悬浮窗
-<img width="390" height="201" alt="image" src="https://github.com/user-attachments/assets/6180a8ed-1cda-46e2-bb99-8d75c5c12071" />
+
+![AIMaster 中文悬浮窗](docs/images/floating-zh.png)
 
 在主窗口点击“悬浮监控”打开悬浮窗：
 
@@ -57,6 +63,7 @@ AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“�
 - 鼠标悬停感应条会展开并立即刷新。
 - 右键可立即刷新、切换收起状态、选择任务名称来源、开启或关闭靠边自动收起、修改刷新频率。
 - 内容宽度会根据任务名和模型名自动调整，最多显示 3 个最近任务。
+- 浮窗字号可在主窗口“保护策略”中按 100–150% 调整。
 - 主窗口右上角关闭按钮只会隐藏窗口。单击托盘图标可恢复，右键托盘图标可打开悬浮监控或退出 AIMaster。
 
 ## 数据来源与隐私
@@ -104,12 +111,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Runtime win-arm
 更多信息：
 
 - [用户手册](docs/USER-GUIDE.md)
+- [English user guide](docs/USER-GUIDE.en.md)
 - [开发与构建](docs/DEVELOPMENT.md)
 - [故障排查](docs/TROUBLESHOOTING.md)
-
-## English quick start
-
-Choose a package under `release`: the standalone build includes .NET, while the lightweight build requires .NET 8 Desktop Runtime. Extract the ZIP, make sure Codex is installed and signed in, then run `AIMaster.exe`.
 
 ## License
 

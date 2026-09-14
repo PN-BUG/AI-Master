@@ -40,6 +40,14 @@ dotnet run --project .\AIMaster.csproj
 dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release
 ```
 
+重新生成 README 和用户手册使用的中英文匿名演示截图：
+
+```powershell
+dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release -- --capture-docs --output .\docs\images
+```
+
+截图使用固定的演示额度、任务和项目路径，不读取或公开真实账户数据。生成后应检查四张 PNG 的文字、图表和底部控件是否完整。
+
 ## 发布
 
 默认生成 Windows x64 自包含单文件应用和 ZIP：
@@ -94,3 +102,4 @@ App Server 请求使用独立超时；任务、模型或历史用量等可选请
 4. 在主屏、副屏分别验证上/左/右靠边收起。
 5. 切换中英文，检查窗口尺寸和右键菜单。
 6. 运行 `build.ps1 -All`，确认两个发布目录和两个 ZIP 均已生成，且 ZIP 中包含 `AIMaster.exe` 和 `START-HERE.txt`。
+7. 运行文档截图命令，确认 `dashboard-zh/en.png` 和 `floating-zh/en.png` 与当前界面一致。
