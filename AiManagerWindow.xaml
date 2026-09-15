@@ -312,9 +312,11 @@
                             <TextBlock Text="TOKEN / 本周" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
                             <TextBlock x:Name="LocalUsageDetailText" Text="等待本地记录" Foreground="{StaticResource Muted}"
                                        FontSize="11" TextWrapping="Wrap" Margin="0,13,18,0"/>
-                            <TextBlock Text="仅统计本机 Codex 会话，不代表账户官方额度。" Foreground="#71838A"
+                            <TextBlock x:Name="LocalUsageEstimateText" Text="等待账户与本机记录" Foreground="{StaticResource Signal}"
                                        FontSize="10" TextWrapping="Wrap" Margin="0,8,18,0"/>
-                            <TextBlock Text="项目周额度占比按本机 Token 比例估算。" Foreground="#71838A"
+                            <TextBlock Text="本机 Token 来自本地会话日志；账户 Token 来自 Codex 用量历史。" Foreground="#71838A"
+                                       FontSize="10" TextWrapping="Wrap" Margin="0,8,18,0"/>
+                            <TextBlock Text="额度占比按同周期 Token 比例估算，不等于官方设备账单。" Foreground="#71838A"
                                        FontSize="10" TextWrapping="Wrap" Margin="0,5,18,0"/>
                         </StackPanel>
                         <Border Grid.Column="1" Background="{StaticResource Line}"/>

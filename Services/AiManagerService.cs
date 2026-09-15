@@ -40,9 +40,10 @@ internal sealed class AiManagerService : IAsyncDisposable
         public readonly List<LocalUsageRecord> Records = new();
         public long Offset;
         public string? ProjectPath;
+        public bool HasTokenUsageRecords;
     }
 
-    private sealed record LocalUsageRecord(DateOnly Date, string ProjectPath, long Tokens);
+    private sealed record LocalUsageRecord(DateOnly Date, string ProjectPath, long Tokens, bool IsLegacy = false);
 
     public AiManagerService()
     {
@@ -422,8 +423,9 @@ internal sealed class AiManagerService : IAsyncDisposable
     internal AiLocalUsageSummary ReadLocalUsageSummary(string sessionsRoot, DateOnly weekStart,
         CancellationToken cancellationToken = default)
     {
-        if (!Directory.Exists(sessionsRoot)) return new AiLocalUsageSummary();
         var weekEnd = weekStart.AddDays(6);
+        if (!Directory.Exists(sessionsRoot))
+            return new AiLocalUsageSummary { PeriodStart = weekStart, PeriodEnd = weekEnd };
         var earliestWriteUtc = weekStart.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
         var sessionRecords = new List<(string SessionPath, LocalUsageRecord Record)>();
 
@@ -458,6 +460,8 @@ internal sealed class AiManagerService : IAsyncDisposable
             .ToList();
         return new AiLocalUsageSummary
         {
+            PeriodStart = weekStart,
+            PeriodEnd = weekEnd,
             TotalTokens = total,
             SessionCount = sessionRecords.Select(item => item.SessionPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
@@ -476,6 +480,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             {
                 cursor.Offset = 0;
                 cursor.ProjectPath = null;
+                cursor.HasTokenUsageRecords = false;
                 cursor.Records.Clear();
                 cursor.PendingLine.SetLength(0);
             }
@@ -516,21 +521,47 @@ internal sealed class AiManagerService : IAsyncDisposable
                 cursor.ProjectPath = NormalizeProjectPath(ReadString(payload, "cwd")) ?? cursor.ProjectPath;
                 return;
             }
-            if (type != "token_usage_record" ||
-                !payload.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
-                return;
-            var tokens = ReadLong(usage, "total_tokens");
+            var isLegacy = false;
+            var tokens = type switch
+            {
+                // Current rollout records report one response at a time.
+                "token_usage_record" when payload.TryGetProperty("usage", out var usage) &&
+                                          usage.ValueKind == JsonValueKind.Object =>
+                    ReadLong(usage, "total_tokens"),
+                // Older token_count events expose both a cumulative total and the latest
+                // response. Use the latter so repeated snapshots are never double-counted.
+                "event_msg" when string.Equals(ReadString(payload, "type"), "token_count",
+                                     StringComparison.OrdinalIgnoreCase) &&
+                                 payload.TryGetProperty("info", out var info) &&
+                                 info.ValueKind == JsonValueKind.Object &&
+                                 info.TryGetProperty("last_token_usage", out var lastUsage) &&
+                                 lastUsage.ValueKind == JsonValueKind.Object =>
+                    ReadLegacyTokens(lastUsage, ref isLegacy),
+                _ => 0
+            };
             if (tokens <= 0) return;
+            if (type == "token_usage_record" && !cursor.HasTokenUsageRecords)
+            {
+                cursor.HasTokenUsageRecords = true;
+                cursor.Records.RemoveAll(item => item.IsLegacy);
+            }
+            if (isLegacy && cursor.HasTokenUsageRecords) return;
             var date = DateTimeOffset.TryParse(ReadString(root, "timestamp"), out var timestamp)
                 ? DateOnly.FromDateTime(timestamp.LocalDateTime)
                 : fallbackDate;
             cursor.Records.Add(new LocalUsageRecord(date,
-                cursor.ProjectPath ?? LocalizationService.L("未归属项目", "Unassigned"), tokens));
+                cursor.ProjectPath ?? LocalizationService.L("未归属项目", "Unassigned"), tokens, isLegacy));
         }
         catch (JsonException)
         {
             // An incomplete or malformed record does not invalidate the rest of the session.
         }
+    }
+
+    private static long ReadLegacyTokens(JsonElement lastUsage, ref bool isLegacy)
+    {
+        isLegacy = true;
+        return ReadLong(lastUsage, "total_tokens");
     }
 
     private static string? NormalizeProjectPath(string? path)

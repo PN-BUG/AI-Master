@@ -16,7 +16,7 @@ AIMaster is a standalone Windows monitor for Codex quota and task activity. It b
 
 - View total Codex quota, 7-day and 5-hour windows, usage percentages, and reset times.
 - Forecast the remaining weekly quota from Monday through Sunday using recent consumption.
-- Track local Codex token usage by week and estimate each project's share of the official weekly quota.
+- Track this device's weekly Codex tokens and estimate device/project quota attribution from same-period account token history, without assigning multi-device usage entirely to the current machine.
 - Configure warning and pause thresholds; optionally interrupt tasks visible to the current App Server connection.
 - Collapse cards, drag their headers between two columns, and resize them from the lower-right corner. Layout and sizes persist automatically.
 - View recent tasks with running, waiting, interrupted, and completed states.

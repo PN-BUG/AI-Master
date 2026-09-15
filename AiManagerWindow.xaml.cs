@@ -709,7 +709,7 @@ public partial class AiManagerWindow : Window
             .Where(item => item.WindowDurationMinutes is >= 6 * 24 * 60 and <= 8 * 24 * 60)
             .OrderBy(item => Math.Abs(item.WindowDurationMinutes - 7 * 24 * 60))
             .FirstOrDefault();
-        RenderLocalUsage(snapshot.LocalUsage, weeklyLimit?.UsedPercent);
+        RenderLocalUsage(snapshot.LocalUsage, snapshot.DailyUsage, weeklyLimit?.UsedPercent);
         FooterStatusText.Text = snapshot.LifetimeTokens is { } lifetime
             ? (LocalizationService.IsEnglish ? $"Lifetime {FormatTokens(lifetime)} tokens · From Codex App Server" : $"累计 {FormatTokens(lifetime)} tokens · 数据来自 Codex App Server")
             : L("数据来自 Codex App Server；认证由 Codex 管理。", "Data comes from Codex App Server; authentication is managed by Codex.");
@@ -896,25 +896,55 @@ public partial class AiManagerWindow : Window
         }
     }
 
-    private void RenderLocalUsage(AiLocalUsageSummary usage, double? weeklyUsedPercent)
+    private void RenderLocalUsage(AiLocalUsageSummary usage, IReadOnlyCollection<AiDailyUsage> accountDailyUsage,
+        double? weeklyUsedPercent)
     {
+        var estimate = EstimateLocalQuotaUsage(usage, accountDailyUsage, weeklyUsedPercent);
         LocalUsageTokensText.Text = FormatTokens(usage.TotalTokens);
         LocalUsageDetailText.Text = LocalizationService.IsEnglish
             ? $"{usage.SessionCount} local sessions · {usage.Projects.Count} projects"
             : $"{usage.SessionCount} 个本机会话 · {usage.Projects.Count} 个项目";
+        LocalUsageEstimateText.Text = estimate.AccountTokenSharePercent is { } accountShare
+            ? estimate.EstimatedQuotaPercent is { } quota
+                ? LocalizationService.IsEnglish
+                    ? $"~{accountShare:0.#}% of account tokens · ~{quota:0.##}% weekly quota"
+                    : $"约占账户 {accountShare:0.#}% Token · 约 {quota:0.##}% 周额度"
+                : LocalizationService.IsEnglish
+                    ? $"~{accountShare:0.#}% of account tokens · quota estimate unavailable"
+                    : $"约占账户 {accountShare:0.#}% Token · 周额度估算不可用"
+            : usage.TotalTokens > 0
+                ? LocalizationService.L("账户 Token 历史不足，仅显示本机原始 Token",
+                    "Account token history is incomplete; showing local raw tokens only")
+                : LocalizationService.L("本周暂无本机 Token", "No local tokens this week");
         ProjectUsageCountText.Text = usage.Projects.Count > 6
             ? (LocalizationService.IsEnglish ? $"Top 6 of {usage.Projects.Count}" : $"前 6 / 共 {usage.Projects.Count}")
             : (LocalizationService.IsEnglish ? $"{usage.Projects.Count} projects" : $"共 {usage.Projects.Count} 个项目");
-        var visibleProjects = BuildProjectQuotaUsage(usage, weeklyUsedPercent).Take(6).ToList();
+        var visibleProjects = BuildProjectQuotaUsage(usage, estimate.EstimatedQuotaPercent).Take(6).ToList();
         ProjectUsageItems.ItemsSource = visibleProjects;
         ProjectUsageItems.Visibility = visibleProjects.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         LocalUsageEmptyText.Visibility = visibleProjects.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    internal static IReadOnlyList<AiProjectUsage> BuildProjectQuotaUsage(
-        AiLocalUsageSummary usage, double? weeklyUsedPercent)
+    internal static AiLocalQuotaEstimate EstimateLocalQuotaUsage(
+        AiLocalUsageSummary usage, IEnumerable<AiDailyUsage> accountDailyUsage, double? weeklyUsedPercent)
     {
-        var normalizedWeeklyUsage = weeklyUsedPercent is { } value
+        var accountTokens = accountDailyUsage
+            .Where(item => item.Date >= usage.PeriodStart && item.Date <= usage.PeriodEnd)
+            .Sum(item => item.Tokens);
+        if (accountTokens <= 0 || usage.TotalTokens < 0 || usage.TotalTokens > accountTokens)
+            return new AiLocalQuotaEstimate(accountTokens, null, null);
+
+        var accountShare = usage.TotalTokens * 100d / accountTokens;
+        var quota = weeklyUsedPercent is { } value
+            ? Math.Clamp(value, 0, 100) * accountShare / 100d
+            : (double?)null;
+        return new AiLocalQuotaEstimate(accountTokens, accountShare, quota);
+    }
+
+    internal static IReadOnlyList<AiProjectUsage> BuildProjectQuotaUsage(
+        AiLocalUsageSummary usage, double? estimatedLocalQuotaPercent)
+    {
+        var normalizedLocalQuota = estimatedLocalQuotaPercent is { } value
             ? Math.Clamp(value, 0, 100)
             : (double?)null;
         return usage.Projects.Select(item => new AiProjectUsage
@@ -924,7 +954,7 @@ public partial class AiManagerWindow : Window
             Tokens = item.Tokens,
             SharePercent = item.SharePercent,
             SessionCount = item.SessionCount,
-            WeeklyQuotaPercent = normalizedWeeklyUsage * item.SharePercent / 100d
+            WeeklyQuotaPercent = normalizedLocalQuota * item.SharePercent / 100d
         }).ToList();
     }
 

@@ -13,7 +13,7 @@ The dashboard contains seven card types:
 3. **Quota windows** lists the weekly and short windows returned by the account.
 4. **Usage forecast** charts estimated and projected weekly quota remaining, plus the last seven days of usage.
 5. **Recent tasks** lists running, waiting, interrupted, paused, and completed tasks.
-6. **Local usage** totals this week's local tokens and estimates weekly-quota attribution by project.
+6. **Local usage** totals this device's weekly tokens and estimates device/project quota attribution from the ratio of local tokens to same-period account tokens; when account history is incomplete, only local tokens are shown.
 7. **Guard policy** configures warning and pause thresholds, automatic pausing, and floating-window text size.
 
 Select **Sync now** to reconnect to Codex and refresh all data.

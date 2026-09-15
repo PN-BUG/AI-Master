@@ -128,10 +128,17 @@ public sealed class AiProjectUsage
 
 public sealed class AiLocalUsageSummary
 {
+    public DateOnly PeriodStart { get; init; }
+    public DateOnly PeriodEnd { get; init; }
     public long TotalTokens { get; init; }
     public int SessionCount { get; init; }
     public List<AiProjectUsage> Projects { get; init; } = new();
 }
+
+public sealed record AiLocalQuotaEstimate(
+    long AccountTokens,
+    double? AccountTokenSharePercent,
+    double? EstimatedQuotaPercent);
 
 public sealed class AiThreadSummary
 {

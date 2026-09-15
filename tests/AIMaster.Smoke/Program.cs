@@ -373,6 +373,7 @@ internal static partial class Program
         var timestamp = DateTimeOffset.Now.ToString("O");
         var alpha = Path.Combine(root, "alpha.jsonl");
         var beta = Path.Combine(root, "beta.jsonl");
+        var gamma = Path.Combine(root, "gamma.jsonl");
         File.WriteAllLines(alpha,
         [
             $"{{\"timestamp\":\"{timestamp}\",\"type\":\"session_meta\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Alpha\"}}}}",
@@ -382,23 +383,30 @@ internal static partial class Program
         File.WriteAllLines(beta,
         [
             $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Beta\"}}}}",
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":4000}}}}}}"
+            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":4000}}}}}}",
+            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":9000}},\"last_token_usage\":{{\"total_tokens\":500}}}}}}}}"
+        ]);
+        File.WriteAllLines(gamma,
+        [
+            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Gamma\"}}}}",
+            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":500}},\"last_token_usage\":{{\"total_tokens\":500}}}}}}}}"
         ]);
         try
         {
             var service = new AiManagerService();
             var today = DateOnly.FromDateTime(DateTime.Now);
             var first = service.ReadLocalUsageSummary(root, today);
-            Check(first.TotalTokens == 7000 && first.SessionCount == 2 && first.Projects.Count == 2 &&
-                  first.Projects[0].ProjectName == "Beta" && first.Projects[0].Tokens == 4000,
-                "local usage sums response tokens and groups them by project directory");
+            Check(first.TotalTokens == 7500 && first.SessionCount == 3 && first.Projects.Count == 3 &&
+                  first.Projects[0].ProjectName == "Beta" && first.Projects[0].Tokens == 4000 &&
+                  first.Projects.Single(item => item.ProjectName == "Gamma").Tokens == 500,
+                "local usage prefers response records, falls back to legacy increments, and groups by project directory");
 
             File.AppendAllLines(beta,
             [
                 $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":1000}}}}}}"
             ]);
             var second = service.ReadLocalUsageSummary(root, today);
-            Check(second.TotalTokens == 8000 && second.Projects.Single(item => item.ProjectName == "Beta").Tokens == 5000,
+            Check(second.TotalTokens == 8500 && second.Projects.Single(item => item.ProjectName == "Beta").Tokens == 5000,
                 "local usage incrementally reads appended token records without double counting");
             service.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
@@ -412,6 +420,8 @@ internal static partial class Program
     {
         var usage = new AiLocalUsageSummary
         {
+            PeriodStart = new DateOnly(2026, 9, 14),
+            PeriodEnd = new DateOnly(2026, 9, 20),
             TotalTokens = 10_000,
             Projects =
             [
@@ -427,10 +437,25 @@ internal static partial class Program
                 }
             ]
         };
-        var projects = AiManagerWindow.BuildProjectQuotaUsage(usage, 40);
-        Check(Math.Abs(projects[0].WeeklyQuotaPercent!.Value - 10) < 0.001 &&
-              Math.Abs(projects[1].WeeklyQuotaPercent!.Value - 30) < 0.001,
-            "project usage attributes the official weekly quota by local token share");
+        var accountUsage = new[]
+        {
+            new AiDailyUsage { Date = new DateOnly(2026, 9, 14), Tokens = 12_000 },
+            new AiDailyUsage { Date = new DateOnly(2026, 9, 15), Tokens = 28_000 },
+            new AiDailyUsage { Date = new DateOnly(2026, 9, 13), Tokens = 99_000 }
+        };
+        var estimate = AiManagerWindow.EstimateLocalQuotaUsage(usage, accountUsage, 40);
+        var projects = AiManagerWindow.BuildProjectQuotaUsage(usage, estimate.EstimatedQuotaPercent);
+        Check(estimate.AccountTokens == 40_000 &&
+              Math.Abs(estimate.AccountTokenSharePercent!.Value - 25) < 0.001 &&
+              Math.Abs(estimate.EstimatedQuotaPercent!.Value - 10) < 0.001 &&
+              Math.Abs(projects[0].WeeklyQuotaPercent!.Value - 2.5) < 0.001 &&
+              Math.Abs(projects[1].WeeklyQuotaPercent!.Value - 7.5) < 0.001,
+            "local quota attribution first removes other devices, then distributes the device estimate by project");
+
+        var incomplete = AiManagerWindow.EstimateLocalQuotaUsage(usage,
+            [new AiDailyUsage { Date = new DateOnly(2026, 9, 14), Tokens = 5_000 }], 40);
+        Check(incomplete.AccountTokenSharePercent is null && incomplete.EstimatedQuotaPercent is null,
+            "incomplete account history never fabricates a per-device quota estimate");
     }
 
     [GeneratedRegex("[\\u3400-\\u9FFF]")]

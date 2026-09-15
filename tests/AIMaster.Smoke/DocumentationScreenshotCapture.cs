@@ -86,7 +86,7 @@ internal static class DocumentationScreenshotCapture
                 .Select(index => new AiDailyUsage
                 {
                     Date = today.AddDays(index - 6),
-                    Tokens = dailyTokens[index]
+                    Tokens = dailyTokens[index] * 2
                 }).ToList(),
             Threads =
             [
@@ -108,6 +108,8 @@ internal static class DocumentationScreenshotCapture
             ],
             LocalUsage = new AiLocalUsageSummary
             {
+                PeriodStart = today.AddDays(-6),
+                PeriodEnd = today,
                 TotalTokens = 3_765_000,
                 SessionCount = 18,
                 Projects =
