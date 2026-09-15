@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -27,6 +28,7 @@ public partial class AiManagerWindow : Window
     private UpdateCheckResult? _availableUpdate;
     private IReadOnlyList<AiRemainingForecastPoint> _weeklyRemainingForecast =
         Array.Empty<AiRemainingForecastPoint>();
+    private IReadOnlyList<AiHourlyUsage> _todayHourlyUsage = Array.Empty<AiHourlyUsage>();
     private readonly Dictionary<string, DashboardCardState> _dashboardCards =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _collapsedDashboardCards =
@@ -41,8 +43,8 @@ public partial class AiManagerWindow : Window
 
     private static readonly string[] DefaultDashboardLayout =
     [
-        "left:quota", "left:limits", "left:threads", "left:localUsage",
-        "right:guard", "right:forecast", "right:settings"
+        "left:quota", "left:limits", "left:threads", "left:localUsage", "left:dailyUsage",
+        "right:guard", "right:forecast", "right:settings", "right:sharedUsage"
     ];
 
     private sealed record DashboardCardState(
@@ -68,6 +70,7 @@ public partial class AiManagerWindow : Window
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         LoadPolicyControls();
+        LoadSharedUsageControls();
         _timer.Interval = TimeSpan.FromSeconds(Math.Clamp(_service.Settings.RefreshSeconds, 30, 600));
         _timer.Start();
         _ = CheckForUpdatesAsync(showUpToDate: false);
@@ -233,7 +236,9 @@ public partial class AiManagerWindow : Window
             ("forecast", "消耗预测 / 本周", ForecastCard),
             ("threads", "最近任务", ThreadsCard),
             ("settings", "保护策略", SettingsCard),
-            ("localUsage", "本机消耗", LocalUsageCard)
+            ("localUsage", "本机消耗", LocalUsageCard),
+            ("dailyUsage", "当日消耗 / 时段", DailyUsageCard),
+            ("sharedUsage", "共享统计", SharedUsageCard)
         };
 
         foreach (var (id, title, card) in definitions)
@@ -710,6 +715,7 @@ public partial class AiManagerWindow : Window
             .OrderBy(item => Math.Abs(item.WindowDurationMinutes - 7 * 24 * 60))
             .FirstOrDefault();
         RenderLocalUsage(snapshot.LocalUsage, snapshot.DailyUsage, weeklyLimit?.UsedPercent);
+        RenderSharedUsage(snapshot.SharedUsage);
         FooterStatusText.Text = snapshot.LifetimeTokens is { } lifetime
             ? (LocalizationService.IsEnglish ? $"Lifetime {FormatTokens(lifetime)} tokens · From Codex App Server" : $"累计 {FormatTokens(lifetime)} tokens · 数据来自 Codex App Server")
             : L("数据来自 Codex App Server；认证由 Codex 管理。", "Data comes from Codex App Server; authentication is managed by Codex.");
@@ -862,6 +868,109 @@ public partial class AiManagerWindow : Window
         AutoPauseCheck.IsChecked = _service.Settings.AutoPause;
     }
 
+    private void LoadSharedUsageControls()
+    {
+        SharedUsageEnabledCheck.IsChecked = _service.Settings.SharedUsageEnabled;
+        SharedUsageServerUrlBox.Text = _service.Settings.SharedUsageServerUrl;
+        SharedUsageDeviceNameBox.Text = _service.Settings.SharedUsageDeviceName;
+        SharedUsageSyncKeyBox.Password = _service.Settings.SharedUsageSyncKey;
+    }
+
+    private void GenerateSharedSyncKey_Click(object sender, RoutedEventArgs e)
+    {
+        SharedUsageSyncKeyBox.Password = LocalSecretProtection.GenerateSyncKey();
+        SharedUsageStatusText.Text = L(
+            "已生成新密钥；请保存并复制到其他设备。",
+            "A new key was generated; save it and copy it to your other devices.");
+    }
+
+    private void CopySharedSyncKey_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(SharedUsageSyncKeyBox.Password)) return;
+        try
+        {
+            Clipboard.SetText(SharedUsageSyncKeyBox.Password);
+            SharedUsageStatusText.Text = L("同步密钥已复制", "Sync key copied");
+        }
+        catch (ExternalException)
+        {
+            SharedUsageStatusText.Text = L("剪贴板正忙，请稍后重试", "The clipboard is busy; try again shortly");
+        }
+    }
+
+    private async void SaveSharedUsage_Click(object sender, RoutedEventArgs e)
+    {
+        var enabled = SharedUsageEnabledCheck.IsChecked == true;
+        var serverUrl = SharedUsageServerUrlBox.Text.Trim();
+        var deviceName = SharedUsageDeviceNameBox.Text.Trim();
+        var syncKey = SharedUsageSyncKeyBox.Password.Trim();
+        if (enabled && (!SharedUsageClient.TryBuildSyncEndpoint(serverUrl, out _, out var error) ||
+                        string.IsNullOrWhiteSpace(deviceName) || syncKey.Length is < 32 or > 512))
+        {
+            if (string.IsNullOrWhiteSpace(error))
+                error = string.IsNullOrWhiteSpace(deviceName)
+                    ? L("设备名称不能为空", "The device name is required")
+                    : L("同步密钥需要 32–512 个字符", "The sync key must contain 32–512 characters");
+            WpfMessageBox.Show(this, error, L("共享设置无效", "Invalid sharing settings"),
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        SharedUsageSaveButton.IsEnabled = false;
+        try
+        {
+            var settings = _service.ReloadSettings();
+            settings.SharedUsageEnabled = enabled;
+            settings.SharedUsageServerUrl = serverUrl;
+            settings.SharedUsageDeviceName = deviceName;
+            settings.SharedUsageSyncKey = syncKey;
+            _service.SaveSettings(settings);
+            if (!enabled)
+            {
+                RenderSharedUsage(new AiSharedUsageSummary { Enabled = false });
+                SharedUsageStatusText.Text = L("共享统计已关闭", "Shared usage is disabled");
+                return;
+            }
+
+            SharedUsageStatusText.Text = L("正在同步设备数据…", "Syncing device usage…");
+            if (_service.LastSnapshot is null)
+            {
+                await RefreshAsync(showErrors: true);
+                return;
+            }
+            var localUsage = _service.LastSnapshot.LocalUsage;
+            var sharedUsage = await _service.SyncSharedUsageAsync(localUsage, _lifetime.Token);
+            RenderSharedUsage(sharedUsage);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        finally
+        {
+            SharedUsageSaveButton.IsEnabled = true;
+        }
+    }
+
+    private void RenderSharedUsage(AiSharedUsageSummary usage)
+    {
+        SharedDeviceItems.ItemsSource = null;
+        SharedDeviceItems.ItemsSource = usage.Devices;
+        SharedDeviceItems.Visibility = usage.Devices.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        SharedUsageEmptyText.Visibility = usage.Devices.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        SharedUsageSummaryText.Text = usage.Devices.Count == 0
+            ? string.Empty
+            : LocalizationService.IsEnglish
+                ? $"{usage.Devices.Count} devices · {FormatTokens(usage.TotalTokens)} tokens"
+                : $"{usage.Devices.Count} 台设备 · {FormatTokens(usage.TotalTokens)} Token";
+        SharedUsageStatusText.Text = !usage.Enabled
+            ? L("启用后可查看使用同一同步密钥的设备", "Enable sharing to see devices using the same sync key")
+            : !string.IsNullOrWhiteSpace(usage.Error)
+                ? (LocalizationService.IsEnglish ? $"Sync failed: {usage.Error}" : $"同步失败：{usage.Error}")
+                : usage.SyncedAt is { } syncedAt
+                    ? (LocalizationService.IsEnglish
+                        ? $"Synced {syncedAt.LocalDateTime:HH:mm:ss}"
+                        : $"已同步 {syncedAt.LocalDateTime:HH:mm:ss}")
+                    : L("等待首次同步", "Waiting for first sync");
+    }
+
     private void RenderUsageBars(IEnumerable<AiDailyUsage> usage)
     {
         UsageBarsPanel.Children.Clear();
@@ -902,6 +1011,16 @@ public partial class AiManagerWindow : Window
         var estimate = EstimateLocalQuotaUsage(usage, accountDailyUsage, weeklyUsedPercent);
         LocalUsageTokensText.Text = FormatTokens(usage.TotalTokens);
         LocalUsageModelText.Text = usage.MostUsedModel ?? LocalizationService.L("未知", "Unknown");
+        DailyUsageTokensText.Text = FormatTokens(usage.TodayTokens);
+        var todayQuotaPercent = EstimateTodayWeeklyQuotaPercent(usage, estimate);
+        DailyUsageShareText.Text = todayQuotaPercent is { } percent
+            ? LocalizationService.IsEnglish
+                ? $"~{percent:0.##}% of total weekly quota"
+                : $"约占周总额度 {percent:0.##}%"
+            : LocalizationService.L("周总额度占比暂不可用", "Weekly quota share unavailable");
+        _todayHourlyUsage = usage.TodayHourlyUsage;
+        DailyUsageEmptyText.Visibility = usage.TodayTokens > 0 ? Visibility.Collapsed : Visibility.Visible;
+        RenderTodayUsageChart();
         LocalUsageDetailText.Text = LocalizationService.IsEnglish
             ? $"{usage.SessionCount} local sessions · {usage.Projects.Count} projects"
             : $"{usage.SessionCount} 个本机会话 · {usage.Projects.Count} 个项目";
@@ -926,6 +1045,87 @@ public partial class AiManagerWindow : Window
         LocalUsageEmptyText.Visibility = visibleProjects.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    private void DailyUsageCanvas_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        RenderTodayUsageChart();
+
+    private void RenderTodayUsageChart()
+    {
+        DailyUsageCanvas.Children.Clear();
+        var width = DailyUsageCanvas.ActualWidth;
+        var height = DailyUsageCanvas.ActualHeight;
+        if (width < 120 || height < 70 || _todayHourlyUsage.Count == 0) return;
+        var byHour = _todayHourlyUsage.ToDictionary(item => item.Hour, item => item.Tokens);
+        var maximum = Math.Max(1, byHour.Values.DefaultIfEmpty().Max());
+        const double left = 34;
+        const double top = 8;
+        const double right = 8;
+        const double bottom = 20;
+        var plotWidth = width - left - right;
+        var plotHeight = height - top - bottom;
+
+        foreach (var fraction in new[] { 0d, 0.5d, 1d })
+        {
+            var y = top + plotHeight * (1 - fraction);
+            DailyUsageCanvas.Children.Add(new Line
+            {
+                X1 = left, X2 = left + plotWidth, Y1 = y, Y2 = y,
+                Stroke = Brush("#293640"), StrokeThickness = 1
+            });
+        }
+
+        AddCanvasText(DailyUsageCanvas, FormatTokens(maximum), 0, top - 5, "#71838A", 8);
+        AddCanvasText(DailyUsageCanvas, "0", 18, top + plotHeight - 6, "#71838A", 8);
+        var points = Enumerable.Range(0, 24)
+            .Select(hour => new Point(
+                left + plotWidth * hour / 23d,
+                top + plotHeight * (1 - byHour.GetValueOrDefault(hour) / (double)maximum)))
+            .ToList();
+        DailyUsageCanvas.Children.Add(new Polyline
+        {
+            Points = new PointCollection(points),
+            Stroke = Brush("#22C58B"),
+            StrokeThickness = 2,
+            StrokeLineJoin = PenLineJoin.Round
+        });
+
+        foreach (var hour in new[] { 0, 6, 12, 18, 23 })
+            AddCanvasText(DailyUsageCanvas, $"{hour:00}", points[hour].X - 6,
+                height - bottom + 4, "#71838A", 8);
+        foreach (var item in _todayHourlyUsage.Where(item => item.Tokens > 0))
+        {
+            var point = points[Math.Clamp(item.Hour, 0, 23)];
+            var marker = new Ellipse
+            {
+                Width = 6,
+                Height = 6,
+                Fill = Brush("#22C58B"),
+                Stroke = Brush("#F1F5F2"),
+                StrokeThickness = 1,
+                ToolTip = LocalizationService.IsEnglish
+                    ? $"{item.Hour:00}:00–{item.Hour:00}:59 · {FormatTokens(item.Tokens)} tokens"
+                    : $"{item.Hour:00}:00–{item.Hour:00}:59 · {FormatTokens(item.Tokens)} Token"
+            };
+            Canvas.SetLeft(marker, point.X - 3);
+            Canvas.SetTop(marker, point.Y - 3);
+            DailyUsageCanvas.Children.Add(marker);
+        }
+    }
+
+    private static void AddCanvasText(
+        Canvas canvas, string text, double left, double top, string color, double fontSize)
+    {
+        var label = new TextBlock
+        {
+            Text = text,
+            Foreground = Brush(color),
+            FontFamily = new FontFamily("Cascadia Mono"),
+            FontSize = fontSize
+        };
+        Canvas.SetLeft(label, left);
+        Canvas.SetTop(label, top);
+        canvas.Children.Add(label);
+    }
+
     internal static AiLocalQuotaEstimate EstimateLocalQuotaUsage(
         AiLocalUsageSummary usage, IEnumerable<AiDailyUsage> accountDailyUsage, double? weeklyUsedPercent)
     {
@@ -940,6 +1140,15 @@ public partial class AiManagerWindow : Window
             ? Math.Clamp(value, 0, 100) * accountShare / 100d
             : (double?)null;
         return new AiLocalQuotaEstimate(accountTokens, accountShare, quota);
+    }
+
+    internal static double? EstimateTodayWeeklyQuotaPercent(
+        AiLocalUsageSummary usage, AiLocalQuotaEstimate estimate)
+    {
+        if (usage.TotalTokens <= 0 || usage.TodayTokens < 0 || usage.TodayTokens > usage.TotalTokens ||
+            estimate.EstimatedQuotaPercent is not { } localQuotaPercent)
+            return null;
+        return Math.Clamp(localQuotaPercent, 0, 100) * usage.TodayTokens / usage.TotalTokens;
     }
 
     internal static IReadOnlyList<AiProjectUsage> BuildProjectQuotaUsage(

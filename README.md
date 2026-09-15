@@ -19,6 +19,8 @@ AIMaster 是一个可独立运行的 Windows Codex 用量与任务监控工具�
 - 设置预警线和暂停线，越线时提醒并暂停当前连接可见的任务。
 - 用折线图展示本周一至周日的剩余额度估算与未来预测。
 - 汇总本周本机 Codex Token 消耗和按 Token 加权的常用模型；结合账号同周期 Token 历史估算当前设备与各项目的周额度占比，并为每个项目显示常用模型，避免把多设备总用量全部归到本机。
+- 显示今日的本机 Token、约占账号周总额度的比例，以及 0–23 时每小时消耗折线图。
+- 可选启用涡流网共享统计，将多台设备按同步密钥归组并显示各设备 Token 占比、常用模型、会话数和最后同步时间。
 - 支持折叠仪表盘卡片、拖动标题栏调整双列布局，以及拖动右下角自由调整卡片宽高；布局和尺寸会自动保存。
 - 显示最近执行的最多 3 个任务，包括进行中、暂停/中断和已完成状态。
 - 任务名称可选择显示 Codex 对话标题或该任务最后发送的用户内容。
@@ -69,6 +71,8 @@ AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“�
 ## 数据来源与隐私
 
 AIMaster 启动本机的 `codex app-server --listen stdio://` 并使用 Codex 自己维护的登录状态。工具不会读取、复制或保存登录令牌。
+
+共享统计默认关闭。启用后仅向 `https://www.woliu.top/api/v1/aimaster/sync` 上传设备周汇总，不上传 Codex 凭证、任务内容、项目名称或路径；同步密钥使用 Windows DPAPI 加密后保存在本机。
 
 当 App Server 暂时不可用时，任务列表会从 `%USERPROFILE%\.codex\sessions` 中的本地会话记录降级读取。设置保存在 `%LOCALAPPDATA%\AIMaster\settings.json`。第一次启动会自动迁移旧版 `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` 设置。
 

@@ -63,6 +63,24 @@ public sealed class AiManagerSettings
     [JsonPropertyName("language")]
     public string? Language { get; set; }
 
+    [JsonPropertyName("sharedUsageEnabled")]
+    public bool SharedUsageEnabled { get; set; }
+
+    [JsonPropertyName("sharedUsageServerUrl")]
+    public string SharedUsageServerUrl { get; set; } = "https://www.woliu.top";
+
+    [JsonPropertyName("sharedUsageSyncKeyProtected")]
+    public string SharedUsageSyncKeyProtected { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string SharedUsageSyncKey { get; set; } = string.Empty;
+
+    [JsonPropertyName("sharedUsageDeviceId")]
+    public string SharedUsageDeviceId { get; set; } = Guid.NewGuid().ToString("D");
+
+    [JsonPropertyName("sharedUsageDeviceName")]
+    public string SharedUsageDeviceName { get; set; } = Environment.MachineName;
+
 }
 
 public sealed class AiDashboardCardSize
@@ -97,6 +115,12 @@ public sealed class AiLimitWindow
 public sealed class AiDailyUsage
 {
     public DateOnly Date { get; init; }
+    public long Tokens { get; init; }
+}
+
+public sealed class AiHourlyUsage
+{
+    public int Hour { get; init; }
     public long Tokens { get; init; }
 }
 
@@ -136,9 +160,51 @@ public sealed class AiLocalUsageSummary
     public DateOnly PeriodStart { get; init; }
     public DateOnly PeriodEnd { get; init; }
     public long TotalTokens { get; init; }
+    public long TodayTokens { get; init; }
     public int SessionCount { get; init; }
     public string? MostUsedModel { get; init; }
+    public List<AiHourlyUsage> TodayHourlyUsage { get; init; } = new();
     public List<AiProjectUsage> Projects { get; init; } = new();
+}
+
+public sealed class AiDeviceUsage
+{
+    public string DeviceId { get; init; } = string.Empty;
+    public string DeviceName { get; init; } = string.Empty;
+    public long TotalTokens { get; init; }
+    public double TokenSharePercent { get; init; }
+    public int SessionCount { get; init; }
+    public string? MostUsedModel { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }
+    public bool IsCurrentDevice { get; init; }
+    public string TokensText => FormatTokens(TotalTokens);
+    public string ShareText => $"{TokenSharePercent:0.##}%";
+    public string CurrentDeviceText => IsCurrentDevice
+        ? LocalizationService.L("当前设备", "This device")
+        : string.Empty;
+    public string ModelText => LocalizationService.IsEnglish
+        ? $"Top model · {MostUsedModel ?? "Unknown"}"
+        : $"常用模型 · {MostUsedModel ?? "未知"}";
+    public string DetailText => LocalizationService.IsEnglish
+        ? $"{SessionCount} sessions · {LocalizationService.FormatUpdatedTime(UpdatedAt)}"
+        : $"{SessionCount} 个会话 · {LocalizationService.FormatUpdatedTime(UpdatedAt)}";
+
+    private static string FormatTokens(long tokens) => tokens switch
+    {
+        >= 1_000_000_000 => $"{tokens / 1_000_000_000d:0.##}B",
+        >= 1_000_000 => $"{tokens / 1_000_000d:0.##}M",
+        >= 1_000 => $"{tokens / 1_000d:0.#}K",
+        _ => $"{tokens}"
+    };
+}
+
+public sealed class AiSharedUsageSummary
+{
+    public bool Enabled { get; init; }
+    public string? Error { get; init; }
+    public DateTimeOffset? SyncedAt { get; init; }
+    public List<AiDeviceUsage> Devices { get; init; } = new();
+    public long TotalTokens { get; init; }
 }
 
 public sealed record AiLocalQuotaEstimate(
@@ -171,6 +237,7 @@ public sealed class AiManagerSnapshot
     public long? LifetimeTokens { get; init; }
     public int ResetCredits { get; init; }
     public AiLocalUsageSummary LocalUsage { get; init; } = new();
+    public AiSharedUsageSummary SharedUsage { get; init; } = new();
     public DateTimeOffset CapturedAt { get; init; } = DateTimeOffset.Now;
 
     public AiLimitWindow? MainLimit => Limits

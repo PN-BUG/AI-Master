@@ -9,6 +9,7 @@ namespace AIMaster.Services;
 internal sealed class AiManagerService : IAsyncDisposable
 {
     private readonly CodexAppServerClient _client = new();
+    private readonly SharedUsageClient _sharedUsageClient = new();
     private readonly string _settingsPath;
     private readonly ConcurrentDictionary<string, RolloutCursor> _rolloutCursors =
         new(StringComparer.OrdinalIgnoreCase);
@@ -46,6 +47,7 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     private sealed record LocalUsageRecord(
         DateOnly Date,
+        int Hour,
         string ProjectPath,
         string? ModelName,
         long Tokens,
@@ -80,6 +82,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         var usage = await usageTask;
         var threads = await threadsTask;
         var localData = await localDataTask;
+        var sharedUsage = await _sharedUsageClient.SyncAsync(Settings, localData.Usage, cancellationToken);
 
         var serverThreads = threads is { } threadValue ? ParseThreads(threadValue) : new();
         var mergedThreads = MergeFloatingTasks(serverThreads, localData.Tasks)
@@ -95,6 +98,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             Threads = mergedThreads,
             ResetCredits = ParseResetCredits(rate),
             LocalUsage = localData.Usage,
+            SharedUsage = sharedUsage,
             CapturedAt = DateTimeOffset.Now
         };
         return LastSnapshot;
@@ -364,6 +368,7 @@ internal sealed class AiManagerService : IAsyncDisposable
     public void SaveSettings(AiManagerSettings settings)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+        settings.SharedUsageSyncKeyProtected = LocalSecretProtection.Protect(settings.SharedUsageSyncKey);
         File.WriteAllText(_settingsPath, JsonSerializer.Serialize(settings));
         Settings = settings;
     }
@@ -373,6 +378,11 @@ internal sealed class AiManagerService : IAsyncDisposable
         Settings = LoadSettings();
         return Settings;
     }
+
+    public Task<AiSharedUsageSummary> SyncSharedUsageAsync(
+        AiLocalUsageSummary localUsage,
+        CancellationToken cancellationToken = default) =>
+        _sharedUsageClient.SyncAsync(Settings, localUsage, cancellationToken);
 
     public AiForecast BuildForecast(AiManagerSnapshot snapshot)
     {
@@ -451,6 +461,8 @@ internal sealed class AiManagerService : IAsyncDisposable
         }
 
         var total = sessionRecords.Sum(item => item.Record.Tokens);
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var todayRecords = sessionRecords.Where(item => item.Record.Date == today).ToList();
         var projects = sessionRecords
             .GroupBy(item => item.Record.ProjectPath, StringComparer.OrdinalIgnoreCase)
             .Select(group => new AiProjectUsage
@@ -470,9 +482,18 @@ internal sealed class AiManagerService : IAsyncDisposable
             PeriodStart = weekStart,
             PeriodEnd = weekEnd,
             TotalTokens = total,
+            TodayTokens = todayRecords.Sum(item => item.Record.Tokens),
             SessionCount = sessionRecords.Select(item => item.SessionPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
             MostUsedModel = SelectMostUsedModel(sessionRecords.Select(item => item.Record)),
+            TodayHourlyUsage = Enumerable.Range(0, 24)
+                .Select(hour => new AiHourlyUsage
+                {
+                    Hour = hour,
+                    Tokens = todayRecords.Where(item => item.Record.Hour == hour)
+                        .Sum(item => item.Record.Tokens)
+                })
+                .ToList(),
             Projects = projects
         };
     }
@@ -556,10 +577,11 @@ internal sealed class AiManagerService : IAsyncDisposable
                 cursor.Records.RemoveAll(item => item.IsLegacy);
             }
             if (isLegacy && cursor.HasTokenUsageRecords) return;
-            var date = DateTimeOffset.TryParse(ReadString(root, "timestamp"), out var timestamp)
-                ? DateOnly.FromDateTime(timestamp.LocalDateTime)
-                : fallbackDate;
-            cursor.Records.Add(new LocalUsageRecord(date,
+            var hasTimestamp = DateTimeOffset.TryParse(ReadString(root, "timestamp"), out var timestamp);
+            var localDateTime = hasTimestamp
+                ? timestamp.LocalDateTime
+                : fallbackDate.ToDateTime(TimeOnly.MinValue);
+            cursor.Records.Add(new LocalUsageRecord(DateOnly.FromDateTime(localDateTime), localDateTime.Hour,
                 cursor.ProjectPath ?? LocalizationService.L("未归属项目", "Unassigned"),
                 cursor.ModelName, tokens, isLegacy));
         }
@@ -682,6 +704,16 @@ internal sealed class AiManagerService : IAsyncDisposable
                 ? new Dictionary<string, AiDashboardCardSize>(StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, AiDashboardCardSize>(settings.DashboardCardSizes,
                     StringComparer.OrdinalIgnoreCase);
+            settings.SharedUsageServerUrl = string.IsNullOrWhiteSpace(settings.SharedUsageServerUrl)
+                ? "https://www.woliu.top"
+                : settings.SharedUsageServerUrl.Trim();
+            settings.SharedUsageSyncKey = LocalSecretProtection.Unprotect(settings.SharedUsageSyncKeyProtected);
+            settings.SharedUsageDeviceId = Guid.TryParse(settings.SharedUsageDeviceId, out var deviceId)
+                ? deviceId.ToString("D")
+                : Guid.NewGuid().ToString("D");
+            settings.SharedUsageDeviceName = string.IsNullOrWhiteSpace(settings.SharedUsageDeviceName)
+                ? Environment.MachineName
+                : settings.SharedUsageDeviceName.Trim();
             return settings;
         }
         catch
@@ -1094,6 +1126,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         _rolloutCursors.Clear();
         foreach (var cursor in _localUsageCursors.Values) cursor.PendingLine.Dispose();
         _localUsageCursors.Clear();
+        _sharedUsageClient.Dispose();
         await _client.DisposeAsync();
     }
 }

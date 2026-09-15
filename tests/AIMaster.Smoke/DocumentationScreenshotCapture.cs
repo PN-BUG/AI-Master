@@ -30,11 +30,18 @@ internal static class DocumentationScreenshotCapture
         var managerSnapshot = CreateManagerSnapshot(now, LocalizationService.IsEnglish);
         var main = new AiManagerWindow();
         ResetDashboardLayout(main);
+        ((System.Windows.Controls.CheckBox)main.FindName("SharedUsageEnabledCheck")).IsChecked = true;
+        ((System.Windows.Controls.TextBox)main.FindName("SharedUsageDeviceNameBox")).Text =
+            LocalizationService.IsEnglish ? "Office PC" : "办公室电脑";
+        ((System.Windows.Controls.PasswordBox)main.FindName("SharedUsageSyncKeyBox")).Password =
+            "documentation-demo-sync-key-123456";
         Invoke(main, "RenderSnapshot", managerSnapshot);
         var mainContent = main.Content as FrameworkElement ?? main;
-        Arrange(mainContent, 1180, 960);
+        Arrange(mainContent, 1180, 1420);
         Invoke(main, "RenderRemainingForecastChart");
-        SavePng(mainContent, 1180, 960,
+        Invoke(main, "RenderTodayUsageChart");
+        Arrange(mainContent, 1180, 1420);
+        SavePng(mainContent, 1180, 1420,
             Path.Combine(outputDirectory, $"dashboard-{suffix}.png"));
 
         var floating = new AiFloatingWindow();
@@ -111,13 +118,45 @@ internal static class DocumentationScreenshotCapture
                 PeriodStart = today.AddDays(-6),
                 PeriodEnd = today,
                 TotalTokens = 3_765_000,
+                TodayTokens = 455_000,
                 SessionCount = 18,
                 MostUsedModel = "gpt-5.6-terra",
+                TodayHourlyUsage =
+                [
+                    new AiHourlyUsage { Hour = 8, Tokens = 45_000 },
+                    new AiHourlyUsage { Hour = 10, Tokens = 80_000 },
+                    new AiHourlyUsage { Hour = 13, Tokens = 120_000 },
+                    new AiHourlyUsage { Hour = 16, Tokens = 90_000 },
+                    new AiHourlyUsage { Hour = 19, Tokens = 120_000 }
+                ],
                 Projects =
                 [
                     new AiProjectUsage { ProjectName = "AIMaster", ProjectPath = @"C:\Demo\AIMaster", Tokens = 2_070_750, SharePercent = 55, SessionCount = 9, MostUsedModel = "gpt-5.6-terra" },
                     new AiProjectUsage { ProjectName = english ? "Documentation" : "文档站", ProjectPath = @"C:\Demo\Docs", Tokens = 1_129_500, SharePercent = 30, SessionCount = 5, MostUsedModel = "gpt-5.6-sol" },
                     new AiProjectUsage { ProjectName = english ? "Prototype" : "原型项目", ProjectPath = @"C:\Demo\Prototype", Tokens = 564_750, SharePercent = 15, SessionCount = 4, MostUsedModel = "gpt-5.5" }
+                ]
+            },
+            SharedUsage = new AiSharedUsageSummary
+            {
+                Enabled = true,
+                SyncedAt = now,
+                TotalTokens = 6_120_000,
+                Devices =
+                [
+                    new AiDeviceUsage
+                    {
+                        DeviceId = "8b38a721-400c-4d80-a344-17bfa725f542",
+                        DeviceName = english ? "Office PC" : "办公室电脑",
+                        TotalTokens = 3_765_000, TokenSharePercent = 61.52, SessionCount = 18,
+                        MostUsedModel = "gpt-5.6-terra", UpdatedAt = now, IsCurrentDevice = true
+                    },
+                    new AiDeviceUsage
+                    {
+                        DeviceId = "21f74732-d677-49df-a72e-2d46b8007f24",
+                        DeviceName = english ? "Home PC" : "家用电脑",
+                        TotalTokens = 2_355_000, TokenSharePercent = 38.48, SessionCount = 11,
+                        MostUsedModel = "gpt-5.6-sol", UpdatedAt = now.AddMinutes(-4)
+                    }
                 ]
             }
         };

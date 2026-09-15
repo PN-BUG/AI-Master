@@ -17,6 +17,8 @@ AIMaster is a standalone Windows monitor for Codex quota and task activity. It b
 - View total Codex quota, 7-day and 5-hour windows, usage percentages, and reset times.
 - Forecast the remaining weekly quota from Monday through Sunday using recent consumption.
 - Track this device's weekly Codex tokens and token-weighted top model, estimate device/project quota attribution from same-period account token history, and show each project's top model without assigning multi-device usage entirely to the current machine.
+- Show today's local tokens, their estimated share of the account's total weekly quota, and an hourly usage line chart from 00 through 23.
+- Optionally group multiple devices through Woliu shared usage and show each device's token share, top model, session count, and last sync time.
 - Configure warning and pause thresholds; optionally interrupt tasks visible to the current App Server connection.
 - Collapse cards, drag their headers between two columns, and resize them from the lower-right corner. Layout and sizes persist automatically.
 - View recent tasks with running, waiting, interrupted, and completed states.
@@ -63,6 +65,8 @@ Open it with **Floating monitor** in the main window:
 ## Data and privacy
 
 AIMaster starts the local `codex app-server --listen stdio://` process and uses the sign-in state maintained by Codex. It does not read, copy, or store login tokens.
+
+Shared usage is disabled by default. When enabled, only weekly device aggregates are sent to `https://www.woliu.top/api/v1/aimaster/sync`; Codex credentials, task content, project names, and paths are excluded. The sync key is encrypted locally with Windows DPAPI.
 
 When App Server data is unavailable, AIMaster falls back to local session records under `%USERPROFILE%\.codex\sessions` for the task list. Settings are stored in `%LOCALAPPDATA%\AIMaster\settings.json`. Existing `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` settings are migrated on first launch.
 

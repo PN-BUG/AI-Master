@@ -84,11 +84,14 @@ WPF 窗口
   -> AiManagerService
       -> CodexAppServerClient -> codex app-server（额度、模型、在线任务）
       -> 本地 JSONL 扫描       -> %USERPROFILE%\.codex\sessions（任务降级数据）
+      -> SharedUsageClient     -> https://www.woliu.top/api/v1/aimaster/sync（可选设备周汇总）
   -> AiManagerSnapshot / AiFloatingSnapshot
   -> 主面板与悬浮窗渲染
 ```
 
 App Server 请求使用独立超时；任务、模型或历史用量等可选请求失败时，不应阻止本地任务降级和已有额度信息显示。
+
+共享统计默认关闭。客户端只上传设备级周汇总，`X-AIMaster-Sync-Key` 使用 Windows DPAPI 加密保存在本机设置中；项目、任务与 Codex 登录数据不得进入共享请求。公网服务接口和 Supabase 持久化由 `woliu` 项目维护。
 
 应用使用 `OnExplicitShutdown`：主窗口的关闭事件只隐藏窗口，`App` 持有系统托盘图标并维持后台进程；只有托盘“退出”会关闭窗口、释放 App Server 与图标资源并调用 `Shutdown()`。
 
@@ -103,3 +106,4 @@ App Server 请求使用独立超时；任务、模型或历史用量等可选请
 5. 切换中英文，检查窗口尺寸和右键菜单。
 6. 运行 `build.ps1 -All`，确认两个发布目录和两个 ZIP 均已生成，且 ZIP 中包含 `AIMaster.exe` 和 `START-HERE.txt`。
 7. 运行文档截图命令，确认 `dashboard-zh/en.png` 和 `floating-zh/en.png` 与当前界面一致。
+8. 启用共享统计后，用同一同步密钥在两台测试设备上同步，确认设备数、Token 总计与占比正确；检查设置文件中不存在明文同步密钥。

@@ -146,7 +146,7 @@
         <ScrollViewer x:Name="DashboardScrollViewer" Grid.Row="2"
                       VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
             <Grid x:Name="DashboardGrid">
-                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.35*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="1*"/></Grid.ColumnDefinitions>
 
                 <Border x:Name="QuotaCard" Grid.Row="0" Grid.Column="0" Style="{StaticResource PanelCard}" MinHeight="168">
@@ -360,6 +360,111 @@
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </Grid>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="DailyUsageCard" Grid.Row="4" Grid.ColumnSpan="3" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="210">
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="当日消耗 / 时段" Style="{StaticResource Label}"/>
+                            <TextBlock x:Name="DailyUsageTokensText" Text="--" Foreground="{StaticResource Ink}"
+                                       FontFamily="Cascadia Mono" FontSize="31" FontWeight="SemiBold" Margin="0,14,0,0"/>
+                            <TextBlock Text="TOKEN / 今日" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
+                            <TextBlock x:Name="DailyUsageShareText" Text="周总额度占比暂不可用" Foreground="{StaticResource Signal}"
+                                       FontFamily="Cascadia Mono" FontSize="11" TextWrapping="Wrap" Margin="0,12,18,0"/>
+                            <TextBlock Text="按账号本周 Token 历史与周窗口已用比例估算，不是官方逐日账单。"
+                                       Foreground="#71838A" FontSize="10" TextWrapping="Wrap" Margin="0,9,18,0"/>
+                        </StackPanel>
+                        <Border Grid.Column="1" Background="{StaticResource Line}"/>
+                        <Grid Grid.Column="2" Margin="20,0,0,0">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Grid>
+                                <TextBlock Text="今日每小时消耗" Style="{StaticResource Label}"/>
+                                <TextBlock Text="00–23 时" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono"
+                                           FontSize="9" HorizontalAlignment="Right"/>
+                            </Grid>
+                            <Grid Grid.Row="1" Margin="0,10,0,0" MinHeight="120">
+                                <Canvas x:Name="DailyUsageCanvas" Height="120" ClipToBounds="True"
+                                        SizeChanged="DailyUsageCanvas_SizeChanged"/>
+                                <TextBlock x:Name="DailyUsageEmptyText" Text="今日暂无本机 Token" Foreground="{StaticResource Muted}"
+                                           VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                            </Grid>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="SharedUsageCard" Grid.Row="5" Grid.ColumnSpan="3" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="380">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <TextBlock Text="共享统计" Style="{StaticResource Label}"/>
+                            <TextBlock x:Name="SharedUsageSummaryText" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <TextBlock Grid.Row="1" Text="使用相同同步密钥的设备归为一组；不会上传 Codex 凭证、任务内容、项目名称或路径。"
+                                   Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,10"/>
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="78"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <CheckBox x:Name="SharedUsageEnabledCheck" Grid.ColumnSpan="2" Content="启用共享统计"
+                                      Foreground="{StaticResource Ink}"/>
+                            <TextBlock Grid.Row="1" Text="服务器地址" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
+                            <TextBox x:Name="SharedUsageServerUrlBox" Grid.Row="1" Grid.Column="1"
+                                     Text="https://www.woliu.top" Margin="0,9,0,0"/>
+                            <TextBlock Grid.Row="2" Text="设备名称" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
+                            <TextBox x:Name="SharedUsageDeviceNameBox" Grid.Row="2" Grid.Column="1" Margin="0,9,0,0"/>
+                            <TextBlock Grid.Row="3" Text="同步密钥" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
+                            <Grid Grid.Row="3" Grid.Column="1" Margin="0,9,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <PasswordBox x:Name="SharedUsageSyncKeyBox" Background="#10181E" Foreground="{StaticResource Ink}"
+                                             BorderBrush="#354650" BorderThickness="1" Padding="9,6"/>
+                                <Button Grid.Column="1" Content="生成密钥" Style="{StaticResource ActionButton}" Height="30"
+                                        Padding="9,0" Margin="7,0,0,0" Click="GenerateSharedSyncKey_Click"/>
+                                <Button Grid.Column="2" Content="复制密钥" Style="{StaticResource ActionButton}" Height="30"
+                                        Padding="9,0" Margin="7,0,0,0" Click="CopySharedSyncKey_Click"/>
+                            </Grid>
+                        </Grid>
+                        <Grid Grid.Row="3" Margin="0,10,0,10">
+                            <TextBlock x:Name="SharedUsageStatusText" Text="等待共享设置" Foreground="{StaticResource Signal}"
+                                       FontSize="10" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,118,0"/>
+                            <Button x:Name="SharedUsageSaveButton" Content="保存并同步" Style="{StaticResource SignalButton}"
+                                    Height="32" HorizontalAlignment="Right" Click="SaveSharedUsage_Click"/>
+                        </Grid>
+                        <Grid Grid.Row="4" MinHeight="70">
+                            <TextBlock x:Name="SharedUsageEmptyText" Text="暂无共享设备数据" Foreground="{StaticResource Muted}"
+                                       VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                            <ItemsControl x:Name="SharedDeviceItems">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,3,0,9" ToolTip="{Binding DeviceId}">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding DeviceName}" Foreground="{StaticResource Ink}" FontSize="11"
+                                                           FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{Binding CurrentDeviceText}" Foreground="{StaticResource Signal}" FontSize="9" Margin="8,1,0,0"/>
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Text="{Binding TokensText}" Foreground="{StaticResource Ink}"
+                                                       FontFamily="Cascadia Mono" FontSize="10" Margin="12,0,0,0"/>
+                                            <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,5,0,0">
+                                                <ProgressBar Style="{StaticResource Meter}" Maximum="100" Value="{Binding TokenSharePercent}"/>
+                                                <TextBlock Text="{Binding ShareText}" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono"
+                                                           FontSize="8" HorizontalAlignment="Right" Margin="0,8,0,0"/>
+                                            </Grid>
+                                            <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="0,4,0,0">
+                                                <TextBlock Text="{Binding ModelText}" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="8"/>
+                                                <TextBlock Text="{Binding DetailText}" Foreground="{StaticResource Muted}" FontSize="8" HorizontalAlignment="Right"/>
+                                            </Grid>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </Grid>
                     </Grid>
                 </Border>

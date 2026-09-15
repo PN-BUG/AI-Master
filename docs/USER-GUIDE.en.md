@@ -6,7 +6,7 @@
 
 ## Main dashboard
 
-The dashboard contains seven card types:
+The dashboard contains nine card types:
 
 1. **Primary quota runway** shows remaining quota, usage, and the next reset.
 2. **Task guard** shows protection status and can pause tasks visible to the current connection.
@@ -14,7 +14,9 @@ The dashboard contains seven card types:
 4. **Usage forecast** charts estimated and projected weekly quota remaining, plus the last seven days of usage.
 5. **Recent tasks** lists running, waiting, interrupted, paused, and completed tasks.
 6. **Local usage** totals this device's weekly tokens, shows token-weighted top models for the device and each project, and estimates device/project quota attribution from the ratio of local tokens to same-period account tokens; when account history is incomplete, only local tokens are shown.
-7. **Guard policy** configures warning and pause thresholds, automatic pausing, and floating-window text size.
+7. **Today / hourly usage** shows this device's tokens today, today's estimated share of the account's total weekly quota, and a local-token line chart for hours 00–23. The share is estimated from this week's account token history and weekly-window usage; it stays unavailable when the data is incomplete.
+8. **Guard policy** configures warning and pause thresholds, automatic pausing, and floating-window text size.
+9. **Shared usage** groups devices using the same sync key and shows each device's tokens, group share, top model, session count, and last sync time.
 
 Select **Sync now** to reconnect to Codex and refresh all data.
 
@@ -34,6 +36,18 @@ Select **Sync now** to reconnect to Codex and refresh all data.
 - **Floating font size** adjusts overlay text from 100% to 150%.
 
 Live control is scoped to the App Server connection. Tasks running in another Codex window may need to be stopped in that window.
+
+## Multi-device shared usage
+
+1. Select **Enable shared usage** on the first device.
+2. Keep the server URL set to `https://www.woliu.top` and enter a recognizable device name.
+3. Select **Generate key**, then **Save & sync**.
+4. Select **Copy key** and paste the same key on your other devices. Give each device a distinct name.
+5. After the other devices save and sync, the card displays the current week's usage for the group.
+
+The sync key grants access to the shared usage group, so share it only between your own devices. AIMaster encrypts it locally with Windows DPAPI. Uploads contain only the device ID and name, weekly period, tokens, session count, top model, and capture time. Codex login tokens, task content, prompts, project names, and project paths are never uploaded.
+
+Public sync requires HTTPS. The Woliu server stores only an HMAC-SHA256 group identifier derived with a server-side pepper, and retains data for 35 days by default.
 
 ## Floating monitor
 

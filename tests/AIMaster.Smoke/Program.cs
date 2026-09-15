@@ -67,6 +67,7 @@ internal static partial class Program
               fallbackRelease.ReleaseAssets[0].DownloadUrl ==
               "https://github.com/PN-BUG/AI-Master/releases/latest/download/AIMaster-win-x64-lightweight.zip",
             "rate-limit fallback resolves the latest tag and direct-update packages");
+        VerifySharedUsageContract();
         using (var protocolValues = System.Text.Json.JsonDocument.Parse(
                    "{\"requestId\":\"42\",\"usedPercent\":\"12.5\",\"tokens\":\"123456\"}"))
         {
@@ -100,6 +101,9 @@ internal static partial class Program
         Check(main.FindName("InstallUpdateButton") is Button installButton &&
               Equals(installButton.Content, "⇩ Update now") && installButton.Visibility == Visibility.Collapsed,
             "main window exposes the localized direct-update action on demand");
+        Check(main.FindName("SharedUsageServerUrlBox") is TextBox { Text: "https://www.woliu.top" } &&
+              main.FindName("SharedUsageSyncKeyBox") is PasswordBox,
+            "shared usage card exposes the deployed woliu endpoint and a masked sync key");
         Check(main.Icon != null, "main window has the AIMaster icon");
         Check(floating.Icon != null, "floating window has the AIMaster icon");
         Check(main.FindName("DashboardScrollViewer") is ScrollViewer
@@ -113,6 +117,7 @@ internal static partial class Program
         VerifyDashboardLayout();
         VerifyDashboardCardResize(main);
         VerifyProjectUsageTemplate(main);
+        VerifySharedUsageTemplate(main);
         var shell = (Border)floating.FindName("Shell");
         Check(shell.Effect is null, "floating window has no outer shadow");
         var peekSignal = (System.Windows.Shapes.Rectangle)floating.FindName("PeekSignal");
@@ -264,8 +269,8 @@ internal static partial class Program
     {
         var normalized = AiManagerWindow.NormalizeDashboardLayout(
             ["right:quota", "left:quota", "left:unknown", "right:forecast"]);
-        Check(normalized.Count == 7 && normalized[0] == "right:quota" &&
-              normalized[1] == "right:forecast" && normalized.Select(item => item.Split(':')[1]).Distinct().Count() == 7,
+        Check(normalized.Count == 9 && normalized[0] == "right:quota" &&
+              normalized[1] == "right:forecast" && normalized.Select(item => item.Split(':')[1]).Distinct().Count() == 9,
             "dashboard layout preserves valid card moves and restores every missing card once");
     }
 
@@ -273,7 +278,8 @@ internal static partial class Program
     {
         var resizeThumbs = Descendants(main).OfType<Thumb>().Count(item =>
             Equals(item.Style, main.FindResource("CardResizeThumb")));
-        Check(resizeThumbs == 7, "every dashboard card exposes a resize handle");
+        Check(resizeThumbs == 9 && main.FindName("DailyUsageCanvas") is Canvas,
+            "every dashboard card exposes a resize handle and the hourly chart is available");
         var normalized = AiManagerWindow.NormalizeDashboardCardSize(new AiDashboardCardSize
         {
             Width = 40,
@@ -310,6 +316,69 @@ internal static partial class Program
         row.Arrange(new Rect(0, 0, 420, 80));
         row.UpdateLayout();
         Check(true, "project usage card creates its quota progress binding without a runtime exception");
+    }
+
+    private static void VerifySharedUsageContract()
+    {
+        Check(SharedUsageClient.TryBuildSyncEndpoint("https://www.woliu.top", out var endpoint, out _) &&
+              endpoint!.AbsoluteUri == "https://www.woliu.top/api/v1/aimaster/sync" &&
+              !SharedUsageClient.TryBuildSyncEndpoint("http://www.woliu.top", out _, out _) &&
+              SharedUsageClient.TryBuildSyncEndpoint("http://localhost:3000", out _, out _),
+            "shared usage requires HTTPS publicly and targets the deployed woliu API");
+
+        var secret = LocalSecretProtection.GenerateSyncKey();
+        var protectedSecret = LocalSecretProtection.Protect(secret);
+        var settingsJson = System.Text.Json.JsonSerializer.Serialize(new AiManagerSettings
+        {
+            SharedUsageSyncKey = secret,
+            SharedUsageSyncKeyProtected = protectedSecret
+        });
+        Check(secret.Length >= 32 && protectedSecret != secret &&
+              LocalSecretProtection.Unprotect(protectedSecret) == secret &&
+              !settingsJson.Contains(secret, StringComparison.Ordinal),
+            "shared usage sync keys are high entropy and protected by Windows DPAPI");
+
+        var json = SharedUsageClient.SerializeUpload(new AiManagerSettings
+        {
+            SharedUsageDeviceId = "8b38a721-400c-4d80-a344-17bfa725f542",
+            SharedUsageDeviceName = "Smoke PC"
+        }, new AiLocalUsageSummary
+        {
+            PeriodStart = new DateOnly(2026, 9, 14),
+            PeriodEnd = new DateOnly(2026, 9, 20),
+            TotalTokens = 12_345,
+            SessionCount = 7,
+            MostUsedModel = "gpt-5.6-terra",
+            Projects = [new AiProjectUsage { ProjectName = "Private project", ProjectPath = @"C:\Private" }]
+        });
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var fields = document.RootElement.EnumerateObject().Select(item => item.Name).ToHashSet();
+        Check(fields.SetEquals([
+                  "deviceId", "deviceName", "periodStart", "periodEnd", "totalTokens", "sessionCount",
+                  "mostUsedModel", "capturedAt"
+              ]) && !json.Contains("Private", StringComparison.Ordinal),
+            "shared upload contains only aggregate fields and excludes project data");
+    }
+
+    private static void VerifySharedUsageTemplate(AiManagerWindow main)
+    {
+        var items = (ItemsControl)main.FindName("SharedDeviceItems");
+        var row = (FrameworkElement)items.ItemTemplate.LoadContent();
+        row.DataContext = new AiDeviceUsage
+        {
+            DeviceId = "8b38a721-400c-4d80-a344-17bfa725f542",
+            DeviceName = "Smoke PC",
+            TotalTokens = 10_000,
+            TokenSharePercent = 62.5,
+            SessionCount = 4,
+            MostUsedModel = "gpt-5.6-terra",
+            UpdatedAt = DateTimeOffset.Now,
+            IsCurrentDevice = true
+        };
+        row.Measure(new Size(520, 100));
+        row.Arrange(new Rect(0, 0, 520, 100));
+        row.UpdateLayout();
+        Check(true, "shared device row creates its usage and localization bindings without a runtime exception");
     }
 
     private static void VerifyLocalTaskNameSources()
@@ -371,48 +440,59 @@ internal static partial class Program
     {
         var root = Path.Combine(Path.GetTempPath(), $"AIMaster-Smoke-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
-        var timestamp = DateTimeOffset.Now.ToString("O");
+        var todayDateTime = DateTime.Today;
+        var previousTimestamp = new DateTimeOffset(todayDateTime.AddDays(-1).AddHours(9),
+            TimeZoneInfo.Local.GetUtcOffset(todayDateTime.AddDays(-1).AddHours(9))).ToString("O");
+        var morningTimestamp = new DateTimeOffset(todayDateTime.AddHours(10),
+            TimeZoneInfo.Local.GetUtcOffset(todayDateTime.AddHours(10))).ToString("O");
+        var afternoonTimestamp = new DateTimeOffset(todayDateTime.AddHours(15),
+            TimeZoneInfo.Local.GetUtcOffset(todayDateTime.AddHours(15))).ToString("O");
         var alpha = Path.Combine(root, "alpha.jsonl");
         var beta = Path.Combine(root, "beta.jsonl");
         var gamma = Path.Combine(root, "gamma.jsonl");
         File.WriteAllLines(alpha,
         [
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"session_meta\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Alpha\"}}}}",
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"model\":\"gpt-5.5\"}}}}",
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":1000}}}}}}",
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"model\":\"gpt-5.6-sol\"}}}}",
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":2000}}}}}}"
+            $"{{\"timestamp\":\"{previousTimestamp}\",\"type\":\"session_meta\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Alpha\"}}}}",
+            $"{{\"timestamp\":\"{previousTimestamp}\",\"type\":\"turn_context\",\"payload\":{{\"model\":\"gpt-5.5\"}}}}",
+            $"{{\"timestamp\":\"{previousTimestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":1000}}}}}}",
+            $"{{\"timestamp\":\"{previousTimestamp}\",\"type\":\"turn_context\",\"payload\":{{\"model\":\"gpt-5.6-sol\"}}}}",
+            $"{{\"timestamp\":\"{previousTimestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":2000}}}}}}"
         ]);
         File.WriteAllLines(beta,
         [
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Beta\",\"model\":\"gpt-5.6-terra\"}}}}",
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":4000}}}}}}",
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":9000}},\"last_token_usage\":{{\"total_tokens\":500}}}}}}}}"
+            $"{{\"timestamp\":\"{morningTimestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Beta\",\"model\":\"gpt-5.6-terra\"}}}}",
+            $"{{\"timestamp\":\"{morningTimestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":4000}}}}}}",
+            $"{{\"timestamp\":\"{morningTimestamp}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":9000}},\"last_token_usage\":{{\"total_tokens\":500}}}}}}}}"
         ]);
         File.WriteAllLines(gamma,
         [
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Gamma\",\"model\":\"gpt-5.6-terra\"}}}}",
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":500}},\"last_token_usage\":{{\"total_tokens\":500}}}}}}}}"
+            $"{{\"timestamp\":\"{afternoonTimestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Gamma\",\"model\":\"gpt-5.6-terra\"}}}}",
+            $"{{\"timestamp\":\"{afternoonTimestamp}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":500}},\"last_token_usage\":{{\"total_tokens\":500}}}}}}}}"
         ]);
         try
         {
             var service = new AiManagerService();
             var today = DateOnly.FromDateTime(DateTime.Now);
-            var first = service.ReadLocalUsageSummary(root, today);
+            var first = service.ReadLocalUsageSummary(root, today.AddDays(-1));
             Check(first.TotalTokens == 7500 && first.SessionCount == 3 && first.Projects.Count == 3 &&
+                  first.TodayTokens == 4500 && first.TodayHourlyUsage.Count == 24 &&
+                  first.TodayHourlyUsage.Single(item => item.Hour == 10).Tokens == 4000 &&
+                  first.TodayHourlyUsage.Single(item => item.Hour == 15).Tokens == 500 &&
                   first.MostUsedModel == "gpt-5.6-terra" &&
                   first.Projects[0].ProjectName == "Beta" && first.Projects[0].Tokens == 4000 &&
                   first.Projects[0].MostUsedModel == "gpt-5.6-terra" &&
                   first.Projects.Single(item => item.ProjectName == "Alpha").MostUsedModel == "gpt-5.6-sol" &&
                   first.Projects.Single(item => item.ProjectName == "Gamma").Tokens == 500,
-                "local usage groups by project and reports token-weighted top models");
+                "local usage groups by project, model, day, and local hour");
 
             File.AppendAllLines(beta,
             [
-                $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":1000}}}}}}"
+                $"{{\"timestamp\":\"{morningTimestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":1000}}}}}}"
             ]);
-            var second = service.ReadLocalUsageSummary(root, today);
-            Check(second.TotalTokens == 8500 && second.Projects.Single(item => item.ProjectName == "Beta").Tokens == 5000,
+            var second = service.ReadLocalUsageSummary(root, today.AddDays(-1));
+            Check(second.TotalTokens == 8500 && second.TodayTokens == 5500 &&
+                  second.TodayHourlyUsage.Single(item => item.Hour == 10).Tokens == 5000 &&
+                  second.Projects.Single(item => item.ProjectName == "Beta").Tokens == 5000,
                 "local usage incrementally reads appended token records without double counting");
             service.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
@@ -458,10 +538,22 @@ internal static partial class Program
               Math.Abs(projects[1].WeeklyQuotaPercent!.Value - 7.5) < 0.001,
             "local quota attribution first removes other devices, then distributes the device estimate by project");
 
+        var todayUsage = new AiLocalUsageSummary
+        {
+            PeriodStart = usage.PeriodStart,
+            PeriodEnd = usage.PeriodEnd,
+            TotalTokens = usage.TotalTokens,
+            TodayTokens = 4_000
+        };
+        Check(Math.Abs(AiManagerWindow.EstimateTodayWeeklyQuotaPercent(todayUsage, estimate)!.Value - 4) < 0.001,
+            "today usage share uses the account's total weekly quota as the denominator");
+
         var incomplete = AiManagerWindow.EstimateLocalQuotaUsage(usage,
             [new AiDailyUsage { Date = new DateOnly(2026, 9, 14), Tokens = 5_000 }], 40);
         Check(incomplete.AccountTokenSharePercent is null && incomplete.EstimatedQuotaPercent is null,
             "incomplete account history never fabricates a per-device quota estimate");
+        Check(AiManagerWindow.EstimateTodayWeeklyQuotaPercent(todayUsage, incomplete) is null,
+            "today weekly-quota share remains unavailable when account history is incomplete");
     }
 
     [GeneratedRegex("[\\u3400-\\u9FFF]")]
