@@ -83,6 +83,7 @@ public static class LocalizationService
         ["保护策略已保存并应用"] = "Guard policy saved and applied", ["设置已保存并应用"] = "Settings saved and applied",
         ["折叠卡片"] = "Collapse card", ["展开卡片"] = "Expand card", ["拖动调整布局"] = "Drag to rearrange",
         ["本机消耗"] = "LOCAL USAGE", ["TOKEN / 本周"] = "TOKENS / THIS WEEK",
+        ["常用模型"] = "TOP MODEL",
         ["等待本地记录"] = "Waiting for local records", ["等待账户与本机记录"] = "Waiting for account and local records",
         ["本机 Token 来自本地会话日志；账户 Token 来自 Codex 用量历史。"] = "Local tokens come from on-device session logs; account tokens come from Codex usage history.",
         ["额度占比按同周期 Token 比例估算，不等于官方设备账单。"] = "Quota attribution is estimated from same-period token ratios; it is not an official per-device bill.",

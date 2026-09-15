@@ -62,6 +62,7 @@ public sealed class AiManagerSettings
 
     [JsonPropertyName("language")]
     public string? Language { get; set; }
+
 }
 
 public sealed class AiDashboardCardSize
@@ -107,8 +108,12 @@ public sealed class AiProjectUsage
     public double SharePercent { get; init; }
     public double? WeeklyQuotaPercent { get; init; }
     public int SessionCount { get; init; }
+    public string? MostUsedModel { get; init; }
     public string TokensText => FormatTokens(Tokens);
     public string ShareText => $"{SharePercent:0.#}%";
+    public string MostUsedModelText => LocalizationService.IsEnglish
+        ? $"Top model · {MostUsedModel ?? "Unknown"}"
+        : $"常用模型 · {MostUsedModel ?? "未知"}";
     public double WeeklyQuotaBarValue => WeeklyQuotaPercent ?? 0;
     public string QuotaShareText => WeeklyQuotaPercent is { } quota
         ? LocalizationService.IsEnglish
@@ -132,6 +137,7 @@ public sealed class AiLocalUsageSummary
     public DateOnly PeriodEnd { get; init; }
     public long TotalTokens { get; init; }
     public int SessionCount { get; init; }
+    public string? MostUsedModel { get; init; }
     public List<AiProjectUsage> Projects { get; init; } = new();
 }
 

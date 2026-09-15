@@ -40,10 +40,16 @@ internal sealed class AiManagerService : IAsyncDisposable
         public readonly List<LocalUsageRecord> Records = new();
         public long Offset;
         public string? ProjectPath;
+        public string? ModelName;
         public bool HasTokenUsageRecords;
     }
 
-    private sealed record LocalUsageRecord(DateOnly Date, string ProjectPath, long Tokens, bool IsLegacy = false);
+    private sealed record LocalUsageRecord(
+        DateOnly Date,
+        string ProjectPath,
+        string? ModelName,
+        long Tokens,
+        bool IsLegacy = false);
 
     public AiManagerService()
     {
@@ -453,7 +459,8 @@ internal sealed class AiManagerService : IAsyncDisposable
                 ProjectPath = group.Key,
                 Tokens = group.Sum(item => item.Record.Tokens),
                 SharePercent = total > 0 ? group.Sum(item => item.Record.Tokens) * 100d / total : 0,
-                SessionCount = group.Select(item => item.SessionPath).Distinct(StringComparer.OrdinalIgnoreCase).Count()
+                SessionCount = group.Select(item => item.SessionPath).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                MostUsedModel = SelectMostUsedModel(group.Select(item => item.Record))
             })
             .OrderByDescending(item => item.Tokens)
             .ThenBy(item => item.ProjectName, StringComparer.CurrentCultureIgnoreCase)
@@ -465,6 +472,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             TotalTokens = total,
             SessionCount = sessionRecords.Select(item => item.SessionPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            MostUsedModel = SelectMostUsedModel(sessionRecords.Select(item => item.Record)),
             Projects = projects
         };
     }
@@ -480,6 +488,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             {
                 cursor.Offset = 0;
                 cursor.ProjectPath = null;
+                cursor.ModelName = null;
                 cursor.HasTokenUsageRecords = false;
                 cursor.Records.Clear();
                 cursor.PendingLine.SetLength(0);
@@ -519,6 +528,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             if (type is "session_meta" or "turn_context")
             {
                 cursor.ProjectPath = NormalizeProjectPath(ReadString(payload, "cwd")) ?? cursor.ProjectPath;
+                cursor.ModelName = NormalizeModelName(ReadString(payload, "model")) ?? cursor.ModelName;
                 return;
             }
             var isLegacy = false;
@@ -550,7 +560,8 @@ internal sealed class AiManagerService : IAsyncDisposable
                 ? DateOnly.FromDateTime(timestamp.LocalDateTime)
                 : fallbackDate;
             cursor.Records.Add(new LocalUsageRecord(date,
-                cursor.ProjectPath ?? LocalizationService.L("未归属项目", "Unassigned"), tokens, isLegacy));
+                cursor.ProjectPath ?? LocalizationService.L("未归属项目", "Unassigned"),
+                cursor.ModelName, tokens, isLegacy));
         }
         catch (JsonException)
         {
@@ -570,6 +581,18 @@ internal sealed class AiManagerService : IAsyncDisposable
         if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) path = path[4..];
         return Path.TrimEndingDirectorySeparator(path.Trim());
     }
+
+    private static string? NormalizeModelName(string? model) =>
+        string.IsNullOrWhiteSpace(model) ? null : model.Trim();
+
+    private static string? SelectMostUsedModel(IEnumerable<LocalUsageRecord> records) => records
+        .Where(item => !string.IsNullOrWhiteSpace(item.ModelName))
+        .GroupBy(item => item.ModelName!, StringComparer.OrdinalIgnoreCase)
+        .Select(group => new { Name = group.Key, Tokens = group.Sum(item => item.Tokens) })
+        .OrderByDescending(item => item.Tokens)
+        .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+        .Select(item => item.Name)
+        .FirstOrDefault();
 
     private static string ProjectDisplayName(string path)
     {

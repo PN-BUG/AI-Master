@@ -901,6 +901,7 @@ public partial class AiManagerWindow : Window
     {
         var estimate = EstimateLocalQuotaUsage(usage, accountDailyUsage, weeklyUsedPercent);
         LocalUsageTokensText.Text = FormatTokens(usage.TotalTokens);
+        LocalUsageModelText.Text = usage.MostUsedModel ?? LocalizationService.L("未知", "Unknown");
         LocalUsageDetailText.Text = LocalizationService.IsEnglish
             ? $"{usage.SessionCount} local sessions · {usage.Projects.Count} projects"
             : $"{usage.SessionCount} 个本机会话 · {usage.Projects.Count} 个项目";
@@ -954,6 +955,7 @@ public partial class AiManagerWindow : Window
             Tokens = item.Tokens,
             SharePercent = item.SharePercent,
             SessionCount = item.SessionCount,
+            MostUsedModel = item.MostUsedModel,
             WeeklyQuotaPercent = normalizedLocalQuota * item.SharePercent / 100d
         }).ToList();
     }

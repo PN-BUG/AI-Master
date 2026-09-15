@@ -112,11 +112,12 @@ internal static class DocumentationScreenshotCapture
                 PeriodEnd = today,
                 TotalTokens = 3_765_000,
                 SessionCount = 18,
+                MostUsedModel = "gpt-5.6-terra",
                 Projects =
                 [
-                    new AiProjectUsage { ProjectName = "AIMaster", ProjectPath = @"C:\Demo\AIMaster", Tokens = 2_070_750, SharePercent = 55, SessionCount = 9 },
-                    new AiProjectUsage { ProjectName = english ? "Documentation" : "文档站", ProjectPath = @"C:\Demo\Docs", Tokens = 1_129_500, SharePercent = 30, SessionCount = 5 },
-                    new AiProjectUsage { ProjectName = english ? "Prototype" : "原型项目", ProjectPath = @"C:\Demo\Prototype", Tokens = 564_750, SharePercent = 15, SessionCount = 4 }
+                    new AiProjectUsage { ProjectName = "AIMaster", ProjectPath = @"C:\Demo\AIMaster", Tokens = 2_070_750, SharePercent = 55, SessionCount = 9, MostUsedModel = "gpt-5.6-terra" },
+                    new AiProjectUsage { ProjectName = english ? "Documentation" : "文档站", ProjectPath = @"C:\Demo\Docs", Tokens = 1_129_500, SharePercent = 30, SessionCount = 5, MostUsedModel = "gpt-5.6-sol" },
+                    new AiProjectUsage { ProjectName = english ? "Prototype" : "原型项目", ProjectPath = @"C:\Demo\Prototype", Tokens = 564_750, SharePercent = 15, SessionCount = 4, MostUsedModel = "gpt-5.5" }
                 ]
             }
         };

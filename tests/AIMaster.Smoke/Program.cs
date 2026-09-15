@@ -303,7 +303,8 @@ internal static partial class Program
         var row = (FrameworkElement)items.ItemTemplate.LoadContent();
         row.DataContext = new AiProjectUsage
         {
-            ProjectName = "Smoke", Tokens = 1_000, SharePercent = 25, WeeklyQuotaPercent = 10
+            ProjectName = "Smoke", Tokens = 1_000, SharePercent = 25, WeeklyQuotaPercent = 10,
+            MostUsedModel = "gpt-5.6-terra"
         };
         row.Measure(new Size(420, 80));
         row.Arrange(new Rect(0, 0, 420, 80));
@@ -377,18 +378,20 @@ internal static partial class Program
         File.WriteAllLines(alpha,
         [
             $"{{\"timestamp\":\"{timestamp}\",\"type\":\"session_meta\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Alpha\"}}}}",
+            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"model\":\"gpt-5.5\"}}}}",
             $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":1000}}}}}}",
+            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"model\":\"gpt-5.6-sol\"}}}}",
             $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":2000}}}}}}"
         ]);
         File.WriteAllLines(beta,
         [
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Beta\"}}}}",
+            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Beta\",\"model\":\"gpt-5.6-terra\"}}}}",
             $"{{\"timestamp\":\"{timestamp}\",\"type\":\"token_usage_record\",\"payload\":{{\"usage\":{{\"total_tokens\":4000}}}}}}",
             $"{{\"timestamp\":\"{timestamp}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":9000}},\"last_token_usage\":{{\"total_tokens\":500}}}}}}}}"
         ]);
         File.WriteAllLines(gamma,
         [
-            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Gamma\"}}}}",
+            $"{{\"timestamp\":\"{timestamp}\",\"type\":\"turn_context\",\"payload\":{{\"cwd\":\"C:\\\\Work\\\\Gamma\",\"model\":\"gpt-5.6-terra\"}}}}",
             $"{{\"timestamp\":\"{timestamp}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"total_tokens\":500}},\"last_token_usage\":{{\"total_tokens\":500}}}}}}}}"
         ]);
         try
@@ -397,9 +400,12 @@ internal static partial class Program
             var today = DateOnly.FromDateTime(DateTime.Now);
             var first = service.ReadLocalUsageSummary(root, today);
             Check(first.TotalTokens == 7500 && first.SessionCount == 3 && first.Projects.Count == 3 &&
+                  first.MostUsedModel == "gpt-5.6-terra" &&
                   first.Projects[0].ProjectName == "Beta" && first.Projects[0].Tokens == 4000 &&
+                  first.Projects[0].MostUsedModel == "gpt-5.6-terra" &&
+                  first.Projects.Single(item => item.ProjectName == "Alpha").MostUsedModel == "gpt-5.6-sol" &&
                   first.Projects.Single(item => item.ProjectName == "Gamma").Tokens == 500,
-                "local usage prefers response records, falls back to legacy increments, and groups by project directory");
+                "local usage groups by project and reports token-weighted top models");
 
             File.AppendAllLines(beta,
             [
