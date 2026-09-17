@@ -249,8 +249,8 @@ public partial class AiManagerWindow : Window
 
         DashboardGrid.RowDefinitions.Clear();
         DashboardGrid.ColumnDefinitions.Clear();
-        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
+        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         _leftDashboardColumn = CreateDashboardColumn();
@@ -282,8 +282,9 @@ public partial class AiManagerWindow : Window
 
         card.Child = null;
         card.Tag = id;
-        card.Margin = new Thickness(0, 0, 0, 8);
+        card.Margin = new Thickness(0, 0, 0, 12);
         card.MinWidth = MinimumCardWidth;
+        card.HorizontalAlignment = HorizontalAlignment.Stretch;
         card.ClipToBounds = true;
         card.AllowDrop = true;
         card.DragOver += DashboardCard_DragOver;
@@ -292,6 +293,7 @@ public partial class AiManagerWindow : Window
         var frame = new Grid();
         frame.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         frame.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        frame.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var header = new Grid
         {
             Tag = id,
@@ -338,14 +340,13 @@ public partial class AiManagerWindow : Window
             Style = (Style)FindResource("CardResizeThumb"),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Bottom,
-            ToolTip = L("拖动自由调整卡片大小；双击恢复自适应", "Drag to resize; double-click to reset")
+            ToolTip = L("拖动调整卡片高度；双击恢复自适应", "Drag to adjust height; double-click to reset")
         };
         resizeThumb.DragStarted += CardResize_DragStarted;
         resizeThumb.DragDelta += CardResize_DragDelta;
         resizeThumb.DragCompleted += CardResize_DragCompleted;
         resizeThumb.PreviewMouseDoubleClick += CardResize_MouseDoubleClick;
-        Grid.SetRowSpan(resizeThumb, 2);
-        Panel.SetZIndex(resizeThumb, 2);
+        Grid.SetRow(resizeThumb, 2);
         header.Children.Add(headerTitle);
         header.Children.Add(grip);
         header.Children.Add(toggle);
@@ -512,18 +513,15 @@ public partial class AiManagerWindow : Window
         if (sender is not FrameworkElement { Tag: string id } ||
             !_dashboardCards.TryGetValue(id, out var state) || _collapsedDashboardCards.Contains(id)) return;
         state.Card.MinHeight = MinimumCardHeight;
-        state.Card.Width = Math.Max(MinimumCardWidth, state.Card.ActualWidth);
         state.Card.Height = Math.Max(MinimumCardHeight, state.Card.ActualHeight);
-        state.Card.HorizontalAlignment = HorizontalAlignment.Left;
+        state.Card.Width = double.NaN;
+        state.Card.HorizontalAlignment = HorizontalAlignment.Stretch;
     }
 
     private void CardResize_DragDelta(object sender, DragDeltaEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: string id } ||
             !_dashboardCards.TryGetValue(id, out var state) || _collapsedDashboardCards.Contains(id)) return;
-        var availableWidth = (state.Card.Parent as FrameworkElement)?.ActualWidth ?? state.Card.ActualWidth;
-        var maximumWidth = Math.Max(MinimumCardWidth, availableWidth);
-        state.Card.Width = Math.Clamp(state.Card.Width + e.HorizontalChange, MinimumCardWidth, maximumWidth);
         state.Card.Height = Math.Clamp(state.Card.Height + e.VerticalChange, MinimumCardHeight, MaximumCardHeight);
     }
 
@@ -575,9 +573,11 @@ public partial class AiManagerWindow : Window
             return;
         }
         state.Card.MinHeight = MinimumCardHeight;
-        state.Card.Width = size.Width;
+        // Width is intentionally fluid. Persisted fixed widths made cards look broken
+        // after maximizing the window or moving between displays with different DPI.
+        state.Card.Width = double.NaN;
         state.Card.Height = size.Height;
-        state.Card.HorizontalAlignment = HorizontalAlignment.Left;
+        state.Card.HorizontalAlignment = HorizontalAlignment.Stretch;
     }
 
     private void CardToggle_Click(object sender, RoutedEventArgs e)
@@ -635,8 +635,8 @@ public partial class AiManagerWindow : Window
             state.ToggleButton.ToolTip = collapsed
                 ? L("展开卡片", "Expand card")
                 : L("折叠卡片", "Collapse card");
-            state.ResizeThumb.ToolTip = L("拖动自由调整卡片大小；双击恢复自适应",
-                "Drag to resize; double-click to reset");
+            state.ResizeThumb.ToolTip = L("拖动调整卡片高度；双击恢复自适应",
+                "Drag to adjust height; double-click to reset");
         }
     }
 
@@ -982,7 +982,7 @@ public partial class AiManagerWindow : Window
         var max = Math.Max(1, days.Max(item => item.Tokens));
         foreach (var day in days)
         {
-            var column = new StackPanel { Width = 34, Margin = new Thickness(0, 0, 7, 0), VerticalAlignment = VerticalAlignment.Bottom };
+            var column = new StackPanel { Width = 36, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Bottom };
             column.Children.Add(new Border
             {
                 Height = 8 + 54d * day.Tokens / max,
@@ -997,7 +997,7 @@ public partial class AiManagerWindow : Window
                 Text = day.Date.Day.ToString(CultureInfo.InvariantCulture),
                 Foreground = Brush("#71838A"),
                 FontFamily = new FontFamily("Cascadia Mono"),
-                FontSize = 9,
+                FontSize = 10,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 5, 0, 0)
             });
@@ -1056,10 +1056,10 @@ public partial class AiManagerWindow : Window
         if (width < 120 || height < 70 || _todayHourlyUsage.Count == 0) return;
         var byHour = _todayHourlyUsage.ToDictionary(item => item.Hour, item => item.Tokens);
         var maximum = Math.Max(1, byHour.Values.DefaultIfEmpty().Max());
-        const double left = 34;
+        const double left = 42;
         const double top = 8;
         const double right = 8;
-        const double bottom = 20;
+        const double bottom = 24;
         var plotWidth = width - left - right;
         var plotHeight = height - top - bottom;
 
@@ -1073,8 +1073,8 @@ public partial class AiManagerWindow : Window
             });
         }
 
-        AddCanvasText(DailyUsageCanvas, FormatTokens(maximum), 0, top - 5, "#71838A", 8);
-        AddCanvasText(DailyUsageCanvas, "0", 18, top + plotHeight - 6, "#71838A", 8);
+        AddCanvasText(DailyUsageCanvas, FormatTokens(maximum), 0, top - 5, "#82969D", 10);
+        AddCanvasText(DailyUsageCanvas, "0", 24, top + plotHeight - 7, "#82969D", 10);
         var points = Enumerable.Range(0, 24)
             .Select(hour => new Point(
                 left + plotWidth * hour / 23d,
@@ -1090,7 +1090,7 @@ public partial class AiManagerWindow : Window
 
         foreach (var hour in new[] { 0, 6, 12, 18, 23 })
             AddCanvasText(DailyUsageCanvas, $"{hour:00}", points[hour].X - 6,
-                height - bottom + 4, "#71838A", 8);
+                height - bottom + 5, "#82969D", 10);
         foreach (var item in _todayHourlyUsage.Where(item => item.Tokens > 0))
         {
             var point = points[Math.Clamp(item.Hour, 0, 23)];
@@ -1179,10 +1179,10 @@ public partial class AiManagerWindow : Window
         var height = RemainingForecastCanvas.ActualHeight;
         if (width < 100 || height < 60 || _weeklyRemainingForecast.Count == 0) return;
 
-        const double left = 27;
+        const double left = 34;
         const double top = 7;
         const double right = 6;
-        const double bottom = 20;
+        const double bottom = 24;
         var plotWidth = width - left - right;
         var plotHeight = height - top - bottom;
 
@@ -1194,7 +1194,7 @@ public partial class AiManagerWindow : Window
                 X1 = left, X2 = left + plotWidth, Y1 = y, Y2 = y,
                 Stroke = Brush("#293640"), StrokeThickness = 1
             });
-            AddChartText($"{percent:0}", 0, y - 6, "#71838A", 8);
+            AddChartText($"{percent:0}", 0, y - 7, "#82969D", 10);
         }
 
         var points = _weeklyRemainingForecast
@@ -1231,8 +1231,8 @@ public partial class AiManagerWindow : Window
             var dayLabel = LocalizationService.IsEnglish
                 ? item.Date.DayOfWeek.ToString()[..3]
                 : "一二三四五六日"[index].ToString();
-            AddChartText(dayLabel, point.X - (isToday ? 7 : 5), height - bottom + 4,
-                isToday ? "#F1F5F2" : "#71838A", isToday ? 9 : 8);
+            AddChartText(dayLabel, point.X - (isToday ? 8 : 6), height - bottom + 5,
+                isToday ? "#F1F5F2" : "#82969D", 10);
         }
     }
 

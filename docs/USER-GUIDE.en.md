@@ -24,9 +24,9 @@ Select **Sync now** to reconnect to Codex and refresh all data.
 
 - Drag a card header to reorder it or move it between columns.
 - Select the arrow in the upper-right corner to collapse or expand a card.
-- Drag the diagonal handle in the lower-right corner to resize a card.
+- Drag the handle at the bottom of a card to adjust its height. Card width fills its column and follows the window size automatically.
 - Double-click the resize handle to restore its adaptive size.
-- Card order, collapsed state, and custom size are saved automatically.
+- Card order, collapsed state, and custom height are saved automatically.
 
 ## Guard policy
 

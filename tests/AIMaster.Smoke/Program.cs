@@ -276,10 +276,14 @@ internal static partial class Program
 
     private static void VerifyDashboardCardResize(AiManagerWindow main)
     {
-        var resizeThumbs = Descendants(main).OfType<Thumb>().Count(item =>
-            Equals(item.Style, main.FindResource("CardResizeThumb")));
-        Check(resizeThumbs == 9 && main.FindName("DailyUsageCanvas") is Canvas,
-            "every dashboard card exposes a resize handle and the hourly chart is available");
+        var resizeThumbs = Descendants(main).OfType<Thumb>()
+            .Where(item => Equals(item.Style, main.FindResource("CardResizeThumb")))
+            .ToList();
+        var quotaCard = (Border)main.FindName("QuotaCard");
+        Check(resizeThumbs.Count == 9 && resizeThumbs.All(item => Grid.GetRow(item) == 2 && Grid.GetRowSpan(item) == 1) &&
+              main.FindName("DailyUsageCanvas") is Canvas &&
+              double.IsNaN(quotaCard.Width) && quotaCard.HorizontalAlignment == HorizontalAlignment.Stretch,
+            "dashboard cards keep fluid widths and reserve a separate row for height handles");
         var normalized = AiManagerWindow.NormalizeDashboardCardSize(new AiDashboardCardSize
         {
             Width = 40,

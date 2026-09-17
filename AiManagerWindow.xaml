@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="AIMaster" Icon="Resources/AIMaster.ico" ShowInTaskbar="True"
-        Width="1180" Height="790" MinWidth="960" MinHeight="650"
+        Width="1280" Height="840" MinWidth="960" MinHeight="650"
         WindowStartupLocation="CenterOwner" Background="#0F151B"
         FontFamily="Microsoft YaHei UI" Loaded="Window_Loaded" Closing="Window_Closing" Closed="Window_Closed">
     <Window.Resources>
@@ -17,11 +17,11 @@
             <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="10"/>
-            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Padding" Value="15"/>
         </Style>
         <Style x:Key="Label" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource Muted}"/>
-            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
         <Style x:Key="ActionButton" TargetType="Button">
@@ -67,15 +67,15 @@
             <Setter Property="FontSize" Value="12"/>
         </Style>
         <Style x:Key="CardResizeThumb" TargetType="Thumb">
-            <Setter Property="Width" Value="16"/>
-            <Setter Property="Height" Value="16"/>
-            <Setter Property="Cursor" Value="SizeNWSE"/>
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="14"/>
+            <Setter Property="Cursor" Value="SizeNS"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Thumb">
                         <Grid Background="{TemplateBinding Background}">
-                            <Path Data="M 3,13 L 13,3 M 8,13 L 13,8" Stroke="#71838A"
+                            <Path Data="M 5,6 L 23,6 M 9,10 L 19,10" Stroke="#71838A"
                                   StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                         </Grid>
                     </ControlTemplate>
@@ -91,7 +91,7 @@
             <Setter Property="CaretBrush" Value="{StaticResource Signal}"/>
         </Style>
         <Style x:Key="Meter" TargetType="ProgressBar">
-            <Setter Property="Height" Value="7"/>
+            <Setter Property="Height" Value="8"/>
             <Setter Property="Background" Value="#293640"/>
             <Setter Property="Foreground" Value="{StaticResource Signal}"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -110,7 +110,7 @@
         </Style>
     </Window.Resources>
 
-    <Grid Margin="16,12,16,12">
+    <Grid Margin="20,15,20,14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -118,7 +118,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Margin="0,0,0,11">
+        <Grid Grid.Row="0" Margin="0,0,0,13">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="AI / CONTROL DESK" Foreground="{StaticResource Signal}" FontFamily="Cascadia Mono"
@@ -168,9 +168,9 @@
                                 <TextBlock Text="REMAINING" Style="{StaticResource Label}" FontFamily="Cascadia Mono"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="22,0,0,0">
-                                <Grid><TextBlock Text="0" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
-                                    <TextBlock Text="LIMIT" Foreground="#667881" FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="100" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right"/></Grid>
+                                <Grid><TextBlock Text="0" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
+                                    <TextBlock Text="LIMIT" Foreground="#71838A" FontFamily="Cascadia Mono" FontSize="11" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="100" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="11" HorizontalAlignment="Right"/></Grid>
                                 <ProgressBar x:Name="MainUsageBar" Style="{StaticResource Meter}" Maximum="100" Value="0" Margin="0,7,0,0"/>
                                 <Grid Margin="0,9,0,0">
                                     <TextBlock x:Name="MainUsedText" Text="等待额度数据" Foreground="{StaticResource Ink}" FontSize="12"/>
@@ -189,7 +189,7 @@
                         <StackPanel Grid.Row="1" Margin="0,5,0,6">
                             <TextBlock x:Name="GuardGlyph" Text="GO" Foreground="{StaticResource Signal}" FontFamily="Cascadia Mono" FontSize="38" FontWeight="Bold"/>
                             <TextBlock x:Name="GuardStatusText" Text="额度安全，当前无需暂停" Foreground="{StaticResource Ink}" FontSize="14" FontWeight="SemiBold" Margin="0,1,0,0"/>
-                            <TextBlock x:Name="GuardDetailText" Text="达到暂停线后中断当前连接可见任务" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                            <TextBlock x:Name="GuardDetailText" Text="达到暂停线后中断当前连接可见任务" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0"/>
                         </StackPanel>
                         <StackPanel Grid.Row="2" Orientation="Horizontal">
                             <Button x:Name="PauseNowButton" Content="暂停可见任务" Style="{StaticResource DangerButton}" Click="PauseNow_Click"/>
@@ -203,7 +203,7 @@
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <Grid><TextBlock Text="额度窗口" Style="{StaticResource Label}"/>
                             <TextBlock x:Name="ResetCreditText" Text="" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right"/></Grid>
-                        <TextBlock Grid.Row="1" Text="账户可能同时返回总额度和特定模型额度；守卫以最高占用为准。" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,5"/>
+                        <TextBlock Grid.Row="1" Text="账户可能同时返回总额度和特定模型额度；守卫以最高占用为准。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,7"/>
                         <ItemsControl x:Name="LimitItems" Grid.Row="2">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -215,9 +215,11 @@
                                             <TextBlock Text="{Binding WindowName, StringFormat= · {0}}" Foreground="{StaticResource Muted}" FontSize="11" Margin="4,1,0,0"/>
                                         </StackPanel>
                                         <TextBlock Grid.Column="1" Text="{Binding RemainingText}" Foreground="{StaticResource Ink}" FontFamily="Cascadia Mono" FontSize="11"/>
-                                        <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,6,0,0">
+                                        <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,0">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                             <ProgressBar Style="{StaticResource Meter}" Maximum="100" Value="{Binding UsedPercent}"/>
-                                            <TextBlock Text="{Binding ResetText}" Foreground="#789098" FontSize="9" HorizontalAlignment="Right" Margin="0,10,0,0"/>
+                                            <TextBlock Grid.Row="1" Text="{Binding ResetText}" Foreground="#82969D" FontSize="10"
+                                                       HorizontalAlignment="Right" Margin="0,5,0,0"/>
                                         </Grid>
                                     </Grid>
                                 </DataTemplate>
@@ -237,9 +239,9 @@
                                 <TextBlock Text="本周剩余额度" Style="{StaticResource Label}"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <Rectangle Width="15" Height="2" Fill="{StaticResource Signal}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="估算" Foreground="{StaticResource Muted}" FontSize="9" Margin="4,0,9,0"/>
+                                    <TextBlock Text="估算" Foreground="{StaticResource Muted}" FontSize="10" Margin="5,0,10,0"/>
                                     <Rectangle Width="15" Height="2" Fill="#FFB36A" VerticalAlignment="Center"/>
-                                    <TextBlock Text="预测" Foreground="{StaticResource Muted}" FontSize="9" Margin="4,0,0,0"/>
+                                    <TextBlock Text="预测" Foreground="{StaticResource Muted}" FontSize="10" Margin="5,0,0,0"/>
                                 </StackPanel>
                             </Grid>
                             <Border Grid.Row="1" Margin="0,7,0,0" Background="#10181E" BorderBrush="#26343E"
@@ -274,7 +276,7 @@
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="100"/></Grid.ColumnDefinitions>
                                         <TextBlock Text="{Binding DisplayTitle}" Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis" FontSize="12"/>
                                         <TextBlock Grid.Column="1" Text="{Binding StatusText}" Foreground="{StaticResource Signal}" FontSize="11" HorizontalAlignment="Center"/>
-                                        <TextBlock Grid.Column="2" Text="{Binding UpdatedText}" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding UpdatedText}" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
                                     </Grid>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -309,28 +311,28 @@
                             <TextBlock Text="本机消耗" Style="{StaticResource Label}"/>
                             <TextBlock x:Name="LocalUsageTokensText" Text="--" Foreground="{StaticResource Ink}"
                                        FontFamily="Cascadia Mono" FontSize="31" FontWeight="SemiBold" Margin="0,14,0,0"/>
-                            <TextBlock Text="TOKEN / 本周" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
+                            <TextBlock Text="TOKEN / 本周" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
                             <StackPanel Orientation="Horizontal" Margin="0,9,18,0">
-                                <TextBlock Text="常用模型" Foreground="{StaticResource Muted}" FontSize="10"/>
+                                <TextBlock Text="常用模型" Foreground="{StaticResource Muted}" FontSize="11"/>
                                 <TextBlock x:Name="LocalUsageModelText" Text="--" Foreground="{StaticResource Ink}"
-                                           FontFamily="Cascadia Mono" FontSize="10" Margin="8,0,0,0"
+                                           FontFamily="Cascadia Mono" FontSize="11" Margin="8,0,0,0"
                                            TextTrimming="CharacterEllipsis"/>
                             </StackPanel>
                             <TextBlock x:Name="LocalUsageDetailText" Text="等待本地记录" Foreground="{StaticResource Muted}"
                                        FontSize="11" TextWrapping="Wrap" Margin="0,9,18,0"/>
                             <TextBlock x:Name="LocalUsageEstimateText" Text="等待账户与本机记录" Foreground="{StaticResource Signal}"
-                                       FontSize="10" TextWrapping="Wrap" Margin="0,8,18,0"/>
+                                       FontSize="11" TextWrapping="Wrap" Margin="0,8,18,0"/>
                             <TextBlock Text="本机 Token 来自本地会话日志；账户 Token 来自 Codex 用量历史。" Foreground="#71838A"
-                                       FontSize="10" TextWrapping="Wrap" Margin="0,8,18,0"/>
+                                       FontSize="11" TextWrapping="Wrap" Margin="0,8,18,0"/>
                             <TextBlock Text="额度占比按同周期 Token 比例估算，不等于官方设备账单。" Foreground="#71838A"
-                                       FontSize="10" TextWrapping="Wrap" Margin="0,5,18,0"/>
+                                       FontSize="11" TextWrapping="Wrap" Margin="0,5,18,0"/>
                         </StackPanel>
                         <Border Grid.Column="1" Background="{StaticResource Line}"/>
                         <Grid Grid.Column="2" Margin="20,0,0,0">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <Grid>
                                 <TextBlock Text="项目消耗分布" Style="{StaticResource Label}"/>
-                                <TextBlock x:Name="ProjectUsageCountText" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right"/>
+                                <TextBlock x:Name="ProjectUsageCountText" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,9,0,0">
                                 <TextBlock x:Name="LocalUsageEmptyText" Text="本周暂无本地 Token 记录" Foreground="{StaticResource Muted}"
@@ -338,22 +340,22 @@
                                 <ItemsControl x:Name="ProjectUsageItems">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Grid Margin="0,3,0,7" ToolTip="{Binding ProjectPath}">
-                                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <Grid Margin="0,4,0,9" ToolTip="{Binding ProjectPath}">
+                                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding ProjectName}" Foreground="{StaticResource Ink}" FontSize="11"
+                                                <TextBlock Text="{Binding ProjectName}" Foreground="{StaticResource Ink}" FontSize="12"
                                                            FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                                                 <TextBlock Grid.Column="1" Text="{Binding TokensText}" Foreground="{StaticResource Ink}"
-                                                           FontFamily="Cascadia Mono" FontSize="10" Margin="12,0,0,0"/>
-                                                <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,5,0,0">
+                                                           FontFamily="Cascadia Mono" FontSize="11" Margin="12,0,0,0"/>
+                                                <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource Meter}" Maximum="100"
+                                                             Value="{Binding WeeklyQuotaBarValue, Mode=OneWay}" Margin="0,6,0,0"/>
+                                                <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="0,5,0,0">
                                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                    <ProgressBar Style="{StaticResource Meter}" Maximum="100"
-                                                                 Value="{Binding WeeklyQuotaBarValue, Mode=OneWay}" Grid.ColumnSpan="2"/>
                                                     <TextBlock Text="{Binding MostUsedModelText}" Foreground="{StaticResource Muted}"
-                                                               FontFamily="Cascadia Mono" FontSize="8" Margin="0,8,12,0"
+                                                               FontFamily="Cascadia Mono" FontSize="10" Margin="0,0,12,0"
                                                                TextTrimming="CharacterEllipsis"/>
                                                     <TextBlock Grid.Column="1" Text="{Binding QuotaShareText}" Foreground="{StaticResource Muted}"
-                                                               FontFamily="Cascadia Mono" FontSize="8" HorizontalAlignment="Right" Margin="0,8,0,0"/>
+                                                               FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right"/>
                                                 </Grid>
                                             </Grid>
                                         </DataTemplate>
@@ -371,11 +373,11 @@
                             <TextBlock Text="当日消耗 / 时段" Style="{StaticResource Label}"/>
                             <TextBlock x:Name="DailyUsageTokensText" Text="--" Foreground="{StaticResource Ink}"
                                        FontFamily="Cascadia Mono" FontSize="31" FontWeight="SemiBold" Margin="0,14,0,0"/>
-                            <TextBlock Text="TOKEN / 今日" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
+                            <TextBlock Text="TOKEN / 今日" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
                             <TextBlock x:Name="DailyUsageShareText" Text="周总额度占比暂不可用" Foreground="{StaticResource Signal}"
                                        FontFamily="Cascadia Mono" FontSize="11" TextWrapping="Wrap" Margin="0,12,18,0"/>
                             <TextBlock Text="按账号本周 Token 历史与周窗口已用比例估算，不是官方逐日账单。"
-                                       Foreground="#71838A" FontSize="10" TextWrapping="Wrap" Margin="0,9,18,0"/>
+                                       Foreground="#82969D" FontSize="11" TextWrapping="Wrap" Margin="0,9,18,0"/>
                         </StackPanel>
                         <Border Grid.Column="1" Background="{StaticResource Line}"/>
                         <Grid Grid.Column="2" Margin="20,0,0,0">
@@ -383,7 +385,7 @@
                             <Grid>
                                 <TextBlock Text="今日每小时消耗" Style="{StaticResource Label}"/>
                                 <TextBlock Text="00–23 时" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono"
-                                           FontSize="9" HorizontalAlignment="Right"/>
+                                           FontSize="10" HorizontalAlignment="Right"/>
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,10,0,0" MinHeight="120">
                                 <Canvas x:Name="DailyUsageCanvas" Height="120" ClipToBounds="True"
@@ -403,10 +405,10 @@
                         </Grid.RowDefinitions>
                         <Grid>
                             <TextBlock Text="共享统计" Style="{StaticResource Label}"/>
-                            <TextBlock x:Name="SharedUsageSummaryText" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right"/>
+                            <TextBlock x:Name="SharedUsageSummaryText" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
                         </Grid>
                         <TextBlock Grid.Row="1" Text="使用相同同步密钥的设备归为一组；不会上传 Codex 凭证、任务内容、项目名称或路径。"
-                                   Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,10"/>
+                                   Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,10"/>
                         <Grid Grid.Row="2">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="78"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
@@ -432,7 +434,7 @@
                         </Grid>
                         <Grid Grid.Row="3" Margin="0,10,0,10">
                             <TextBlock x:Name="SharedUsageStatusText" Text="等待共享设置" Foreground="{StaticResource Signal}"
-                                       FontSize="10" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,118,0"/>
+                                       FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,118,0"/>
                             <Button x:Name="SharedUsageSaveButton" Content="保存并同步" Style="{StaticResource SignalButton}"
                                     Height="32" HorizontalAlignment="Right" Click="SaveSharedUsage_Click"/>
                         </Grid>
@@ -442,24 +444,23 @@
                             <ItemsControl x:Name="SharedDeviceItems">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Grid Margin="0,3,0,9" ToolTip="{Binding DeviceId}">
-                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <Grid Margin="0,4,0,11" ToolTip="{Binding DeviceId}">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding DeviceName}" Foreground="{StaticResource Ink}" FontSize="11"
+                                                <TextBlock Text="{Binding DeviceName}" Foreground="{StaticResource Ink}" FontSize="12"
                                                            FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Text="{Binding CurrentDeviceText}" Foreground="{StaticResource Signal}" FontSize="9" Margin="8,1,0,0"/>
+                                                <TextBlock Text="{Binding CurrentDeviceText}" Foreground="{StaticResource Signal}" FontSize="10" Margin="8,1,0,0"/>
                                             </StackPanel>
                                             <TextBlock Grid.Column="1" Text="{Binding TokensText}" Foreground="{StaticResource Ink}"
-                                                       FontFamily="Cascadia Mono" FontSize="10" Margin="12,0,0,0"/>
-                                            <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,5,0,0">
-                                                <ProgressBar Style="{StaticResource Meter}" Maximum="100" Value="{Binding TokenSharePercent}"/>
-                                                <TextBlock Text="{Binding ShareText}" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono"
-                                                           FontSize="8" HorizontalAlignment="Right" Margin="0,8,0,0"/>
-                                            </Grid>
-                                            <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="0,4,0,0">
-                                                <TextBlock Text="{Binding ModelText}" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="8"/>
-                                                <TextBlock Text="{Binding DetailText}" Foreground="{StaticResource Muted}" FontSize="8" HorizontalAlignment="Right"/>
+                                                       FontFamily="Cascadia Mono" FontSize="11" Margin="12,0,0,0"/>
+                                            <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource Meter}" Maximum="100"
+                                                         Value="{Binding TokenSharePercent}" Margin="0,6,0,0"/>
+                                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding ShareText}" Foreground="{StaticResource Muted}"
+                                                       FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right" Margin="0,5,0,0"/>
+                                            <Grid Grid.Row="3" Grid.ColumnSpan="2" Margin="0,4,0,0">
+                                                <TextBlock Text="{Binding ModelText}" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
+                                                <TextBlock Text="{Binding DetailText}" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right"/>
                                             </Grid>
                                         </Grid>
                                     </DataTemplate>
