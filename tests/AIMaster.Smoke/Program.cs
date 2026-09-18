@@ -104,6 +104,12 @@ internal static partial class Program
         Check(main.FindName("SharedUsageServerUrlBox") is TextBox { Text: "https://www.woliu.top" } &&
               main.FindName("SharedUsageSyncKeyBox") is PasswordBox,
             "shared usage card exposes the deployed woliu endpoint and a masked sync key");
+        Check(main.FindName("AccountForecastButton") is Button { Content: "Account" } &&
+              main.FindName("LocalForecastButton") is Button { Content: "This device" },
+            "forecast card exposes account and local scope controls");
+        Check(main.FindName("ThemeButton") is Button themeButton &&
+              (Equals(themeButton.Content, "☀ Light") || Equals(themeButton.Content, "☾ Dark")),
+            "main window exposes the day/night theme control");
         Check(main.Icon != null, "main window has the AIMaster icon");
         Check(floating.Icon != null, "floating window has the AIMaster icon");
         Check(main.FindName("DashboardScrollViewer") is ScrollViewer
@@ -124,6 +130,17 @@ internal static partial class Program
         Check(peekSignal.Effect is null, "collapsed handle has no glow shadow");
         Check(new AiManagerSettings().TaskNameSource == TaskNameSources.ConversationTitle,
             "conversation title is the default task-name source");
+        Check(new AiManagerSettings().Theme == ThemeModes.Dark &&
+              ThemeModes.Normalize("LIGHT") == ThemeModes.Light &&
+              ThemeModes.Normalize("unknown") == ThemeModes.Dark,
+            "theme settings default safely and normalize persisted values");
+        var themeResources = new ResourceDictionary();
+        ThemeService.Apply(themeResources, ThemeModes.Light);
+        Check(themeResources["AppBackground"] is System.Windows.Media.SolidColorBrush lightBackground &&
+              lightBackground.Color.R > 230 &&
+              themeResources["Ink"] is System.Windows.Media.SolidColorBrush lightInk &&
+              lightInk.Color.R < 40,
+            "light theme supplies a bright surface and high-contrast text");
         Check(Math.Abs(new AiManagerSettings().FloatingFontScale - 1.2) < 0.001,
             "floating text is larger by default");
         Check(floating.FindName("TaskNameText") is TextBlock { FontSize: >= 11.9 },
@@ -131,6 +148,7 @@ internal static partial class Program
         Check(Math.Abs(FloatingFontScales.Normalize(9) - 1.5) < 0.001,
             "floating font scale is clamped to its supported range");
         VerifyWeeklyRemainingForecast();
+        VerifyLocalForecast();
         VerifyLocalProjectUsage();
         VerifyProjectWeeklyQuotaShare();
         Check(TaskNameSources.Normalize(TaskNameSources.LatestUserMessage) == TaskNameSources.LatestUserMessage,
@@ -440,6 +458,53 @@ internal static partial class Program
             "weekly forecast separates estimated history from future projection");
     }
 
+    private static void VerifyLocalForecast()
+    {
+        var capturedAt = new DateTimeOffset(2026, 9, 17, 12, 0, 0, TimeSpan.Zero);
+        var snapshot = new AiManagerSnapshot
+        {
+            CapturedAt = capturedAt,
+            Limits =
+            [
+                new AiLimitWindow
+                {
+                    Name = "Weekly",
+                    UsedPercent = 40,
+                    WindowDurationMinutes = 7 * 24 * 60,
+                    ResetsAt = capturedAt.AddDays(4),
+                    IsPrimary = true
+                }
+            ],
+            DailyUsage =
+            [
+                new AiDailyUsage { Date = new DateOnly(2026, 9, 14), Tokens = 10_000 },
+                new AiDailyUsage { Date = new DateOnly(2026, 9, 15), Tokens = 10_000 },
+                new AiDailyUsage { Date = new DateOnly(2026, 9, 16), Tokens = 10_000 },
+                new AiDailyUsage { Date = new DateOnly(2026, 9, 17), Tokens = 20_000 }
+            ],
+            LocalUsage = new AiLocalUsageSummary
+            {
+                PeriodStart = new DateOnly(2026, 9, 14),
+                PeriodEnd = new DateOnly(2026, 9, 20),
+                TotalTokens = 10_000,
+                DailyUsage =
+                [
+                    new AiDailyUsage { Date = new DateOnly(2026, 9, 14), Tokens = 1_000 },
+                    new AiDailyUsage { Date = new DateOnly(2026, 9, 15), Tokens = 2_000 },
+                    new AiDailyUsage { Date = new DateOnly(2026, 9, 16), Tokens = 3_000 },
+                    new AiDailyUsage { Date = new DateOnly(2026, 9, 17), Tokens = 4_000 }
+                ]
+            }
+        };
+        var service = new AiManagerService();
+        var forecast = service.BuildLocalForecast(snapshot);
+        Check(Math.Abs(forecast.DailyTokens - 10_000d / 7d) < 0.001 &&
+              Math.Abs(forecast.DailyPercent - 8d / 3d) < 0.001 &&
+              forecast.Summary.Contains("this device's current rate", StringComparison.Ordinal),
+            "local forecast uses local tokens and this device's estimated share of account quota velocity");
+        service.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
     private static void VerifyLocalProjectUsage()
     {
         var root = Path.Combine(Path.GetTempPath(), $"AIMaster-Smoke-{Guid.NewGuid():N}");
@@ -479,7 +544,10 @@ internal static partial class Program
             var today = DateOnly.FromDateTime(DateTime.Now);
             var first = service.ReadLocalUsageSummary(root, today.AddDays(-1));
             Check(first.TotalTokens == 7500 && first.SessionCount == 3 && first.Projects.Count == 3 &&
-                  first.TodayTokens == 4500 && first.TodayHourlyUsage.Count == 24 &&
+                  first.TodayTokens == 4500 && first.DailyUsage.Count == 7 &&
+                  first.DailyUsage.Single(item => item.Date == today.AddDays(-1)).Tokens == 3000 &&
+                  first.DailyUsage.Single(item => item.Date == today).Tokens == 4500 &&
+                  first.TodayHourlyUsage.Count == 24 &&
                   first.TodayHourlyUsage.Single(item => item.Hour == 10).Tokens == 4000 &&
                   first.TodayHourlyUsage.Single(item => item.Hour == 15).Tokens == 500 &&
                   first.MostUsedModel == "gpt-5.6-terra" &&

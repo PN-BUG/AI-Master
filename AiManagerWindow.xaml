@@ -3,33 +3,61 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="AIMaster" Icon="Resources/AIMaster.ico" ShowInTaskbar="True"
         Width="1280" Height="840" MinWidth="960" MinHeight="650"
-        WindowStartupLocation="CenterOwner" Background="#0F151B"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackground}"
         FontFamily="Microsoft YaHei UI" Loaded="Window_Loaded" Closing="Window_Closing" Closed="Window_Closed">
     <Window.Resources>
-        <SolidColorBrush x:Key="Panel" Color="#172028"/>
-        <SolidColorBrush x:Key="PanelRaised" Color="#1D2832"/>
-        <SolidColorBrush x:Key="Line" Color="#2C3944"/>
-        <SolidColorBrush x:Key="Ink" Color="#F1F5F2"/>
-        <SolidColorBrush x:Key="Muted" Color="#92A39B"/>
-        <SolidColorBrush x:Key="Signal" Color="#22C58B"/>
+        <SolidColorBrush x:Key="AppBackground" Color="#0B1220"/>
+        <SolidColorBrush x:Key="Panel" Color="#111C2D"/>
+        <SolidColorBrush x:Key="PanelRaised" Color="#17243A"/>
+        <SolidColorBrush x:Key="InputSurface" Color="#0D1726"/>
+        <SolidColorBrush x:Key="ButtonSurface" Color="#1A2940"/>
+        <SolidColorBrush x:Key="ButtonHover" Color="#233550"/>
+        <SolidColorBrush x:Key="ButtonPressed" Color="#101C2D"/>
+        <SolidColorBrush x:Key="Line" Color="#263750"/>
+        <SolidColorBrush x:Key="LineStrong" Color="#36506F"/>
+        <SolidColorBrush x:Key="Ink" Color="#F4F7FB"/>
+        <SolidColorBrush x:Key="Muted" Color="#9EADC2"/>
+        <SolidColorBrush x:Key="Subtle" Color="#71839A"/>
+        <SolidColorBrush x:Key="Signal" Color="#47D7AC"/>
+        <SolidColorBrush x:Key="SignalInk" Color="#071A14"/>
+        <SolidColorBrush x:Key="SignalSoft" Color="#153A34"/>
+        <SolidColorBrush x:Key="SignalText" Color="#71E7C3"/>
+        <SolidColorBrush x:Key="Warning" Color="#F2B95F"/>
+        <SolidColorBrush x:Key="WarningSoft" Color="#382D1D"/>
+        <SolidColorBrush x:Key="WarningBorder" Color="#6B542D"/>
+        <SolidColorBrush x:Key="WarningText" Color="#F6D18E"/>
+        <SolidColorBrush x:Key="Danger" Color="#F06B78"/>
+        <SolidColorBrush x:Key="DangerSoft" Color="#3B222B"/>
+        <SolidColorBrush x:Key="DangerBorder" Color="#75404B"/>
+        <SolidColorBrush x:Key="DangerText" Color="#FFB7C0"/>
+        <SolidColorBrush x:Key="MeterTrack" Color="#223249"/>
+        <SolidColorBrush x:Key="ChartGrid" Color="#26364C"/>
+        <SolidColorBrush x:Key="ChartBar" Color="#3A5364"/>
+        <SolidColorBrush x:Key="FloatingShell" Color="#F5111C2D"/>
+        <SolidColorBrush x:Key="FloatingPeek" Color="#70384A61"/>
+        <SolidColorBrush x:Key="FloatingSecondaryInk" Color="#C5D0DE"/>
+        <SolidColorBrush x:Key="Interrupted" Color="#BEA5F4"/>
+        <SolidColorBrush x:Key="InterruptedSoft" Color="#302746"/>
+        <SolidColorBrush x:Key="Idle" Color="#8294A8"/>
+        <SolidColorBrush x:Key="IdleSoft" Color="#223147"/>
         <Style x:Key="PanelCard" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource Panel}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+            <Setter Property="Background" Value="{DynamicResource Panel}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="10"/>
             <Setter Property="Padding" Value="15"/>
         </Style>
         <Style x:Key="Label" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Muted}"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
         <Style x:Key="ActionButton" TargetType="Button">
             <Setter Property="Height" Value="34"/>
             <Setter Property="Padding" Value="14,0"/>
-            <Setter Property="Background" Value="#22303A"/>
-            <Setter Property="Foreground" Value="{StaticResource Ink}"/>
-            <Setter Property="BorderBrush" Value="#354650"/>
+            <Setter Property="Background" Value="{DynamicResource ButtonSurface}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Ink}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LineStrong}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
@@ -40,8 +68,8 @@
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Root" Property="Background" Value="#2B3B46"/></Trigger>
-                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Root" Property="Background" Value="#18242C"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Root" Property="Background" Value="{DynamicResource ButtonHover}"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Root" Property="Background" Value="{DynamicResource ButtonPressed}"/></Trigger>
                             <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Root" Property="Opacity" Value="0.45"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -49,15 +77,15 @@
             </Setter>
         </Style>
         <Style x:Key="SignalButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
-            <Setter Property="Background" Value="{StaticResource Signal}"/>
-            <Setter Property="Foreground" Value="#07120E"/>
-            <Setter Property="BorderBrush" Value="{StaticResource Signal}"/>
+            <Setter Property="Background" Value="{DynamicResource Signal}"/>
+            <Setter Property="Foreground" Value="{DynamicResource SignalInk}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Signal}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
         <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
-            <Setter Property="Background" Value="#3A2528"/>
-            <Setter Property="Foreground" Value="#FFB4B8"/>
-            <Setter Property="BorderBrush" Value="#714047"/>
+            <Setter Property="Background" Value="{DynamicResource DangerSoft}"/>
+            <Setter Property="Foreground" Value="{DynamicResource DangerText}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource DangerBorder}"/>
         </Style>
         <Style x:Key="CardChromeButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
             <Setter Property="Width" Value="24"/>
@@ -75,7 +103,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Thumb">
                         <Grid Background="{TemplateBinding Background}">
-                            <Path Data="M 5,6 L 23,6 M 9,10 L 19,10" Stroke="#71838A"
+                            <Path Data="M 5,6 L 23,6 M 9,10 L 19,10" Stroke="{DynamicResource Subtle}"
                                   StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                         </Grid>
                     </ControlTemplate>
@@ -83,17 +111,17 @@
             </Setter>
         </Style>
         <Style TargetType="TextBox">
-            <Setter Property="Background" Value="#10181E"/>
-            <Setter Property="Foreground" Value="{StaticResource Ink}"/>
-            <Setter Property="BorderBrush" Value="#354650"/>
+            <Setter Property="Background" Value="{DynamicResource InputSurface}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Ink}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LineStrong}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="9,6"/>
-            <Setter Property="CaretBrush" Value="{StaticResource Signal}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource Signal}"/>
         </Style>
         <Style x:Key="Meter" TargetType="ProgressBar">
             <Setter Property="Height" Value="8"/>
-            <Setter Property="Background" Value="#293640"/>
-            <Setter Property="Foreground" Value="{StaticResource Signal}"/>
+            <Setter Property="Background" Value="{DynamicResource MeterTrack}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Signal}"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -121,26 +149,27 @@
         <Grid Grid.Row="0" Margin="0,0,0,13">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock Text="AI / CONTROL DESK" Foreground="{StaticResource Signal}" FontFamily="Cascadia Mono"
+                <TextBlock Text="AI / CONTROL DESK" Foreground="{DynamicResource Signal}" FontFamily="Cascadia Mono"
                            FontSize="11" FontWeight="SemiBold"/>
-                <TextBlock Text="AIMaster" Foreground="{StaticResource Ink}" FontSize="26" FontWeight="Bold" Margin="0,2,0,0"/>
-                <TextBlock Text="看清额度跑道，在撞线之前停下来。" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,2,0,0"/>
+                <TextBlock Text="AIMaster" Foreground="{DynamicResource Ink}" FontSize="26" FontWeight="Bold" Margin="0,2,0,0"/>
+                <TextBlock Text="看清额度跑道，在撞线之前停下来。" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,2,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock x:Name="SyncStatusText" Text="等待连接" Foreground="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <TextBlock x:Name="SyncStatusText" Text="等待连接" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
                 <Button x:Name="CheckUpdateButton" Content="⇩ 检查更新" ToolTip="检查 GitHub 新版本"
                         Style="{StaticResource ActionButton}" Click="CheckUpdate_Click" Margin="0,0,8,0"/>
                 <Button x:Name="InstallUpdateButton" Content="⇩ 立即更新" ToolTip="下载并安装新版本"
                         Style="{StaticResource SignalButton}" Click="InstallUpdate_Click" Margin="0,0,8,0" Visibility="Collapsed"/>
                 <Button x:Name="LanguageButton" Content="EN" ToolTip="切换语言" Style="{StaticResource ActionButton}" Click="LanguageButton_Click" Margin="0,0,8,0"/>
+                <Button x:Name="ThemeButton" Content="☀ 日间" ToolTip="切换到日间模式" Style="{StaticResource ActionButton}" Click="ThemeButton_Click" Margin="0,0,8,0"/>
                 <Button x:Name="FloatingWindowButton" Content="▣ 悬浮监控" Style="{StaticResource ActionButton}" Click="FloatingWindow_Click" Margin="0,0,8,0"/>
                 <Button x:Name="RefreshButton" Content="↻ 立即同步" Style="{StaticResource SignalButton}" Click="Refresh_Click"/>
             </StackPanel>
         </Grid>
 
-        <Border x:Name="ConnectionBanner" Grid.Row="1" Background="#2B2417" BorderBrush="#665128" BorderThickness="1"
+        <Border x:Name="ConnectionBanner" Grid.Row="1" Background="{DynamicResource WarningSoft}" BorderBrush="{DynamicResource WarningBorder}" BorderThickness="1"
                 CornerRadius="8" Padding="10,7" Margin="0,0,0,9" Visibility="Collapsed">
-            <TextBlock x:Name="ConnectionText" Foreground="#F2CD7D" TextWrapping="Wrap"/>
+            <TextBlock x:Name="ConnectionText" Foreground="{DynamicResource WarningText}" TextWrapping="Wrap"/>
         </Border>
 
         <ScrollViewer x:Name="DashboardScrollViewer" Grid.Row="2"
@@ -154,31 +183,31 @@
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <Grid>
                             <TextBlock Text="主额度跑道" Style="{StaticResource Label}"/>
-                            <Border x:Name="QuotaStateBadge" HorizontalAlignment="Right" Background="#18382D" CornerRadius="10" Padding="9,3">
-                                <TextBlock x:Name="QuotaStateText" Text="正在同步" Foreground="#68E0B2" FontSize="11" FontWeight="SemiBold"/>
+                            <Border x:Name="QuotaStateBadge" HorizontalAlignment="Right" Background="{DynamicResource SignalSoft}" CornerRadius="10" Padding="9,3">
+                                <TextBlock x:Name="QuotaStateText" Text="正在同步" Foreground="{DynamicResource SignalText}" FontSize="11" FontWeight="SemiBold"/>
                             </Border>
                         </Grid>
                         <Grid Grid.Row="1" Margin="0,8,0,7">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
-                                    <TextBlock x:Name="RemainingText" Text="--" Foreground="{StaticResource Ink}" FontFamily="Cascadia Mono" FontSize="50" FontWeight="SemiBold"/>
-                                    <TextBlock Text="%" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="18" Margin="4,0,0,8"/>
+                                    <TextBlock x:Name="RemainingText" Text="--" Foreground="{DynamicResource Ink}" FontFamily="Cascadia Mono" FontSize="50" FontWeight="SemiBold"/>
+                                    <TextBlock Text="%" Foreground="{DynamicResource Muted}" FontFamily="Cascadia Mono" FontSize="18" Margin="4,0,0,8"/>
                                 </StackPanel>
                                 <TextBlock Text="REMAINING" Style="{StaticResource Label}" FontFamily="Cascadia Mono"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="22,0,0,0">
-                                <Grid><TextBlock Text="0" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
-                                    <TextBlock Text="LIMIT" Foreground="#71838A" FontFamily="Cascadia Mono" FontSize="11" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="100" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="11" HorizontalAlignment="Right"/></Grid>
+                                <Grid><TextBlock Text="0" Foreground="{DynamicResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
+                                    <TextBlock Text="LIMIT" Foreground="{DynamicResource Subtle}" FontFamily="Cascadia Mono" FontSize="11" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="100" Foreground="{DynamicResource Muted}" FontFamily="Cascadia Mono" FontSize="11" HorizontalAlignment="Right"/></Grid>
                                 <ProgressBar x:Name="MainUsageBar" Style="{StaticResource Meter}" Maximum="100" Value="0" Margin="0,7,0,0"/>
                                 <Grid Margin="0,9,0,0">
-                                    <TextBlock x:Name="MainUsedText" Text="等待额度数据" Foreground="{StaticResource Ink}" FontSize="12"/>
-                                    <TextBlock x:Name="MainResetText" Text="" Foreground="{StaticResource Muted}" FontSize="12" HorizontalAlignment="Right"/>
+                                    <TextBlock x:Name="MainUsedText" Text="等待额度数据" Foreground="{DynamicResource Ink}" FontSize="12"/>
+                                    <TextBlock x:Name="MainResetText" Text="" Foreground="{DynamicResource Muted}" FontSize="12" HorizontalAlignment="Right"/>
                                 </Grid>
                             </StackPanel>
                         </Grid>
-                        <TextBlock Grid.Row="2" Text="刻度线使用账户返回的百分比；不同模型可能拥有独立窗口。" Foreground="#71838A" FontSize="11"/>
+                        <TextBlock Grid.Row="2" Text="刻度线使用账户返回的百分比；不同模型可能拥有独立窗口。" Foreground="{DynamicResource Subtle}" FontSize="11"/>
                     </Grid>
                 </Border>
 
@@ -187,9 +216,9 @@
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <TextBlock Text="任务闸门" Style="{StaticResource Label}"/>
                         <StackPanel Grid.Row="1" Margin="0,5,0,6">
-                            <TextBlock x:Name="GuardGlyph" Text="GO" Foreground="{StaticResource Signal}" FontFamily="Cascadia Mono" FontSize="38" FontWeight="Bold"/>
-                            <TextBlock x:Name="GuardStatusText" Text="额度安全，当前无需暂停" Foreground="{StaticResource Ink}" FontSize="14" FontWeight="SemiBold" Margin="0,1,0,0"/>
-                            <TextBlock x:Name="GuardDetailText" Text="达到暂停线后中断当前连接可见任务" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                            <TextBlock x:Name="GuardGlyph" Text="GO" Foreground="{DynamicResource Signal}" FontFamily="Cascadia Mono" FontSize="38" FontWeight="Bold"/>
+                            <TextBlock x:Name="GuardStatusText" Text="额度安全，当前无需暂停" Foreground="{DynamicResource Ink}" FontSize="14" FontWeight="SemiBold" Margin="0,1,0,0"/>
+                            <TextBlock x:Name="GuardDetailText" Text="达到暂停线后中断当前连接可见任务" Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0"/>
                         </StackPanel>
                         <StackPanel Grid.Row="2" Orientation="Horizontal">
                             <Button x:Name="PauseNowButton" Content="暂停可见任务" Style="{StaticResource DangerButton}" Click="PauseNow_Click"/>
@@ -202,8 +231,8 @@
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <Grid><TextBlock Text="额度窗口" Style="{StaticResource Label}"/>
-                            <TextBlock x:Name="ResetCreditText" Text="" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right"/></Grid>
-                        <TextBlock Grid.Row="1" Text="账户可能同时返回总额度和特定模型额度；守卫以最高占用为准。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,7"/>
+                            <TextBlock x:Name="ResetCreditText" Text="" Foreground="{DynamicResource Muted}" FontSize="11" HorizontalAlignment="Right"/></Grid>
+                        <TextBlock Grid.Row="1" Text="账户可能同时返回总额度和特定模型额度；守卫以最高占用为准。" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,5,0,7"/>
                         <ItemsControl x:Name="LimitItems" Grid.Row="2">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -211,14 +240,14 @@
                                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource Ink}" FontSize="12" FontWeight="SemiBold"/>
-                                            <TextBlock Text="{Binding WindowName, StringFormat= · {0}}" Foreground="{StaticResource Muted}" FontSize="11" Margin="4,1,0,0"/>
+                                            <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource Ink}" FontSize="12" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding WindowName, StringFormat= · {0}}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="4,1,0,0"/>
                                         </StackPanel>
-                                        <TextBlock Grid.Column="1" Text="{Binding RemainingText}" Foreground="{StaticResource Ink}" FontFamily="Cascadia Mono" FontSize="11"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding RemainingText}" Foreground="{DynamicResource Ink}" FontFamily="Cascadia Mono" FontSize="11"/>
                                         <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,0">
                                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                             <ProgressBar Style="{StaticResource Meter}" Maximum="100" Value="{Binding UsedPercent}"/>
-                                            <TextBlock Grid.Row="1" Text="{Binding ResetText}" Foreground="#82969D" FontSize="10"
+                                            <TextBlock Grid.Row="1" Text="{Binding ResetText}" Foreground="{DynamicResource Subtle}" FontSize="10"
                                                        HorizontalAlignment="Right" Margin="0,5,0,0"/>
                                         </Grid>
                                     </Grid>
@@ -228,23 +257,35 @@
                     </Grid>
                 </Border>
 
-                <Border x:Name="ForecastCard" Grid.Row="1" Grid.Column="2" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="350">
+                <Border x:Name="ForecastCard" Grid.Row="1" Grid.Column="2" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="370">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                        <TextBlock Text="消耗预测 / 本周" Style="{StaticResource Label}"/>
-                        <TextBlock x:Name="ForecastSummaryText" Grid.Row="1" Text="等待数据" Foreground="{StaticResource Ink}" FontSize="15" FontWeight="SemiBold" Margin="0,9,0,0" TextWrapping="Wrap"/>
+                        <Grid>
+                            <TextBlock Text="消耗预测 / 本周" Style="{StaticResource Label}" VerticalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button x:Name="AccountForecastButton" Content="账号" Style="{StaticResource SignalButton}"
+                                        Height="26" Padding="11,0" FontSize="11" Click="ForecastScope_Click"/>
+                                <Button x:Name="LocalForecastButton" Content="本机" Style="{StaticResource ActionButton}"
+                                        Height="26" Padding="11,0" FontSize="11" Margin="5,0,0,0" Click="ForecastScope_Click"/>
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Grid.Row="1" Margin="0,9,0,0">
+                            <TextBlock x:Name="ForecastSummaryText" Text="等待数据" Foreground="{DynamicResource Ink}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="ForecastScopeNoteText" Text="汇总该账号所有设备的用量" Foreground="{DynamicResource Muted}"
+                                       FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
                         <Grid Grid.Row="2" Margin="0,15,0,0">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="118"/></Grid.RowDefinitions>
                             <Grid>
                                 <TextBlock Text="本周剩余额度" Style="{StaticResource Label}"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Rectangle Width="15" Height="2" Fill="{StaticResource Signal}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="估算" Foreground="{StaticResource Muted}" FontSize="10" Margin="5,0,10,0"/>
-                                    <Rectangle Width="15" Height="2" Fill="#FFB36A" VerticalAlignment="Center"/>
-                                    <TextBlock Text="预测" Foreground="{StaticResource Muted}" FontSize="10" Margin="5,0,0,0"/>
+                                    <Rectangle Width="15" Height="2" Fill="{DynamicResource Signal}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="估算" Foreground="{DynamicResource Muted}" FontSize="10" Margin="5,0,10,0"/>
+                                    <Rectangle Width="15" Height="2" Fill="{DynamicResource Warning}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="预测" Foreground="{DynamicResource Muted}" FontSize="10" Margin="5,0,0,0"/>
                                 </StackPanel>
                             </Grid>
-                            <Border Grid.Row="1" Margin="0,7,0,0" Background="#10181E" BorderBrush="#26343E"
+                            <Border Grid.Row="1" Margin="0,7,0,0" Background="{DynamicResource InputSurface}" BorderBrush="{DynamicResource Line}"
                                     BorderThickness="1" CornerRadius="7" Padding="5">
                                 <Canvas x:Name="RemainingForecastCanvas" ClipToBounds="True"
                                         SizeChanged="RemainingForecastCanvas_SizeChanged"/>
@@ -256,9 +297,9 @@
                         </Grid>
                         <Grid Grid.Row="4">
                             <StackPanel><TextBlock Text="日均 TOKEN" Style="{StaticResource Label}" FontFamily="Cascadia Mono"/>
-                                <TextBlock x:Name="DailyTokensText" Text="--" Foreground="{StaticResource Ink}" FontFamily="Cascadia Mono" FontSize="17" Margin="0,3,0,0"/></StackPanel>
+                                <TextBlock x:Name="DailyTokensText" Text="--" Foreground="{DynamicResource Ink}" FontFamily="Cascadia Mono" FontSize="17" Margin="0,3,0,0"/></StackPanel>
                             <StackPanel HorizontalAlignment="Right"><TextBlock Text="日均额度" Style="{StaticResource Label}" FontFamily="Cascadia Mono" HorizontalAlignment="Right"/>
-                                <TextBlock x:Name="DailyPercentText" Text="--" Foreground="{StaticResource Ink}" FontFamily="Cascadia Mono" FontSize="17" Margin="0,3,0,0" HorizontalAlignment="Right"/></StackPanel>
+                                <TextBlock x:Name="DailyPercentText" Text="--" Foreground="{DynamicResource Ink}" FontFamily="Cascadia Mono" FontSize="17" Margin="0,3,0,0" HorizontalAlignment="Right"/></StackPanel>
                         </Grid>
                     </Grid>
                 </Border>
@@ -267,16 +308,16 @@
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <TextBlock Text="最近任务" Style="{StaticResource Label}"/>
-                        <TextBlock Grid.Row="1" Text="运行态只对当前 App Server 连接可见；其他 Codex 窗口可能显示为历史记录。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,7,0,9"/>
+                        <TextBlock Grid.Row="1" Text="运行态只对当前 App Server 连接可见；其他 Codex 窗口可能显示为历史记录。" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,7,0,9"/>
                         <ListBox x:Name="ThreadList" Grid.Row="2" Background="Transparent" BorderThickness="0"
                                  ScrollViewer.VerticalScrollBarVisibility="Hidden" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <Grid Margin="0,5" ToolTip="{Binding Id}">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/><ColumnDefinition Width="100"/></Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding DisplayTitle}" Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis" FontSize="12"/>
-                                        <TextBlock Grid.Column="1" Text="{Binding StatusText}" Foreground="{StaticResource Signal}" FontSize="11" HorizontalAlignment="Center"/>
-                                        <TextBlock Grid.Column="2" Text="{Binding UpdatedText}" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
+                                        <TextBlock Text="{Binding DisplayTitle}" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" FontSize="12"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding StatusText}" Foreground="{DynamicResource Signal}" FontSize="11" HorizontalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding UpdatedText}" Foreground="{DynamicResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
                                     </Grid>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -291,14 +332,14 @@
                         <Grid Grid.Row="1" Margin="0,12,0,8">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="86"/></Grid.ColumnDefinitions>
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                            <TextBlock Text="预警线" Foreground="{StaticResource Ink}" VerticalAlignment="Center"/>
+                            <TextBlock Text="预警线" Foreground="{DynamicResource Ink}" VerticalAlignment="Center"/>
                             <TextBox x:Name="WarningPercentBox" Grid.Column="1" Text="70" FontFamily="Cascadia Mono" HorizontalContentAlignment="Right"/>
-                            <TextBlock Grid.Row="1" Text="暂停线" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,10,0,0"/>
+                            <TextBlock Grid.Row="1" Text="暂停线" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,10,0,0"/>
                             <TextBox x:Name="PausePercentBox" Grid.Row="1" Grid.Column="1" Text="90" FontFamily="Cascadia Mono" HorizontalContentAlignment="Right" Margin="0,10,0,0"/>
-                            <TextBlock Grid.Row="2" Text="浮窗字号（100–150%）" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,10,0,0"/>
+                            <TextBlock Grid.Row="2" Text="浮窗字号（100–150%）" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,10,0,0"/>
                             <TextBox x:Name="FloatingFontPercentBox" Grid.Row="2" Grid.Column="1" Text="120" FontFamily="Cascadia Mono"
                                      HorizontalContentAlignment="Right" Margin="0,10,0,0"/>
-                            <CheckBox x:Name="AutoPauseCheck" Grid.Row="3" Grid.ColumnSpan="2" Content="超出暂停线时中断可见任务并提示（窗口打开时监控）" Foreground="{StaticResource Ink}" Margin="0,14,0,0"/>
+                            <CheckBox x:Name="AutoPauseCheck" Grid.Row="3" Grid.ColumnSpan="2" Content="超出暂停线时中断可见任务并提示（窗口打开时监控）" Foreground="{DynamicResource Ink}" Margin="0,14,0,0"/>
                         </Grid>
                         <Button Grid.Row="2" Content="保存并应用" Style="{StaticResource SignalButton}" HorizontalAlignment="Right" Click="SavePolicy_Click"/>
                     </Grid>
@@ -309,33 +350,33 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <StackPanel>
                             <TextBlock Text="本机消耗" Style="{StaticResource Label}"/>
-                            <TextBlock x:Name="LocalUsageTokensText" Text="--" Foreground="{StaticResource Ink}"
+                            <TextBlock x:Name="LocalUsageTokensText" Text="--" Foreground="{DynamicResource Ink}"
                                        FontFamily="Cascadia Mono" FontSize="31" FontWeight="SemiBold" Margin="0,14,0,0"/>
-                            <TextBlock Text="TOKEN / 本周" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
+                            <TextBlock Text="TOKEN / 本周" Foreground="{DynamicResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
                             <StackPanel Orientation="Horizontal" Margin="0,9,18,0">
-                                <TextBlock Text="常用模型" Foreground="{StaticResource Muted}" FontSize="11"/>
-                                <TextBlock x:Name="LocalUsageModelText" Text="--" Foreground="{StaticResource Ink}"
+                                <TextBlock Text="常用模型" Foreground="{DynamicResource Muted}" FontSize="11"/>
+                                <TextBlock x:Name="LocalUsageModelText" Text="--" Foreground="{DynamicResource Ink}"
                                            FontFamily="Cascadia Mono" FontSize="11" Margin="8,0,0,0"
                                            TextTrimming="CharacterEllipsis"/>
                             </StackPanel>
-                            <TextBlock x:Name="LocalUsageDetailText" Text="等待本地记录" Foreground="{StaticResource Muted}"
+                            <TextBlock x:Name="LocalUsageDetailText" Text="等待本地记录" Foreground="{DynamicResource Muted}"
                                        FontSize="11" TextWrapping="Wrap" Margin="0,9,18,0"/>
-                            <TextBlock x:Name="LocalUsageEstimateText" Text="等待账户与本机记录" Foreground="{StaticResource Signal}"
+                            <TextBlock x:Name="LocalUsageEstimateText" Text="等待账户与本机记录" Foreground="{DynamicResource Signal}"
                                        FontSize="11" TextWrapping="Wrap" Margin="0,8,18,0"/>
-                            <TextBlock Text="本机 Token 来自本地会话日志；账户 Token 来自 Codex 用量历史。" Foreground="#71838A"
+                            <TextBlock Text="本机 Token 来自本地会话日志；账户 Token 来自 Codex 用量历史。" Foreground="{DynamicResource Subtle}"
                                        FontSize="11" TextWrapping="Wrap" Margin="0,8,18,0"/>
-                            <TextBlock Text="额度占比按同周期 Token 比例估算，不等于官方设备账单。" Foreground="#71838A"
+                            <TextBlock Text="额度占比按同周期 Token 比例估算，不等于官方设备账单。" Foreground="{DynamicResource Subtle}"
                                        FontSize="11" TextWrapping="Wrap" Margin="0,5,18,0"/>
                         </StackPanel>
-                        <Border Grid.Column="1" Background="{StaticResource Line}"/>
+                        <Border Grid.Column="1" Background="{DynamicResource Line}"/>
                         <Grid Grid.Column="2" Margin="20,0,0,0">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <Grid>
                                 <TextBlock Text="项目消耗分布" Style="{StaticResource Label}"/>
-                                <TextBlock x:Name="ProjectUsageCountText" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
+                                <TextBlock x:Name="ProjectUsageCountText" Foreground="{DynamicResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,9,0,0">
-                                <TextBlock x:Name="LocalUsageEmptyText" Text="本周暂无本地 Token 记录" Foreground="{StaticResource Muted}"
+                                <TextBlock x:Name="LocalUsageEmptyText" Text="本周暂无本地 Token 记录" Foreground="{DynamicResource Muted}"
                                            VerticalAlignment="Center" HorizontalAlignment="Center"/>
                                 <ItemsControl x:Name="ProjectUsageItems">
                                     <ItemsControl.ItemTemplate>
@@ -343,18 +384,18 @@
                                             <Grid Margin="0,4,0,9" ToolTip="{Binding ProjectPath}">
                                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding ProjectName}" Foreground="{StaticResource Ink}" FontSize="12"
+                                                <TextBlock Text="{Binding ProjectName}" Foreground="{DynamicResource Ink}" FontSize="12"
                                                            FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Grid.Column="1" Text="{Binding TokensText}" Foreground="{StaticResource Ink}"
+                                                <TextBlock Grid.Column="1" Text="{Binding TokensText}" Foreground="{DynamicResource Ink}"
                                                            FontFamily="Cascadia Mono" FontSize="11" Margin="12,0,0,0"/>
                                                 <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource Meter}" Maximum="100"
                                                              Value="{Binding WeeklyQuotaBarValue, Mode=OneWay}" Margin="0,6,0,0"/>
                                                 <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="0,5,0,0">
                                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                    <TextBlock Text="{Binding MostUsedModelText}" Foreground="{StaticResource Muted}"
+                                                    <TextBlock Text="{Binding MostUsedModelText}" Foreground="{DynamicResource Muted}"
                                                                FontFamily="Cascadia Mono" FontSize="10" Margin="0,0,12,0"
                                                                TextTrimming="CharacterEllipsis"/>
-                                                    <TextBlock Grid.Column="1" Text="{Binding QuotaShareText}" Foreground="{StaticResource Muted}"
+                                                    <TextBlock Grid.Column="1" Text="{Binding QuotaShareText}" Foreground="{DynamicResource Muted}"
                                                                FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right"/>
                                                 </Grid>
                                             </Grid>
@@ -371,26 +412,26 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <StackPanel>
                             <TextBlock Text="当日消耗 / 时段" Style="{StaticResource Label}"/>
-                            <TextBlock x:Name="DailyUsageTokensText" Text="--" Foreground="{StaticResource Ink}"
+                            <TextBlock x:Name="DailyUsageTokensText" Text="--" Foreground="{DynamicResource Ink}"
                                        FontFamily="Cascadia Mono" FontSize="31" FontWeight="SemiBold" Margin="0,14,0,0"/>
-                            <TextBlock Text="TOKEN / 今日" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
-                            <TextBlock x:Name="DailyUsageShareText" Text="周总额度占比暂不可用" Foreground="{StaticResource Signal}"
+                            <TextBlock Text="TOKEN / 今日" Foreground="{DynamicResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
+                            <TextBlock x:Name="DailyUsageShareText" Text="周总额度占比暂不可用" Foreground="{DynamicResource Signal}"
                                        FontFamily="Cascadia Mono" FontSize="11" TextWrapping="Wrap" Margin="0,12,18,0"/>
                             <TextBlock Text="按账号本周 Token 历史与周窗口已用比例估算，不是官方逐日账单。"
-                                       Foreground="#82969D" FontSize="11" TextWrapping="Wrap" Margin="0,9,18,0"/>
+                                       Foreground="{DynamicResource Subtle}" FontSize="11" TextWrapping="Wrap" Margin="0,9,18,0"/>
                         </StackPanel>
-                        <Border Grid.Column="1" Background="{StaticResource Line}"/>
+                        <Border Grid.Column="1" Background="{DynamicResource Line}"/>
                         <Grid Grid.Column="2" Margin="20,0,0,0">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <Grid>
                                 <TextBlock Text="今日每小时消耗" Style="{StaticResource Label}"/>
-                                <TextBlock Text="00–23 时" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono"
+                                <TextBlock Text="00–23 时" Foreground="{DynamicResource Muted}" FontFamily="Cascadia Mono"
                                            FontSize="10" HorizontalAlignment="Right"/>
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,10,0,0" MinHeight="120">
                                 <Canvas x:Name="DailyUsageCanvas" Height="120" ClipToBounds="True"
                                         SizeChanged="DailyUsageCanvas_SizeChanged"/>
-                                <TextBlock x:Name="DailyUsageEmptyText" Text="今日暂无本机 Token" Foreground="{StaticResource Muted}"
+                                <TextBlock x:Name="DailyUsageEmptyText" Text="今日暂无本机 Token" Foreground="{DynamicResource Muted}"
                                            VerticalAlignment="Center" HorizontalAlignment="Center"/>
                             </Grid>
                         </Grid>
@@ -405,27 +446,27 @@
                         </Grid.RowDefinitions>
                         <Grid>
                             <TextBlock Text="共享统计" Style="{StaticResource Label}"/>
-                            <TextBlock x:Name="SharedUsageSummaryText" Foreground="{StaticResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
+                            <TextBlock x:Name="SharedUsageSummaryText" Foreground="{DynamicResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
                         </Grid>
                         <TextBlock Grid.Row="1" Text="使用相同同步密钥的设备归为一组；不会上传 Codex 凭证、任务内容、项目名称或路径。"
-                                   Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,10"/>
+                                   Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,10"/>
                         <Grid Grid.Row="2">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="78"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <CheckBox x:Name="SharedUsageEnabledCheck" Grid.ColumnSpan="2" Content="启用共享统计"
-                                      Foreground="{StaticResource Ink}"/>
-                            <TextBlock Grid.Row="1" Text="服务器地址" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
+                                      Foreground="{DynamicResource Ink}"/>
+                            <TextBlock Grid.Row="1" Text="服务器地址" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
                             <TextBox x:Name="SharedUsageServerUrlBox" Grid.Row="1" Grid.Column="1"
                                      Text="https://www.woliu.top" Margin="0,9,0,0"/>
-                            <TextBlock Grid.Row="2" Text="设备名称" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
+                            <TextBlock Grid.Row="2" Text="设备名称" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
                             <TextBox x:Name="SharedUsageDeviceNameBox" Grid.Row="2" Grid.Column="1" Margin="0,9,0,0"/>
-                            <TextBlock Grid.Row="3" Text="同步密钥" Foreground="{StaticResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
+                            <TextBlock Grid.Row="3" Text="同步密钥" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
                             <Grid Grid.Row="3" Grid.Column="1" Margin="0,9,0,0">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <PasswordBox x:Name="SharedUsageSyncKeyBox" Background="#10181E" Foreground="{StaticResource Ink}"
-                                             BorderBrush="#354650" BorderThickness="1" Padding="9,6"/>
+                                <PasswordBox x:Name="SharedUsageSyncKeyBox" Background="{DynamicResource InputSurface}" Foreground="{DynamicResource Ink}"
+                                             BorderBrush="{DynamicResource LineStrong}" BorderThickness="1" Padding="9,6"/>
                                 <Button Grid.Column="1" Content="生成密钥" Style="{StaticResource ActionButton}" Height="30"
                                         Padding="9,0" Margin="7,0,0,0" Click="GenerateSharedSyncKey_Click"/>
                                 <Button Grid.Column="2" Content="复制密钥" Style="{StaticResource ActionButton}" Height="30"
@@ -433,13 +474,13 @@
                             </Grid>
                         </Grid>
                         <Grid Grid.Row="3" Margin="0,10,0,10">
-                            <TextBlock x:Name="SharedUsageStatusText" Text="等待共享设置" Foreground="{StaticResource Signal}"
+                            <TextBlock x:Name="SharedUsageStatusText" Text="等待共享设置" Foreground="{DynamicResource Signal}"
                                        FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,118,0"/>
                             <Button x:Name="SharedUsageSaveButton" Content="保存并同步" Style="{StaticResource SignalButton}"
                                     Height="32" HorizontalAlignment="Right" Click="SaveSharedUsage_Click"/>
                         </Grid>
                         <Grid Grid.Row="4" MinHeight="70">
-                            <TextBlock x:Name="SharedUsageEmptyText" Text="暂无共享设备数据" Foreground="{StaticResource Muted}"
+                            <TextBlock x:Name="SharedUsageEmptyText" Text="暂无共享设备数据" Foreground="{DynamicResource Muted}"
                                        VerticalAlignment="Center" HorizontalAlignment="Center"/>
                             <ItemsControl x:Name="SharedDeviceItems">
                                 <ItemsControl.ItemTemplate>
@@ -448,19 +489,19 @@
                                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding DeviceName}" Foreground="{StaticResource Ink}" FontSize="12"
+                                                <TextBlock Text="{Binding DeviceName}" Foreground="{DynamicResource Ink}" FontSize="12"
                                                            FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Text="{Binding CurrentDeviceText}" Foreground="{StaticResource Signal}" FontSize="10" Margin="8,1,0,0"/>
+                                                <TextBlock Text="{Binding CurrentDeviceText}" Foreground="{DynamicResource Signal}" FontSize="10" Margin="8,1,0,0"/>
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1" Text="{Binding TokensText}" Foreground="{StaticResource Ink}"
+                                            <TextBlock Grid.Column="1" Text="{Binding TokensText}" Foreground="{DynamicResource Ink}"
                                                        FontFamily="Cascadia Mono" FontSize="11" Margin="12,0,0,0"/>
                                             <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource Meter}" Maximum="100"
                                                          Value="{Binding TokenSharePercent}" Margin="0,6,0,0"/>
-                                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding ShareText}" Foreground="{StaticResource Muted}"
+                                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding ShareText}" Foreground="{DynamicResource Muted}"
                                                        FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right" Margin="0,5,0,0"/>
                                             <Grid Grid.Row="3" Grid.ColumnSpan="2" Margin="0,4,0,0">
-                                                <TextBlock Text="{Binding ModelText}" Foreground="{StaticResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
-                                                <TextBlock Text="{Binding DetailText}" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right"/>
+                                                <TextBlock Text="{Binding ModelText}" Foreground="{DynamicResource Muted}" FontFamily="Cascadia Mono" FontSize="10"/>
+                                                <TextBlock Text="{Binding DetailText}" Foreground="{DynamicResource Muted}" FontSize="10" HorizontalAlignment="Right"/>
                                             </Grid>
                                         </Grid>
                                     </DataTemplate>
@@ -473,8 +514,8 @@
         </ScrollViewer>
 
         <Grid Grid.Row="3" Margin="2,8,2,0">
-            <TextBlock x:Name="FooterStatusText" Text="数据只保存在本机；认证由 Codex 管理。" Foreground="#71838A" FontSize="11"/>
-            <TextBlock x:Name="LastSyncText" Text="" Foreground="#71838A" FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right"/>
+            <TextBlock x:Name="FooterStatusText" Text="数据只保存在本机；认证由 Codex 管理。" Foreground="{DynamicResource Subtle}" FontSize="11"/>
+            <TextBlock x:Name="LastSyncText" Text="" Foreground="{DynamicResource Subtle}" FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right"/>
         </Grid>
     </Grid>
 </Window>

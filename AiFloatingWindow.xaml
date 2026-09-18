@@ -30,14 +30,20 @@
         </ContextMenu>
     </Window.ContextMenu>
     <Window.Resources>
-        <SolidColorBrush x:Key="FloatInk" Color="#EDF6F3"/>
-        <SolidColorBrush x:Key="FloatMuted" Color="#829996"/>
-        <SolidColorBrush x:Key="FloatSignal" Color="#38D7B2"/>
+        <SolidColorBrush x:Key="FloatInk" Color="#F4F7FB"/>
+        <SolidColorBrush x:Key="FloatMuted" Color="#9EADC2"/>
+        <SolidColorBrush x:Key="FloatSignal" Color="#47D7AC"/>
+        <SolidColorBrush x:Key="ButtonHover" Color="#233550"/>
+        <SolidColorBrush x:Key="Line" Color="#263750"/>
+        <SolidColorBrush x:Key="SignalSoft" Color="#153A34"/>
+        <SolidColorBrush x:Key="FloatingShell" Color="#F5111C2D"/>
+        <SolidColorBrush x:Key="FloatingPeek" Color="#70384A61"/>
+        <SolidColorBrush x:Key="FloatingSecondaryInk" Color="#C5D0DE"/>
         <Style x:Key="ChromeButton" TargetType="Button">
             <Setter Property="Width" Value="18"/>
             <Setter Property="Height" Value="17"/>
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{StaticResource FloatMuted}"/>
+            <Setter Property="Foreground" Value="{DynamicResource FloatMuted}"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="FontFamily" Value="Cascadia Mono"/>
             <Setter Property="FontSize" Value="{DynamicResource FloatFontButton}"/>
@@ -50,8 +56,8 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonSurface" Property="Background" Value="#283740"/>
-                                <Setter Property="Foreground" Value="{StaticResource FloatInk}"/>
+                                <Setter TargetName="ButtonSurface" Property="Background" Value="{DynamicResource ButtonHover}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource FloatInk}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -61,7 +67,7 @@
     </Window.Resources>
 
     <Grid Background="Transparent">
-    <Border x:Name="Shell" Margin="4" Background="#F51A232B" BorderBrush="#40515A"
+    <Border x:Name="Shell" Margin="4" Background="{DynamicResource FloatingShell}" BorderBrush="{DynamicResource Line}"
             BorderThickness="1" CornerRadius="10" MouseLeftButtonDown="Shell_MouseLeftButtonDown">
         <Grid>
             <Grid Margin="8,3,5,5">
@@ -75,10 +81,10 @@
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="{StaticResource FloatSignal}" Margin="0,0,6,0"/>
-                        <TextBlock x:Name="BrandText" Text="CODEX / LIVE" Foreground="{StaticResource FloatSignal}" FontFamily="Cascadia Mono"
+                        <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="{DynamicResource FloatSignal}" Margin="0,0,6,0"/>
+                        <TextBlock x:Name="BrandText" Text="CODEX / LIVE" Foreground="{DynamicResource FloatSignal}" FontFamily="Cascadia Mono"
                                    FontWeight="SemiBold" FontSize="{DynamicResource FloatFontBrand}"/>
-                        <TextBlock x:Name="SyncAgeText" Text="连接中" Foreground="{StaticResource FloatMuted}"
+                        <TextBlock x:Name="SyncAgeText" Text="连接中" Foreground="{DynamicResource FloatMuted}"
                                    FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontSmall}" Margin="6,0,0,0"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
@@ -92,38 +98,38 @@
                     <Grid Height="27">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Border x:Name="TaskStatusBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                Background="#173A32" CornerRadius="5" Padding="4,1">
-                            <TextBlock x:Name="TaskStatusText" Text="正在连接" Foreground="{StaticResource FloatSignal}"
+                                Background="{DynamicResource SignalSoft}" CornerRadius="5" Padding="4,1">
+                            <TextBlock x:Name="TaskStatusText" Text="正在连接" Foreground="{DynamicResource FloatSignal}"
                                        FontSize="{DynamicResource FloatFontSmall}" FontWeight="SemiBold"/>
                         </Border>
-                        <TextBlock x:Name="TaskNameText" Grid.Column="1" Text="读取最近任务…" Foreground="{StaticResource FloatInk}"
+                        <TextBlock x:Name="TaskNameText" Grid.Column="1" Text="读取最近任务…" Foreground="{DynamicResource FloatInk}"
                                    FontSize="{DynamicResource FloatFontTask}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                                    VerticalAlignment="Center" Margin="5,0,0,0" ToolTip="读取最近任务…"/>
                     </Grid>
                     <StackPanel x:Name="SecondaryTasksPanel"/>
                 </StackPanel>
 
-                <Border Grid.Row="2" Background="#33434B"/>
+                <Border Grid.Row="2" Background="{DynamicResource Line}"/>
 
                 <Grid Grid.Row="3" Margin="0,3,2,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <StackPanel>
-                        <TextBlock Text="剩余额度" Foreground="{StaticResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
+                        <TextBlock Text="剩余额度" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock x:Name="RemainingQuotaText" Text="--" Foreground="{StaticResource FloatInk}"
+                            <TextBlock x:Name="RemainingQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
                                        FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
-                            <TextBlock Text="%" Foreground="{StaticResource FloatMuted}" FontFamily="Cascadia Mono"
+                            <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
                                        FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
                         </StackPanel>
                     </StackPanel>
-                    <Border Grid.Column="1" Background="#33434B" Margin="0,1,0,1"/>
+                    <Border Grid.Column="1" Background="{DynamicResource Line}" Margin="0,1,0,1"/>
                     <StackPanel Grid.Column="2" Margin="6,0,0,0">
-                        <TextBlock Text="当前推理模型" Foreground="{StaticResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
+                        <TextBlock Text="当前推理模型" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
                         <Grid Margin="0,2,0,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBlock x:Name="ModelText" Text="--" Foreground="{StaticResource FloatInk}" FontFamily="Cascadia Mono"
+                            <TextBlock x:Name="ModelText" Text="--" Foreground="{DynamicResource FloatInk}" FontFamily="Cascadia Mono"
                                        FontSize="{DynamicResource FloatFontModel}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock x:Name="ReasoningText" Grid.Column="1" Text="" Foreground="{StaticResource FloatMuted}"
+                            <TextBlock x:Name="ReasoningText" Grid.Column="1" Text="" Foreground="{DynamicResource FloatMuted}"
                                        FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontSmall}" Margin="4,1,0,0"/>
                         </Grid>
                     </StackPanel>
@@ -135,9 +141,9 @@
     <!-- 靠边收起后唯一保留的轻量触发面；方向由代码随吸附边缘调整。 -->
     <Border x:Name="PeekHandle" Width="8" Height="56" HorizontalAlignment="Left"
             VerticalAlignment="Center" Visibility="Collapsed" Cursor="Hand"
-            Background="#70304448" BorderThickness="0"
+            Background="{DynamicResource FloatingPeek}" BorderThickness="0"
             CornerRadius="6,0,0,6" ToolTip="悬停展开" MouseLeftButtonDown="PeekHandle_MouseLeftButtonDown">
-        <Rectangle x:Name="PeekSignal" Width="2" Height="34" RadiusX="1" RadiusY="1" Fill="#D938D7B2"/>
+        <Rectangle x:Name="PeekSignal" Width="2" Height="34" RadiusX="1" RadiusY="1" Fill="{DynamicResource FloatSignal}"/>
     </Border>
     </Grid>
 </Window>

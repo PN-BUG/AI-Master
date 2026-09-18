@@ -15,7 +15,7 @@ AIMaster is a standalone Windows monitor for Codex quota and task activity. It b
 ![AIMaster dashboard in English](docs/images/dashboard-en.png)
 
 - View total Codex quota, 7-day and 5-hour windows, usage percentages, and reset times.
-- Forecast the remaining weekly quota from Monday through Sunday using recent consumption.
+- Forecast the remaining weekly quota from Monday through Sunday, switching between the whole account's consumption rate and a projection based only on this device's rate.
 - Track this device's weekly Codex tokens and token-weighted top model, estimate device/project quota attribution from same-period account token history, and show each project's top model without assigning multi-device usage entirely to the current machine.
 - Show today's local tokens, their estimated share of the account's total weekly quota, and an hourly usage line chart from 00 through 23.
 - Optionally group multiple devices through Woliu shared usage and show each device's token share, top model, session count, and last sync time.

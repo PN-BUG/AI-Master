@@ -63,6 +63,7 @@ public static class LocalizationService
         ["运行态只对当前 App Server 连接可见；其他 Codex 窗口可能显示为历史记录。"] = "Live state is visible only to this App Server connection; other Codex windows may appear as history.",
         ["暂停可见任务"] = "Pause visible tasks", ["解除本地闸门"] = "Release local guard",
         ["消耗预测 / 近 7 日"] = "USAGE FORECAST / LAST 7 DAYS", ["消耗预测 / 本周"] = "USAGE FORECAST / THIS WEEK",
+        ["账号"] = "Account", ["本机"] = "This device", ["汇总该账号所有设备的用量"] = "Includes usage from all devices on this account",
         ["本周剩余额度"] = "WEEKLY QUOTA REMAINING", ["估算"] = "Estimated", ["预测"] = "Forecast",
         ["近 7 日 TOKEN"] = "LAST 7 DAYS TOKENS", ["等待数据"] = "Waiting for data", ["日均 TOKEN"] = "DAILY TOKENS",
         ["日均额度"] = "DAILY QUOTA", ["最近任务"] = "RECENT TASKS", ["等待连接"] = "Waiting to connect",

@@ -26,6 +26,9 @@ public static class FloatingFontScales
 
 public sealed class AiManagerSettings
 {
+    [JsonPropertyName("theme")]
+    public string Theme { get; set; } = ThemeModes.Dark;
+
     [JsonPropertyName("warningPercent")]
     public double WarningPercent { get; set; } = 70;
 
@@ -80,7 +83,6 @@ public sealed class AiManagerSettings
 
     [JsonPropertyName("sharedUsageDeviceName")]
     public string SharedUsageDeviceName { get; set; } = Environment.MachineName;
-
 }
 
 public sealed class AiDashboardCardSize
@@ -163,6 +165,7 @@ public sealed class AiLocalUsageSummary
     public long TodayTokens { get; init; }
     public int SessionCount { get; init; }
     public string? MostUsedModel { get; init; }
+    public List<AiDailyUsage> DailyUsage { get; init; } = new();
     public List<AiHourlyUsage> TodayHourlyUsage { get; init; } = new();
     public List<AiProjectUsage> Projects { get; init; } = new();
 }

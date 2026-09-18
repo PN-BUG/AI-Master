@@ -416,6 +416,46 @@ internal sealed class AiManagerService : IAsyncDisposable
         return new AiForecast(dailyTokens, dailyPercent, exhaustion, beforeReset, summary);
     }
 
+    public AiForecast BuildLocalForecast(AiManagerSnapshot snapshot)
+    {
+        var localUsage = snapshot.LocalUsage;
+        var dailyTokens = localUsage.DailyUsage.Sum(item => (double)item.Tokens) / 7d;
+        var main = snapshot.MainLimit;
+        if (main?.ResetsAt is null || main.WindowDurationMinutes <= 0 || main.UsedPercent <= 0)
+            return new AiForecast(dailyTokens, 0, null, false,
+                LocalizationService.L("积累更多额度数据后可预测本机消耗", "More quota data is needed before forecasting local usage"));
+
+        var accountTokens = snapshot.DailyUsage
+            .Where(item => item.Date >= localUsage.PeriodStart && item.Date <= localUsage.PeriodEnd)
+            .Sum(item => item.Tokens);
+        if (accountTokens <= 0 || localUsage.TotalTokens <= 0 || localUsage.TotalTokens > accountTokens)
+            return new AiForecast(dailyTokens, 0, null, false,
+                localUsage.TotalTokens <= 0
+                    ? LocalizationService.L("本周暂无本机消耗，暂不生成预测", "No local usage this week; no forecast is available")
+                    : LocalizationService.L("账户 Token 历史不足，暂无法估算本机预测", "Account token history is incomplete; local forecast is unavailable"));
+
+        var start = main.ResetsAt.Value.AddMinutes(-main.WindowDurationMinutes);
+        var elapsedDays = Math.Max((snapshot.CapturedAt - start).TotalDays, 1d / 24d);
+        var localShare = localUsage.TotalTokens / (double)accountTokens;
+        var dailyPercent = main.UsedPercent * localShare / elapsedDays;
+        if (dailyPercent <= 0.001)
+            return new AiForecast(dailyTokens, dailyPercent, null, false,
+                LocalizationService.L("本机当前消耗很低，预计不会单独耗尽账号额度", "Local usage is low and is unlikely to exhaust the account quota on its own"));
+
+        var exhaustion = snapshot.CapturedAt.AddDays(main.RemainingPercent / dailyPercent);
+        var beforeReset = exhaustion < main.ResetsAt.Value;
+        var projectedPercent = Math.Min(999,
+            main.UsedPercent + dailyPercent * (main.ResetsAt.Value - snapshot.CapturedAt).TotalDays);
+        var summary = beforeReset
+            ? LocalizationService.IsEnglish
+                ? $"At this device's current rate, the account quota may be exhausted by {exhaustion.LocalDateTime.ToString("MMM d HH:mm", System.Globalization.CultureInfo.InvariantCulture)}"
+                : $"按本机当前速度，账号额度预计 {exhaustion.LocalDateTime:M月d日 HH:mm} 触顶"
+            : LocalizationService.IsEnglish
+                ? $"At this device's current rate, account usage may reach about {projectedPercent:0}% by the end of this window"
+                : $"按本机当前速度，本周期结束时账号约使用 {projectedPercent:0}%";
+        return new AiForecast(dailyTokens, dailyPercent, exhaustion, beforeReset, summary);
+    }
+
     private AiLocalUsageSummary DiscoverLocalUsage(CancellationToken cancellationToken)
     {
         try
@@ -442,7 +482,10 @@ internal sealed class AiManagerService : IAsyncDisposable
         var weekEnd = weekStart.AddDays(6);
         if (!Directory.Exists(sessionsRoot))
             return new AiLocalUsageSummary { PeriodStart = weekStart, PeriodEnd = weekEnd };
-        var earliestWriteUtc = weekStart.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var rollingStart = today.AddDays(-6);
+        var scanStart = rollingStart < weekStart ? rollingStart : weekStart;
+        var earliestWriteUtc = scanStart.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
         var sessionRecords = new List<(string SessionPath, LocalUsageRecord Record)>();
 
         foreach (var path in Directory.EnumerateFiles(sessionsRoot, "*.jsonl", SearchOption.AllDirectories))
@@ -455,15 +498,17 @@ internal sealed class AiManagerService : IAsyncDisposable
             lock (cursor.Sync)
             {
                 sessionRecords.AddRange(cursor.Records
-                    .Where(item => item.Date >= weekStart && item.Date <= weekEnd)
+                    .Where(item => item.Date >= scanStart && item.Date <= weekEnd)
                     .Select(item => (path, item)));
             }
         }
 
-        var total = sessionRecords.Sum(item => item.Record.Tokens);
-        var today = DateOnly.FromDateTime(DateTime.Now);
-        var todayRecords = sessionRecords.Where(item => item.Record.Date == today).ToList();
-        var projects = sessionRecords
+        var weeklyRecords = sessionRecords
+            .Where(item => item.Record.Date >= weekStart && item.Record.Date <= weekEnd)
+            .ToList();
+        var total = weeklyRecords.Sum(item => item.Record.Tokens);
+        var todayRecords = weeklyRecords.Where(item => item.Record.Date == today).ToList();
+        var projects = weeklyRecords
             .GroupBy(item => item.Record.ProjectPath, StringComparer.OrdinalIgnoreCase)
             .Select(group => new AiProjectUsage
             {
@@ -483,9 +528,18 @@ internal sealed class AiManagerService : IAsyncDisposable
             PeriodEnd = weekEnd,
             TotalTokens = total,
             TodayTokens = todayRecords.Sum(item => item.Record.Tokens),
-            SessionCount = sessionRecords.Select(item => item.SessionPath)
+            SessionCount = weeklyRecords.Select(item => item.SessionPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-            MostUsedModel = SelectMostUsedModel(sessionRecords.Select(item => item.Record)),
+            MostUsedModel = SelectMostUsedModel(weeklyRecords.Select(item => item.Record)),
+            DailyUsage = Enumerable.Range(0, 7)
+                .Select(offset => rollingStart.AddDays(offset))
+                .Select(date => new AiDailyUsage
+                {
+                    Date = date,
+                    Tokens = sessionRecords.Where(item => item.Record.Date == date)
+                        .Sum(item => item.Record.Tokens)
+                })
+                .ToList(),
             TodayHourlyUsage = Enumerable.Range(0, 24)
                 .Select(hour => new AiHourlyUsage
                 {
@@ -696,6 +750,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             if (!File.Exists(_settingsPath)) return new AiManagerSettings();
             var settings = JsonSerializer.Deserialize<AiManagerSettings>(File.ReadAllText(_settingsPath))
                            ?? new AiManagerSettings();
+            settings.Theme = ThemeModes.Normalize(settings.Theme);
             settings.TaskNameSource = TaskNameSources.Normalize(settings.TaskNameSource);
             settings.FloatingFontScale = FloatingFontScales.Normalize(settings.FloatingFontScale);
             settings.DashboardCardLayout ??= new List<string>();

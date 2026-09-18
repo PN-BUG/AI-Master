@@ -25,6 +25,8 @@ public partial class AiManagerWindow : Window
     private bool _overrideCurrentBreach;
     private bool _alertedForCurrentBreach;
     private bool _checkingForUpdates;
+    private bool _showLocalForecast;
+    private string _theme = ThemeModes.Dark;
     private UpdateCheckResult? _availableUpdate;
     private IReadOnlyList<AiRemainingForecastPoint> _weeklyRemainingForecast =
         Array.Empty<AiRemainingForecastPoint>();
@@ -60,11 +62,13 @@ public partial class AiManagerWindow : Window
     public AiManagerWindow()
     {
         InitializeComponent();
+        ApplyTheme(_service.Settings.Theme, refreshContent: false);
         InitializeDashboardCards();
         _timer.Tick += async (_, _) => await RefreshAsync(showErrors: false);
         LocalizationService.LanguageChanged += LocalizationService_LanguageChanged;
         LocalizationService.Apply(this);
         UpdateLanguageButton();
+        UpdateThemeButton();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -226,6 +230,33 @@ public partial class AiManagerWindow : Window
         LanguageButton.ToolTip = LocalizationService.IsEnglish ? "Switch to Chinese" : "切换到英语";
     }
 
+    private void ThemeButton_Click(object sender, RoutedEventArgs e)
+    {
+        var next = _theme == ThemeModes.Dark ? ThemeModes.Light : ThemeModes.Dark;
+        var settings = _service.ReloadSettings();
+        settings.Theme = next;
+        _service.SaveSettings(settings);
+        ApplyTheme(next, refreshContent: true);
+        AiFloatingWindow.ApplySavedTheme(next);
+    }
+
+    private void ApplyTheme(string? theme, bool refreshContent)
+    {
+        _theme = ThemeModes.Normalize(theme);
+        ThemeService.Apply(Resources, _theme);
+        UpdateThemeButton();
+        if (refreshContent && _service.LastSnapshot is { } snapshot)
+            RenderSnapshot(snapshot);
+    }
+
+    private void UpdateThemeButton()
+    {
+        if (ThemeButton is null) return;
+        var dark = _theme == ThemeModes.Dark;
+        ThemeButton.Content = dark ? L("☀ 日间", "☀ Light") : L("☾ 夜间", "☾ Dark");
+        ThemeButton.ToolTip = dark ? L("切换到日间模式", "Switch to light mode") : L("切换到夜间模式", "Switch to dark mode");
+    }
+
     private void InitializeDashboardCards()
     {
         var definitions = new[]
@@ -317,7 +348,7 @@ public partial class AiManagerWindow : Window
         var grip = new TextBlock
         {
             Text = "⋮⋮",
-            Foreground = Brush("#667881"),
+            Foreground = ThemeBrush("Subtle"),
             FontFamily = new FontFamily("Cascadia Mono"),
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
@@ -702,14 +733,7 @@ public partial class AiManagerWindow : Window
             ? (LocalizationService.IsEnglish ? $"Resets available × {snapshot.ResetCredits}" : $"可用重置 × {snapshot.ResetCredits}")
             : L("无可用重置", "No resets available");
 
-        var forecast = _service.BuildForecast(snapshot);
-        ForecastSummaryText.Text = forecast.Summary;
-        ForecastSummaryText.Foreground = Brush(forecast.ExhaustsBeforeReset ? "#FFB36A" : "#F1F5F2");
-        DailyTokensText.Text = FormatTokens(forecast.DailyTokens);
-        DailyPercentText.Text = forecast.DailyPercent > 0 ? $"{forecast.DailyPercent:0.#}%" : "--";
-        _weeklyRemainingForecast = AiManagerService.BuildWeeklyRemainingForecast(snapshot, forecast);
-        RenderRemainingForecastChart();
-        RenderUsageBars(snapshot.DailyUsage);
+        RenderForecast(snapshot);
         var weeklyLimit = snapshot.Limits
             .Where(item => item.WindowDurationMinutes is >= 6 * 24 * 60 and <= 8 * 24 * 60)
             .OrderBy(item => Math.Abs(item.WindowDurationMinutes - 7 * 24 * 60))
@@ -720,6 +744,38 @@ public partial class AiManagerWindow : Window
             ? (LocalizationService.IsEnglish ? $"Lifetime {FormatTokens(lifetime)} tokens · From Codex App Server" : $"累计 {FormatTokens(lifetime)} tokens · 数据来自 Codex App Server")
             : L("数据来自 Codex App Server；认证由 Codex 管理。", "Data comes from Codex App Server; authentication is managed by Codex.");
         LocalizationService.Apply(this);
+    }
+
+    private void ForecastScope_Click(object sender, RoutedEventArgs e)
+    {
+        var showLocal = ReferenceEquals(sender, LocalForecastButton);
+        if (_showLocalForecast == showLocal) return;
+        _showLocalForecast = showLocal;
+        UpdateForecastScopeButtons();
+        if (_service.LastSnapshot is { } snapshot) RenderForecast(snapshot);
+    }
+
+    private void UpdateForecastScopeButtons()
+    {
+        AccountForecastButton.Style = (Style)FindResource(_showLocalForecast ? "ActionButton" : "SignalButton");
+        LocalForecastButton.Style = (Style)FindResource(_showLocalForecast ? "SignalButton" : "ActionButton");
+    }
+
+    private void RenderForecast(AiManagerSnapshot snapshot)
+    {
+        var forecast = _showLocalForecast
+            ? _service.BuildLocalForecast(snapshot)
+            : _service.BuildForecast(snapshot);
+        ForecastSummaryText.Text = forecast.Summary;
+        ForecastSummaryText.Foreground = ThemeBrush(forecast.ExhaustsBeforeReset ? "Warning" : "Ink");
+        ForecastScopeNoteText.Text = _showLocalForecast
+            ? L("以账号当前剩余额度为起点，仅按本机速度推演", "Starts from the account's current remaining quota and projects only this device's rate")
+            : L("汇总该账号所有设备的用量", "Includes usage from all devices on this account");
+        DailyTokensText.Text = FormatTokens(forecast.DailyTokens);
+        DailyPercentText.Text = forecast.DailyPercent > 0 ? $"{forecast.DailyPercent:0.#}%" : "--";
+        _weeklyRemainingForecast = AiManagerService.BuildWeeklyRemainingForecast(snapshot, forecast);
+        RenderRemainingForecastChart();
+        RenderUsageBars(_showLocalForecast ? snapshot.LocalUsage.DailyUsage : snapshot.DailyUsage);
     }
 
     private async Task ApplyGuardAsync(AiManagerSnapshot snapshot)
@@ -763,23 +819,23 @@ public partial class AiManagerWindow : Window
         if (used >= _service.Settings.PausePercent)
         {
             QuotaStateText.Text = L("暂停线", "Pause limit");
-            QuotaStateText.Foreground = Brush("#FFB4B8");
-            QuotaStateBadge.Background = Brush("#3A2528");
-            MainUsageBar.Foreground = Brush("#E45B65");
+            QuotaStateText.Foreground = ThemeBrush("DangerText");
+            QuotaStateBadge.Background = ThemeBrush("DangerSoft");
+            MainUsageBar.Foreground = ThemeBrush("Danger");
         }
         else if (used >= _service.Settings.WarningPercent)
         {
             QuotaStateText.Text = L("接近限制", "Near limit");
-            QuotaStateText.Foreground = Brush("#F2CD7D");
-            QuotaStateBadge.Background = Brush("#382F1D");
-            MainUsageBar.Foreground = Brush("#E6A846");
+            QuotaStateText.Foreground = ThemeBrush("WarningText");
+            QuotaStateBadge.Background = ThemeBrush("WarningSoft");
+            MainUsageBar.Foreground = ThemeBrush("Warning");
         }
         else
         {
             QuotaStateText.Text = L("额度安全", "Quota safe");
-            QuotaStateText.Foreground = Brush("#68E0B2");
-            QuotaStateBadge.Background = Brush("#18382D");
-            MainUsageBar.Foreground = Brush("#22C58B");
+            QuotaStateText.Foreground = ThemeBrush("SignalText");
+            QuotaStateBadge.Background = ThemeBrush("SignalSoft");
+            MainUsageBar.Foreground = ThemeBrush("Signal");
         }
     }
 
@@ -787,7 +843,7 @@ public partial class AiManagerWindow : Window
     {
         _localGuardPaused = paused;
         GuardGlyph.Text = paused ? "HOLD" : "GO";
-        GuardGlyph.Foreground = Brush(paused ? "#E45B65" : "#22C58B");
+        GuardGlyph.Foreground = ThemeBrush(paused ? "Danger" : "Signal");
         GuardStatusText.Text = status;
         GuardDetailText.Text = detail;
         ResumeGuardButton.Visibility = paused ? Visibility.Visible : Visibility.Collapsed;
@@ -986,7 +1042,7 @@ public partial class AiManagerWindow : Window
             column.Children.Add(new Border
             {
                 Height = 8 + 54d * day.Tokens / max,
-                Background = Brush(day.Date == DateOnly.FromDateTime(DateTime.Today) ? "#22C58B" : "#334B50"),
+                Background = ThemeBrush(day.Date == DateOnly.FromDateTime(DateTime.Today) ? "Signal" : "ChartBar"),
                 CornerRadius = new CornerRadius(3),
                 ToolTip = LocalizationService.IsEnglish
                     ? $"{day.Date.ToString("MMM d", CultureInfo.InvariantCulture)} · {FormatTokens(day.Tokens)} tokens"
@@ -995,7 +1051,7 @@ public partial class AiManagerWindow : Window
             column.Children.Add(new TextBlock
             {
                 Text = day.Date.Day.ToString(CultureInfo.InvariantCulture),
-                Foreground = Brush("#71838A"),
+                Foreground = ThemeBrush("Subtle"),
                 FontFamily = new FontFamily("Cascadia Mono"),
                 FontSize = 10,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -1069,12 +1125,12 @@ public partial class AiManagerWindow : Window
             DailyUsageCanvas.Children.Add(new Line
             {
                 X1 = left, X2 = left + plotWidth, Y1 = y, Y2 = y,
-                Stroke = Brush("#293640"), StrokeThickness = 1
+                Stroke = ThemeBrush("ChartGrid"), StrokeThickness = 1
             });
         }
 
-        AddCanvasText(DailyUsageCanvas, FormatTokens(maximum), 0, top - 5, "#82969D", 10);
-        AddCanvasText(DailyUsageCanvas, "0", 24, top + plotHeight - 7, "#82969D", 10);
+        AddCanvasText(DailyUsageCanvas, FormatTokens(maximum), 0, top - 5, "Subtle", 10);
+        AddCanvasText(DailyUsageCanvas, "0", 24, top + plotHeight - 7, "Subtle", 10);
         var points = Enumerable.Range(0, 24)
             .Select(hour => new Point(
                 left + plotWidth * hour / 23d,
@@ -1083,14 +1139,14 @@ public partial class AiManagerWindow : Window
         DailyUsageCanvas.Children.Add(new Polyline
         {
             Points = new PointCollection(points),
-            Stroke = Brush("#22C58B"),
+            Stroke = ThemeBrush("Signal"),
             StrokeThickness = 2,
             StrokeLineJoin = PenLineJoin.Round
         });
 
         foreach (var hour in new[] { 0, 6, 12, 18, 23 })
             AddCanvasText(DailyUsageCanvas, $"{hour:00}", points[hour].X - 6,
-                height - bottom + 5, "#82969D", 10);
+                height - bottom + 5, "Subtle", 10);
         foreach (var item in _todayHourlyUsage.Where(item => item.Tokens > 0))
         {
             var point = points[Math.Clamp(item.Hour, 0, 23)];
@@ -1098,8 +1154,8 @@ public partial class AiManagerWindow : Window
             {
                 Width = 6,
                 Height = 6,
-                Fill = Brush("#22C58B"),
-                Stroke = Brush("#F1F5F2"),
+                Fill = ThemeBrush("Signal"),
+                Stroke = ThemeBrush("Panel"),
                 StrokeThickness = 1,
                 ToolTip = LocalizationService.IsEnglish
                     ? $"{item.Hour:00}:00–{item.Hour:00}:59 · {FormatTokens(item.Tokens)} tokens"
@@ -1111,13 +1167,13 @@ public partial class AiManagerWindow : Window
         }
     }
 
-    private static void AddCanvasText(
-        Canvas canvas, string text, double left, double top, string color, double fontSize)
+    private void AddCanvasText(
+        Canvas canvas, string text, double left, double top, string brushKey, double fontSize)
     {
         var label = new TextBlock
         {
             Text = text,
-            Foreground = Brush(color),
+            Foreground = ThemeBrush(brushKey),
             FontFamily = new FontFamily("Cascadia Mono"),
             FontSize = fontSize
         };
@@ -1192,9 +1248,9 @@ public partial class AiManagerWindow : Window
             RemainingForecastCanvas.Children.Add(new Line
             {
                 X1 = left, X2 = left + plotWidth, Y1 = y, Y2 = y,
-                Stroke = Brush("#293640"), StrokeThickness = 1
+                Stroke = ThemeBrush("ChartGrid"), StrokeThickness = 1
             });
-            AddChartText($"{percent:0}", 0, y - 7, "#82969D", 10);
+            AddChartText($"{percent:0}", 0, y - 7, "Subtle", 10);
         }
 
         var points = _weeklyRemainingForecast
@@ -1205,8 +1261,8 @@ public partial class AiManagerWindow : Window
         var todayIndex = _weeklyRemainingForecast.TakeWhile(item => !item.IsProjected).Count() - 1;
         todayIndex = Math.Clamp(todayIndex, 0, points.Count - 1);
 
-        AddForecastLine(points.Take(todayIndex + 1), "#22C58B", null);
-        AddForecastLine(points.Skip(todayIndex), "#FFB36A", new DoubleCollection { 4, 3 });
+        AddForecastLine(points.Take(todayIndex + 1), "Signal", null);
+        AddForecastLine(points.Skip(todayIndex), "Warning", new DoubleCollection { 4, 3 });
 
         for (var index = 0; index < points.Count; index++)
         {
@@ -1217,8 +1273,8 @@ public partial class AiManagerWindow : Window
             {
                 Width = isToday ? 7 : 5,
                 Height = isToday ? 7 : 5,
-                Fill = Brush(item.IsProjected ? "#FFB36A" : "#22C58B"),
-                Stroke = isToday ? Brush("#F1F5F2") : null,
+                Fill = ThemeBrush(item.IsProjected ? "Warning" : "Signal"),
+                Stroke = isToday ? ThemeBrush("Panel") : null,
                 StrokeThickness = isToday ? 1.5 : 0,
                 ToolTip = LocalizationService.IsEnglish
                     ? $"{item.Date.ToString("MMM d", CultureInfo.InvariantCulture)} · {item.RemainingPercent:0.#}% remaining"
@@ -1232,30 +1288,30 @@ public partial class AiManagerWindow : Window
                 ? item.Date.DayOfWeek.ToString()[..3]
                 : "一二三四五六日"[index].ToString();
             AddChartText(dayLabel, point.X - (isToday ? 8 : 6), height - bottom + 5,
-                isToday ? "#F1F5F2" : "#82969D", 10);
+                isToday ? "Ink" : "Subtle", 10);
         }
     }
 
-    private void AddForecastLine(IEnumerable<Point> source, string color, DoubleCollection? dashArray)
+    private void AddForecastLine(IEnumerable<Point> source, string brushKey, DoubleCollection? dashArray)
     {
         var points = new PointCollection(source);
         if (points.Count < 2) return;
         RemainingForecastCanvas.Children.Add(new Polyline
         {
             Points = points,
-            Stroke = Brush(color),
+            Stroke = ThemeBrush(brushKey),
             StrokeThickness = 2,
             StrokeLineJoin = PenLineJoin.Round,
             StrokeDashArray = dashArray
         });
     }
 
-    private void AddChartText(string text, double left, double top, string color, double fontSize)
+    private void AddChartText(string text, double left, double top, string brushKey, double fontSize)
     {
         var label = new TextBlock
         {
             Text = text,
-            Foreground = Brush(color),
+            Foreground = ThemeBrush(brushKey),
             FontFamily = new FontFamily("Cascadia Mono"),
             FontSize = fontSize
         };
@@ -1283,7 +1339,7 @@ public partial class AiManagerWindow : Window
         _ => $"{tokens:0}"
     };
 
-    private static SolidColorBrush Brush(string value) => new((Color)ColorConverter.ConvertFromString(value));
+    private SolidColorBrush ThemeBrush(string key) => (SolidColorBrush)FindResource(key);
 
     private static string L(string zh, string en) => LocalizationService.IsEnglish ? en : zh;
     private static string HighestUsage(double value) => LocalizationService.IsEnglish ? $"Highest usage {value:0.#}%" : $"最高窗口占用 {value:0.#}%";
@@ -1307,6 +1363,7 @@ public partial class AiManagerWindow : Window
         if (_service.LastSnapshot is { } snapshot) RenderSnapshot(snapshot);
         LocalizationService.Apply(this);
         UpdateLanguageButton();
+        UpdateThemeButton();
         UpdateDashboardChromeLanguage();
     }
 }

@@ -29,6 +29,7 @@ public partial class AiFloatingWindow : Window
     private double _secondaryTaskNaturalWidth;
     private bool _autoCollapse;
     private double _fontScale;
+    private string _theme = ThemeModes.Dark;
     private Rect _dockWorkArea = Rect.Empty;
 
     private const double DockThreshold = 30;
@@ -39,6 +40,7 @@ public partial class AiFloatingWindow : Window
     public AiFloatingWindow()
     {
         InitializeComponent();
+        ApplyTheme(_service.Settings.Theme);
         _autoCollapse = _service.Settings.FloatingAutoCollapse;
         ApplyFontScale(_service.Settings.FloatingFontScale);
         ApplyRefreshInterval(_service.Settings.FloatingRefreshSeconds);
@@ -68,6 +70,15 @@ public partial class AiFloatingWindow : Window
     }
 
     internal static void ApplySavedFontScale(double scale) => _instance?.ApplyFontScale(scale);
+
+    internal static void ApplySavedTheme(string theme) => _instance?.ApplyTheme(theme);
+
+    private void ApplyTheme(string? theme)
+    {
+        _theme = ThemeModes.Normalize(theme);
+        ThemeService.Apply(Resources, _theme);
+        if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
+    }
 
     private void ApplyFontScale(double scale)
     {
@@ -161,7 +172,7 @@ public partial class AiFloatingWindow : Window
         _secondaryTaskNaturalWidth = 0;
         foreach (var task in tasks.Skip(1).Take(2))
         {
-            var color = Brush(StatusColor(task.Status));
+            var color = ThemeBrush(StatusBrushKey(task.Status));
             var row = new Grid { Height = 18 };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -169,7 +180,7 @@ public partial class AiFloatingWindow : Window
             var dot = new Ellipse { Width = 4, Height = 4, Fill = color, VerticalAlignment = VerticalAlignment.Center };
             var title = new TextBlock
             {
-                Text = task.DisplayTitle, Foreground = Brush("#B8C9C6"), FontSize = 8.5 * _fontScale,
+                Text = task.DisplayTitle, Foreground = ThemeBrush("FloatingSecondaryInk"), FontSize = 8.5 * _fontScale,
                 TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(5, 0, 5, 0)
             };
@@ -252,28 +263,28 @@ public partial class AiFloatingWindow : Window
 
     private void ApplyStatusVisual(string status)
     {
-        var color = StatusColor(status);
-        var badge = status switch
+        var colorKey = StatusBrushKey(status);
+        var badgeKey = status switch
         {
-            "active" or "inProgress" => "#173A32",
-            "waitingOnApproval" or "waitingOnUserInput" => "#3A311D",
-            "failed" or "systemError" => "#3B2428",
-            "interrupted" => "#302842",
-            _ => "#26343A"
+            "active" or "inProgress" => "SignalSoft",
+            "waitingOnApproval" or "waitingOnUserInput" => "WarningSoft",
+            "failed" or "systemError" => "DangerSoft",
+            "interrupted" => "InterruptedSoft",
+            _ => "IdleSoft"
         };
-        StatusDot.Fill = Brush(color);
-        PeekSignal.Fill = Brush(color);
-        TaskStatusText.Foreground = Brush(color);
-        TaskStatusBadge.Background = Brush(badge);
+        StatusDot.Fill = ThemeBrush(colorKey);
+        PeekSignal.Fill = ThemeBrush(colorKey);
+        TaskStatusText.Foreground = ThemeBrush(colorKey);
+        TaskStatusBadge.Background = ThemeBrush(badgeKey);
     }
 
-    private static string StatusColor(string status) => status switch
+    private static string StatusBrushKey(string status) => status switch
     {
-        "active" or "inProgress" => "#38D7B2",
-        "waitingOnApproval" or "waitingOnUserInput" => "#F1C46C",
-        "failed" or "systemError" => "#F2777A",
-        "interrupted" => "#B99CE8",
-        _ => "#71888A"
+        "active" or "inProgress" => "Signal",
+        "waitingOnApproval" or "waitingOnUserInput" => "Warning",
+        "failed" or "systemError" => "Danger",
+        "interrupted" => "Interrupted",
+        _ => "Idle"
     };
 
     private void Shell_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -577,7 +588,7 @@ public partial class AiFloatingWindow : Window
         RefreshButton.ToolTip = english ? "Refresh now" : "立即刷新";
     }
 
-    private static SolidColorBrush Brush(string value) => new((Color)ColorConverter.ConvertFromString(value));
+    private SolidColorBrush ThemeBrush(string key) => (SolidColorBrush)FindResource(key);
 
     private async void LocalizationService_LanguageChanged(object? sender, EventArgs e)
     {

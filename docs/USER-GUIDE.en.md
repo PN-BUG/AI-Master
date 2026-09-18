@@ -11,7 +11,7 @@ The dashboard contains nine card types:
 1. **Primary quota runway** shows remaining quota, usage, and the next reset.
 2. **Task guard** shows protection status and can pause tasks visible to the current connection.
 3. **Quota windows** lists the weekly and short windows returned by the account.
-4. **Usage forecast** charts estimated and projected weekly quota remaining, plus the last seven days of usage.
+4. **Usage forecast** charts estimated and projected weekly quota remaining, plus the last seven days of usage. Switch between **Account** and **This device**: account mode includes every device using the account; local mode keeps the account's current remaining quota as its starting point but projects only this device's estimated rate, and changes the seven-day token chart to local records.
 5. **Recent tasks** lists running, waiting, interrupted, paused, and completed tasks.
 6. **Local usage** totals this device's weekly tokens, shows token-weighted top models for the device and each project, and estimates device/project quota attribution from the ratio of local tokens to same-period account tokens; when account history is incomplete, only local tokens are shown.
 7. **Today / hourly usage** shows this device's tokens today, today's estimated share of the account's total weekly quota, and a local-token line chart for hours 00–23. The share is estimated from this week's account token history and weekly-window usage; it stays unavailable when the data is incomplete.
