@@ -58,7 +58,9 @@ Select **Floating monitor** in the main window. The overlay stays on top and dis
 - current status and task name;
 - quota remaining;
 - active model and reasoning effort;
-- up to three recent tasks.
+- recent tasks according to the overlay height (up to eight).
+
+Hover over a task to highlight it; click to open that task in the Codex desktop app. Moving or resizing the overlay saves its position and size for the next launch. If the monitor layout changes, it reopens within the visible work area.
 
 The main window appears in the Windows taskbar; the floating monitor does not. Closing the main window hides AIMaster to the system tray while monitoring continues.
 

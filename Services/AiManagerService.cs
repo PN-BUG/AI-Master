@@ -85,9 +85,8 @@ internal sealed class AiManagerService : IAsyncDisposable
         var sharedUsage = await _sharedUsageClient.SyncAsync(Settings, localData.Usage, cancellationToken);
 
         var serverThreads = threads is { } threadValue ? ParseThreads(threadValue) : new();
-        var mergedThreads = MergeFloatingTasks(serverThreads, localData.Tasks)
-            .Where(IsUsefulFloatingTask)
-            .OrderByDescending(item => item.UpdatedAt)
+        var mergedThreads = SortTasksByStatusAndTime(MergeFloatingTasks(serverThreads, localData.Tasks)
+                .Where(IsUsefulFloatingTask))
             .Take(12)
             .ToList();
         LastSnapshot = new AiManagerSnapshot
@@ -142,8 +141,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         }
 
         var threads = threadsRoot is { } threadValue ? ParseThreads(threadValue) : new();
-        var serverCandidates = threads.Where(IsUsefulFloatingTask)
-            .OrderByDescending(item => item.UpdatedAt)
+        var serverCandidates = SortTasksByStatusAndTime(threads.Where(IsUsefulFloatingTask))
             .Take(8)
             .ToList();
         var enrichedServerTasks = serverCandidates.Count == 0
@@ -155,10 +153,9 @@ internal sealed class AiManagerService : IAsyncDisposable
         // for sessions owned by another Codex process. Rollout JSONL files are shared persisted
         // state, so merge them in as an independent source instead of showing a false empty state.
         var localTasks = await localTasksTask;
-        var visibleTasks = MergeFloatingTasks(enrichedServerTasks, localTasks)
-            .Where(IsUsefulFloatingTask)
-            .OrderByDescending(item => item.UpdatedAt)
-            .Take(3)
+        var visibleTasks = SortTasksByStatusAndTime(MergeFloatingTasks(enrichedServerTasks, localTasks)
+                .Where(IsUsefulFloatingTask))
+            .Take(8)
             .ToList();
         var focus = visibleTasks.FirstOrDefault();
 
@@ -199,6 +196,22 @@ internal sealed class AiManagerService : IAsyncDisposable
     private static bool IsUsefulFloatingTask(AiThreadSummary thread) =>
         !string.IsNullOrWhiteSpace(thread.Id) &&
         !thread.Title.StartsWith("The following is the Codex agent history", StringComparison.OrdinalIgnoreCase);
+
+    internal static IOrderedEnumerable<AiThreadSummary> SortTasksByStatusAndTime(IEnumerable<AiThreadSummary> tasks) =>
+        tasks.OrderBy(item => TaskStatusOrder(item.Status))
+            .ThenByDescending(item => item.UpdatedAt ?? DateTimeOffset.MinValue)
+            .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase);
+
+    private static int TaskStatusOrder(string status) => status switch
+    {
+        "waitingOnApproval" or "waitingOnUserInput" => 0,
+        "active" or "inProgress" => 1,
+        "failed" or "systemError" => 2,
+        "interrupted" => 3,
+        "idle" or "completed" => 4,
+        "notLoaded" => 5,
+        _ => 6
+    };
 
     private List<AiThreadSummary> DiscoverLocalTasks(int scanLimit, int resultLimit,
         CancellationToken cancellationToken = default)
@@ -753,6 +766,8 @@ internal sealed class AiManagerService : IAsyncDisposable
             settings.Theme = ThemeModes.Normalize(settings.Theme);
             settings.TaskNameSource = TaskNameSources.Normalize(settings.TaskNameSource);
             settings.FloatingFontScale = FloatingFontScales.Normalize(settings.FloatingFontScale);
+            if (settings.FloatingWindowPlacement is { IsValid: false })
+                settings.FloatingWindowPlacement = null;
             settings.DashboardCardLayout ??= new List<string>();
             settings.CollapsedDashboardCards ??= new List<string>();
             settings.DashboardCardSizes = settings.DashboardCardSizes is null

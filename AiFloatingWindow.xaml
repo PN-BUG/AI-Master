@@ -1,11 +1,11 @@
 <Window x:Class="AIMaster.AiFloatingWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="AI 任务悬浮监控" Width="200" MinWidth="180" MaxWidth="260" Height="98"
+        Title="AI 任务悬浮监控" Width="200" MinWidth="180" Height="98" MinHeight="98"
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
         Background="Transparent" Icon="Resources/AIMaster.ico" ShowInTaskbar="False" Topmost="True"
         FontFamily="Microsoft YaHei UI" Loaded="Window_Loaded" Closed="Window_Closed"
-        MouseEnter="Window_MouseEnter" MouseLeave="Window_MouseLeave">
+        SizeChanged="Window_SizeChanged" MouseEnter="Window_MouseEnter" MouseLeave="Window_MouseLeave">
     <Window.ContextMenu>
         <ContextMenu x:Name="FloatingMenu" Opened="FloatingMenu_Opened">
             <MenuItem x:Name="RefreshNowMenuItem" Header="立即刷新" Click="RefreshNow_Click"/>
@@ -64,6 +64,25 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="ResizeThumb" TargetType="Thumb">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Panel.ZIndex" Value="20"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="{TemplateBinding Background}"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="TaskHoverRow" TargetType="Grid">
+            <Setter Property="Background" Value="Transparent"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource FloatingHoveredTask}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid Background="Transparent">
@@ -95,7 +114,8 @@
                 </Grid>
 
                 <StackPanel x:Name="TaskRowsPanel" Grid.Row="1" Margin="0,0,2,1">
-                    <Grid Height="27">
+                    <Grid x:Name="PrimaryTaskRow" Height="27"
+                          MouseLeftButtonDown="TaskRow_MouseLeftButtonDown">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Border x:Name="TaskStatusBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
                                 Background="{DynamicResource SignalSoft}" CornerRadius="5" Padding="4,1">
@@ -135,6 +155,32 @@
                     </StackPanel>
                 </Grid>
             </Grid>
+
+            <!-- 无边框浮窗的八向缩放命中区。 -->
+            <Thumb Tag="Top" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Top"
+                   Cursor="SizeNS" Style="{StaticResource ResizeThumb}"
+                   DragStarted="ResizeThumb_DragStarted" DragDelta="ResizeThumb_DragDelta" DragCompleted="ResizeThumb_DragCompleted"/>
+            <Thumb Tag="Bottom" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
+                   Cursor="SizeNS" Style="{StaticResource ResizeThumb}"
+                   DragStarted="ResizeThumb_DragStarted" DragDelta="ResizeThumb_DragDelta" DragCompleted="ResizeThumb_DragCompleted"/>
+            <Thumb Tag="Left" Width="6" HorizontalAlignment="Left" VerticalAlignment="Stretch"
+                   Cursor="SizeWE" Style="{StaticResource ResizeThumb}"
+                   DragStarted="ResizeThumb_DragStarted" DragDelta="ResizeThumb_DragDelta" DragCompleted="ResizeThumb_DragCompleted"/>
+            <Thumb Tag="Right" Width="6" HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                   Cursor="SizeWE" Style="{StaticResource ResizeThumb}"
+                   DragStarted="ResizeThumb_DragStarted" DragDelta="ResizeThumb_DragDelta" DragCompleted="ResizeThumb_DragCompleted"/>
+            <Thumb Tag="TopLeft" Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top"
+                   Cursor="SizeNWSE" Style="{StaticResource ResizeThumb}"
+                   DragStarted="ResizeThumb_DragStarted" DragDelta="ResizeThumb_DragDelta" DragCompleted="ResizeThumb_DragCompleted"/>
+            <Thumb Tag="TopRight" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
+                   Cursor="SizeNESW" Style="{StaticResource ResizeThumb}"
+                   DragStarted="ResizeThumb_DragStarted" DragDelta="ResizeThumb_DragDelta" DragCompleted="ResizeThumb_DragCompleted"/>
+            <Thumb Tag="BottomLeft" Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                   Cursor="SizeNESW" Style="{StaticResource ResizeThumb}"
+                   DragStarted="ResizeThumb_DragStarted" DragDelta="ResizeThumb_DragDelta" DragCompleted="ResizeThumb_DragCompleted"/>
+            <Thumb Tag="BottomRight" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                   Cursor="SizeNWSE" Style="{StaticResource ResizeThumb}"
+                   DragStarted="ResizeThumb_DragStarted" DragDelta="ResizeThumb_DragDelta" DragCompleted="ResizeThumb_DragCompleted"/>
         </Grid>
     </Border>
 

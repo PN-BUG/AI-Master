@@ -64,7 +64,7 @@ public partial class AiManagerWindow : Window
         InitializeComponent();
         ApplyTheme(_service.Settings.Theme, refreshContent: false);
         InitializeDashboardCards();
-        _timer.Tick += async (_, _) => await RefreshAsync(showErrors: false);
+        _timer.Tick += async (_, _) => await RefreshAsync();
         LocalizationService.LanguageChanged += LocalizationService_LanguageChanged;
         LocalizationService.Apply(this);
         UpdateLanguageButton();
@@ -78,7 +78,7 @@ public partial class AiManagerWindow : Window
         _timer.Interval = TimeSpan.FromSeconds(Math.Clamp(_service.Settings.RefreshSeconds, 30, 600));
         _timer.Start();
         _ = CheckForUpdatesAsync(showUpToDate: false);
-        await RefreshAsync(showErrors: true);
+        await RefreshAsync();
     }
 
     private async void Window_Closed(object? sender, EventArgs e)
@@ -98,7 +98,7 @@ public partial class AiManagerWindow : Window
         App.Current.NotifyRunningInBackground();
     }
 
-    private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync(showErrors: true);
+    private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
 
     private void FloatingWindow_Click(object sender, RoutedEventArgs e) => AiFloatingWindow.ShowOrActivate();
 
@@ -106,7 +106,7 @@ public partial class AiManagerWindow : Window
         await CheckForUpdatesAsync(showUpToDate: true);
 
     private async void InstallUpdate_Click(object sender, RoutedEventArgs e) =>
-        await InstallUpdateAsync(confirm: true);
+        await InstallUpdateAsync();
 
     private async Task CheckForUpdatesAsync(bool showUpToDate)
     {
@@ -128,10 +128,8 @@ public partial class AiManagerWindow : Window
                 _availableUpdate = null;
                 InstallUpdateButton.Visibility = Visibility.Collapsed;
                 if (showUpToDate)
-                    WpfMessageBox.Show(this,
-                        L("AIMaster 目前还没有已发布的 GitHub Release。",
-                          "AIMaster does not have a published GitHub Release yet."),
-                        L("检查更新", "Check for updates"), MessageBoxButton.OK, MessageBoxImage.Information);
+                    SetFooterStatus(L("AIMaster 目前还没有已发布的 GitHub Release。",
+                        "AIMaster does not have a published GitHub Release yet."));
                 return;
             }
             if (!result.UpdateAvailable)
@@ -139,32 +137,21 @@ public partial class AiManagerWindow : Window
                 _availableUpdate = null;
                 InstallUpdateButton.Visibility = Visibility.Collapsed;
                 if (showUpToDate)
-                    WpfMessageBox.Show(this,
-                        L($"AIMaster 已是最新版（{result.CurrentVersion}）。", $"AIMaster is up to date ({result.CurrentVersion})."),
-                        L("检查更新", "Check for updates"), MessageBoxButton.OK, MessageBoxImage.Information);
+                    SetFooterStatus(L($"AIMaster 已是最新版（{result.CurrentVersion}）。",
+                        $"AIMaster is up to date ({result.CurrentVersion})."));
                 return;
             }
 
             _availableUpdate = result;
             InstallUpdateButton.Visibility = Visibility.Visible;
-            FooterStatusText.Text = L($"发现 AIMaster {result.LatestVersion}，可立即更新。",
-                $"AIMaster {result.LatestVersion} is available. Ready to update.");
-            if (!showUpToDate)
-            {
-                var install = WpfMessageBox.Show(this,
-                    L($"AIMaster {result.LatestVersion} 已发布（当前：{result.CurrentVersion}）。\n\n是否立即下载、安装并重启？",
-                      $"AIMaster {result.LatestVersion} is available (current: {result.CurrentVersion}).\n\nDownload, install, and restart now?"),
-                    L("发现新版本", "Update available"), MessageBoxButton.YesNo, MessageBoxImage.Information);
-                if (install == MessageBoxResult.Yes) await InstallUpdateAsync(confirm: false);
-            }
+            SetFooterStatus(L($"发现 AIMaster {result.LatestVersion}，可立即更新。",
+                $"AIMaster {result.LatestVersion} is available. Ready to update."));
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
             if (showUpToDate)
-                WpfMessageBox.Show(this,
-                    L($"无法检查更新：{ex.Message}", $"Unable to check for updates: {ex.Message}"),
-                    L("检查更新", "Check for updates"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                SetFooterStatus(L($"无法检查更新：{ex.Message}", $"Unable to check for updates: {ex.Message}"), warning: true);
         }
         finally
         {
@@ -173,18 +160,15 @@ public partial class AiManagerWindow : Window
         }
     }
 
-    private async Task InstallUpdateAsync(bool confirm)
+    private async Task InstallUpdateAsync()
     {
         if (_availableUpdate is null) return;
         var update = _availableUpdate;
-        if (confirm)
-        {
-            var confirmed = WpfMessageBox.Show(this,
-                L($"现在下载并安装 AIMaster {update.LatestVersion}？\n\n程序将关闭并自动重启，本地设置会保留。",
-                  $"Download and install AIMaster {update.LatestVersion} now?\n\nThe app will close and restart. Local settings will be preserved."),
-                L("安装更新", "Install update"), MessageBoxButton.YesNo, MessageBoxImage.Information);
-            if (confirmed != MessageBoxResult.Yes) return;
-        }
+        var confirmed = WpfMessageBox.Show(this,
+            L($"现在下载并安装 AIMaster {update.LatestVersion}？\n\n程序将关闭并自动重启，本地设置会保留。",
+              $"Download and install AIMaster {update.LatestVersion} now?\n\nThe app will close and restart. Local settings will be preserved."),
+            L("安装更新", "Install update"), MessageBoxButton.YesNo, MessageBoxImage.Information);
+        if (confirmed != MessageBoxResult.Yes) return;
 
         CheckUpdateButton.IsEnabled = false;
         InstallUpdateButton.IsEnabled = false;
@@ -671,33 +655,29 @@ public partial class AiManagerWindow : Window
         }
     }
 
-    private async Task RefreshAsync(bool showErrors)
+    private async Task RefreshAsync()
     {
         if (_refreshing) return;
         _refreshing = true;
         RefreshButton.IsEnabled = false;
         SyncStatusText.Text = L("正在读取 Codex…", "Reading Codex…");
+        SyncStatusText.ToolTip = null;
         try
         {
             var snapshot = await _service.RefreshAsync(_lifetime.Token);
-            ConnectionBanner.Visibility = Visibility.Collapsed;
             RenderSnapshot(snapshot);
             await ApplyGuardAsync(snapshot);
             SyncStatusText.Text = L("已连接", "Connected");
+            SyncStatusText.ToolTip = null;
             LastSyncText.Text = $"SYNC {snapshot.CapturedAt.LocalDateTime:HH:mm:ss}";
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
             var message = BuildConnectionError(ex);
-            ConnectionText.Text = message;
-            ConnectionBanner.Visibility = Visibility.Visible;
             SyncStatusText.Text = L("连接失败", "Connection failed");
-            FooterStatusText.Text = ex is TimeoutException
-                ? L("Codex 当前响应较慢，请稍后点击“立即同步”重试。", "Codex is responding slowly. Try Sync now again shortly.")
-                : L("请确认 Codex 已安装并登录，然后重试。", "Make sure Codex is installed and signed in, then try again.");
-            if (showErrors)
-                WpfMessageBox.Show(this, message, L("无法读取 Codex 用量", "Unable to read Codex usage"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            SyncStatusText.ToolTip = message;
+            SetFooterStatus(message, warning: true);
         }
         finally
         {
@@ -740,9 +720,9 @@ public partial class AiManagerWindow : Window
             .FirstOrDefault();
         RenderLocalUsage(snapshot.LocalUsage, snapshot.DailyUsage, weeklyLimit?.UsedPercent);
         RenderSharedUsage(snapshot.SharedUsage);
-        FooterStatusText.Text = snapshot.LifetimeTokens is { } lifetime
+        SetFooterStatus(snapshot.LifetimeTokens is { } lifetime
             ? (LocalizationService.IsEnglish ? $"Lifetime {FormatTokens(lifetime)} tokens · From Codex App Server" : $"累计 {FormatTokens(lifetime)} tokens · 数据来自 Codex App Server")
-            : L("数据来自 Codex App Server；认证由 Codex 管理。", "Data comes from Codex App Server; authentication is managed by Codex.");
+            : L("数据来自 Codex App Server；认证由 Codex 管理。", "Data comes from Codex App Server; authentication is managed by Codex."));
         LocalizationService.Apply(this);
     }
 
@@ -802,16 +782,11 @@ public partial class AiManagerWindow : Window
         if (_alertedForCurrentBreach) return;
         _alertedForCurrentBreach = true;
         var interrupted = await _service.PauseActiveThreadsAsync(_lifetime.Token);
-        WpfMessageBox.Show(this,
-            LocalizationService.IsEnglish
-                ? $"Usage has reached {highest:0.#}%, above the {_service.Settings.PausePercent:0.#}% pause limit.\n\n" +
-                  $"Interrupted {interrupted} running task(s) visible to this App Server connection and paused the guard. " +
-                  "Tasks in other Codex windows may need to be stopped manually."
-                : $"用量已达到 {highest:0.#}%，超过暂停线 {_service.Settings.PausePercent:0.#}%。\n\n" +
-                  $"已中断当前 App Server 可见的 {interrupted} 个运行任务，并将保护状态设为暂停。" +
-                  "其他 Codex 窗口的任务可能需要手动停止。",
-            L("AIMaster 已暂停任务", "AIMaster paused the task guard"),
-            MessageBoxButton.OK, MessageBoxImage.Warning);
+        GuardDetailText.Text = LocalizationService.IsEnglish
+            ? $"Interrupted {interrupted} visible task(s). Check other Codex windows manually."
+            : $"已中断 {interrupted} 个可见任务；其他 Codex 窗口请手动确认。";
+        SetFooterStatus(L($"额度超限，已暂停闸门并中断 {interrupted} 个可见任务。",
+            $"Limit exceeded; guard paused and {interrupted} visible task(s) interrupted."), warning: true);
     }
 
     private void ApplyQuotaVisual(double used)
@@ -860,17 +835,12 @@ public partial class AiManagerWindow : Window
                 LocalizationService.IsEnglish
                     ? $"Interrupted {interrupted} running task(s) visible to this connection"
                     : $"已中断当前连接可见的 {interrupted} 个运行任务");
-            WpfMessageBox.Show(this,
-                LocalizationService.IsEnglish
-                    ? $"Interrupted {interrupted} running task(s) visible to this App Server connection.\n" +
-                      "Tasks in other Codex windows do not share live state and may need to be stopped manually."
-                    : $"已中断当前 App Server 可见的 {interrupted} 个运行任务。\n其他 Codex 窗口中的任务不共享运行态，可能需要手动停止。",
-                L("暂停完成", "Pause completed"), MessageBoxButton.OK, MessageBoxImage.Information);
+            SetFooterStatus(L($"已暂停闸门并中断 {interrupted} 个可见任务；其他窗口请手动确认。",
+                $"Guard paused; {interrupted} visible task(s) interrupted. Check other windows manually."));
         }
         catch (Exception ex)
         {
-            WpfMessageBox.Show(this, BuildConnectionError(ex), L("暂停失败", "Unable to pause tasks"),
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            SetFooterStatus(L("暂停失败：", "Unable to pause tasks: ") + BuildConnectionError(ex), warning: true);
         }
         finally
         {
@@ -893,10 +863,8 @@ public partial class AiManagerWindow : Window
             !TryReadPercent(PausePercentBox.Text, out var pause) || warning >= pause ||
             !TryReadFloatingFontPercent(FloatingFontPercentBox.Text, out var floatingFontScale))
         {
-            WpfMessageBox.Show(this,
-                L("请输入 1–99 之间的预警百分比、100–150 之间的浮窗字号，并确保预警线低于暂停线。",
-                    "Enter guard percentages from 1 to 99, a floating font size from 100 to 150, and keep the warning limit below the pause limit."),
-                L("策略无效", "Invalid guard policy"), MessageBoxButton.OK, MessageBoxImage.Information);
+            SetFooterStatus(L("策略无效：预警/暂停线需在 1–99 之间，浮窗字号需在 100–150% 之间，且预警线低于暂停线。",
+                "Invalid policy: guard limits must be 1–99, font size 100–150%, and warning below pause."), warning: true);
             return;
         }
 
@@ -907,7 +875,7 @@ public partial class AiManagerWindow : Window
         settings.FloatingFontScale = floatingFontScale;
         _service.SaveSettings(settings);
         AiFloatingWindow.ApplySavedFontScale(floatingFontScale);
-        FooterStatusText.Text = L("设置已保存并应用", "Settings saved and applied");
+        SetFooterStatus(L("设置已保存并应用", "Settings saved and applied"));
         if (_service.LastSnapshot is { } snapshot)
         {
             ApplyQuotaVisual(snapshot.MainLimit?.UsedPercent ?? 0);
@@ -967,8 +935,8 @@ public partial class AiManagerWindow : Window
                 error = string.IsNullOrWhiteSpace(deviceName)
                     ? L("设备名称不能为空", "The device name is required")
                     : L("同步密钥需要 32–512 个字符", "The sync key must contain 32–512 characters");
-            WpfMessageBox.Show(this, error, L("共享设置无效", "Invalid sharing settings"),
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            SharedUsageStatusText.Text = error;
+            SetFooterStatus(L("共享设置无效：", "Invalid sharing settings: ") + error, warning: true);
             return;
         }
 
@@ -991,7 +959,7 @@ public partial class AiManagerWindow : Window
             SharedUsageStatusText.Text = L("正在同步设备数据…", "Syncing device usage…");
             if (_service.LastSnapshot is null)
             {
-                await RefreshAsync(showErrors: true);
+                await RefreshAsync();
                 return;
             }
             var localUsage = _service.LastSnapshot.LocalUsage;
@@ -1340,6 +1308,12 @@ public partial class AiManagerWindow : Window
     };
 
     private SolidColorBrush ThemeBrush(string key) => (SolidColorBrush)FindResource(key);
+
+    private void SetFooterStatus(string message, bool warning = false)
+    {
+        FooterStatusText.Text = message;
+        FooterStatusText.Foreground = ThemeBrush(warning ? "WarningText" : "Subtle");
+    }
 
     private static string L(string zh, string en) => LocalizationService.IsEnglish ? en : zh;
     private static string HighestUsage(double value) => LocalizationService.IsEnglish ? $"Highest usage {value:0.#}%" : $"最高窗口占用 {value:0.#}%";

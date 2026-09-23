@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
@@ -145,6 +146,34 @@ internal static partial class Program
             "floating text is larger by default");
         Check(floating.FindName("TaskNameText") is TextBlock { FontSize: >= 11.9 },
             "floating task text applies the larger default font scale");
+        Check(floating.MinHeight == 98 && double.IsPositiveInfinity(floating.MaxWidth) &&
+              Descendants(floating).OfType<Thumb>().Count(item => Equals(item.Style, floating.FindResource("ResizeThumb"))) == 8,
+            "floating window exposes eight-direction resize handles without an artificial width cap");
+        Check(AiFloatingWindow.CalculateVisibleTaskCount(98, 8) == 1 &&
+              AiFloatingWindow.CalculateVisibleTaskCount(116, 8) == 2 &&
+              AiFloatingWindow.CalculateVisibleTaskCount(224, 8) == 8,
+            "floating task count follows the available window height");
+        Check(AiFloatingWindow.BuildTaskUri("0199c8a0-0a12-7000-8000-0123456789ab")?.AbsoluteUri ==
+              "codex://threads/0199c8a0-0a12-7000-8000-0123456789ab" &&
+              AiFloatingWindow.BuildTaskUri("not-a-thread-id") is null,
+            "floating task links target the Codex desktop protocol only for valid thread IDs");
+        var savedPlacement = new AiFloatingWindowPlacement
+            { Left = -1850, Top = 50, Width = 300, Height = 150 };
+        var restoredPlacement = JsonSerializer.Deserialize<AiManagerSettings>(
+            JsonSerializer.Serialize(new AiManagerSettings { FloatingWindowPlacement = savedPlacement }))?
+            .FloatingWindowPlacement;
+        var fittedPlacement = AiFloatingWindow.FitPlacementToWorkArea(restoredPlacement,
+            new Rect(-1920, 0, 1920, 1080), 180, 98);
+        var movedMonitorPlacement = AiFloatingWindow.FitPlacementToWorkArea(restoredPlacement,
+            new Rect(0, 0, 1920, 1080), 180, 98);
+        Check(fittedPlacement is { } fitted && fitted.Left == -1850 && fitted.Top == 50 &&
+              fitted.Width == 300 && fitted.Height == 150 &&
+              movedMonitorPlacement is { } clamped && clamped.Left == 0 &&
+              AiFloatingWindow.FitPlacementToWorkArea(new AiFloatingWindowPlacement
+                  { Left = double.NaN, Top = 0, Width = 300, Height = 150 },
+                  new Rect(0, 0, 1920, 1080), 180, 98) is null,
+            "floating placement survives settings serialization and stays visible when monitors change");
+        VerifyTaskOrdering();
         Check(Math.Abs(FloatingFontScales.Normalize(9) - 1.5) < 0.001,
             "floating font scale is clamped to its supported range");
         VerifyWeeklyRemainingForecast();
@@ -338,6 +367,21 @@ internal static partial class Program
         row.Arrange(new Rect(0, 0, 420, 80));
         row.UpdateLayout();
         Check(true, "project usage card creates its quota progress binding without a runtime exception");
+    }
+
+    private static void VerifyTaskOrdering()
+    {
+        var now = DateTimeOffset.Now;
+        var ordered = AiManagerService.SortTasksByStatusAndTime([
+            new AiThreadSummary { Id = "complete-new", Status = "completed", UpdatedAt = now },
+            new AiThreadSummary { Id = "running-old", Status = "inProgress", UpdatedAt = now.AddMinutes(-2) },
+            new AiThreadSummary { Id = "waiting", Status = "waitingOnUserInput", UpdatedAt = now.AddMinutes(-10) },
+            new AiThreadSummary { Id = "running-new", Status = "active", UpdatedAt = now.AddMinutes(-1) },
+            new AiThreadSummary { Id = "complete-old", Status = "completed", UpdatedAt = now.AddMinutes(-5) }
+        ]).Select(item => item.Id).ToArray();
+
+        Check(ordered.SequenceEqual(["waiting", "running-new", "running-old", "complete-new", "complete-old"]),
+            "tasks sort by actionable status first and newest update first within each status group");
     }
 
     private static void VerifySharedUsageContract()

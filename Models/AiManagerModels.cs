@@ -50,6 +50,9 @@ public sealed class AiManagerSettings
     [JsonPropertyName("floatingFontScale")]
     public double FloatingFontScale { get; set; } = FloatingFontScales.Default;
 
+    [JsonPropertyName("floatingWindowPlacement")]
+    public AiFloatingWindowPlacement? FloatingWindowPlacement { get; set; }
+
     [JsonPropertyName("dashboardCardLayout")]
     public List<string> DashboardCardLayout { get; set; } = new();
 
@@ -83,6 +86,27 @@ public sealed class AiManagerSettings
 
     [JsonPropertyName("sharedUsageDeviceName")]
     public string SharedUsageDeviceName { get; set; } = Environment.MachineName;
+}
+
+public sealed class AiFloatingWindowPlacement
+{
+    [JsonPropertyName("left")]
+    public double Left { get; set; }
+
+    [JsonPropertyName("top")]
+    public double Top { get; set; }
+
+    [JsonPropertyName("width")]
+    public double Width { get; set; }
+
+    [JsonPropertyName("height")]
+    public double Height { get; set; }
+
+    [JsonIgnore]
+    public bool IsValid => double.IsFinite(Left) && Math.Abs(Left) <= 1_000_000 &&
+                           double.IsFinite(Top) && Math.Abs(Top) <= 1_000_000 &&
+                           double.IsFinite(Width) && Width > 0 && Width <= 10_000 &&
+                           double.IsFinite(Height) && Height > 0 && Height <= 10_000;
 }
 
 public sealed class AiDashboardCardSize

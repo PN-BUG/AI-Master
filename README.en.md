@@ -21,10 +21,10 @@ AIMaster is a standalone Windows monitor for Codex quota and task activity. It b
 - Optionally group multiple devices through Woliu shared usage and show each device's token share, top model, session count, and last sync time.
 - Configure warning and pause thresholds; optionally interrupt tasks visible to the current App Server connection.
 - Collapse cards, drag their headers between two columns, and resize them from the lower-right corner. Layout and sizes persist automatically.
-- View recent tasks with running, waiting, interrupted, and completed states.
+- View up to eight recent tasks in the overlay, ordered by status and update time.
 - Use either the Codex conversation title or the latest user request as the displayed task name.
 - Inspect the active model and reasoning effort.
-- Adjust floating-window text from 100% to 150% in the main-window settings.
+- Resize and reposition the overlay with persistent placement, click a task to open it in Codex, and adjust text from 100% to 150% in the main-window settings.
 - Dock and auto-hide the overlay on the top, left, or right edge of any monitor. Refreshing pauses while hidden.
 - Switch between Simplified Chinese and English instantly.
 - Check GitHub Releases automatically or install an available update directly from the app.
@@ -59,7 +59,8 @@ Open it with **Floating monitor** in the main window:
 - Only an 8 px hover strip remains while hidden, and background refreshing pauses.
 - Hover over the strip to expand and refresh immediately.
 - Right-click to refresh, collapse or expand, select the task-name source, enable auto-hide, or change the refresh interval.
-- Up to three recent tasks are shown, and the width adapts to task and model names.
+- Resize the overlay from its edges or corners to show up to eight recent tasks; position and size persist across launches.
+- Hover over a task row to highlight it, or click it to open the task in Codex Desktop.
 - Closing the main window hides it to the Windows system tray. Click the tray icon to restore it, or use its menu to open the floating monitor or exit AIMaster.
 
 ## Data and privacy

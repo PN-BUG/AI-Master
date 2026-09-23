@@ -141,7 +141,6 @@
     <Grid Margin="20,15,20,14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -167,12 +166,7 @@
             </StackPanel>
         </Grid>
 
-        <Border x:Name="ConnectionBanner" Grid.Row="1" Background="{DynamicResource WarningSoft}" BorderBrush="{DynamicResource WarningBorder}" BorderThickness="1"
-                CornerRadius="8" Padding="10,7" Margin="0,0,0,9" Visibility="Collapsed">
-            <TextBlock x:Name="ConnectionText" Foreground="{DynamicResource WarningText}" TextWrapping="Wrap"/>
-        </Border>
-
-        <ScrollViewer x:Name="DashboardScrollViewer" Grid.Row="2"
+        <ScrollViewer x:Name="DashboardScrollViewer" Grid.Row="1"
                       VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
             <Grid x:Name="DashboardGrid">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -513,9 +507,13 @@
             </Grid>
         </ScrollViewer>
 
-        <Grid Grid.Row="3" Margin="2,8,2,0">
-            <TextBlock x:Name="FooterStatusText" Text="数据只保存在本机；认证由 Codex 管理。" Foreground="{DynamicResource Subtle}" FontSize="11"/>
-            <TextBlock x:Name="LastSyncText" Text="" Foreground="{DynamicResource Subtle}" FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right"/>
+        <Grid Grid.Row="2" Margin="2,8,2,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="FooterStatusText" Text="数据只保存在本机；认证由 Codex 管理。" Foreground="{DynamicResource Subtle}"
+                       FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"
+                       ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+            <TextBlock x:Name="LastSyncText" Grid.Column="1" Text="" Foreground="{DynamicResource Subtle}"
+                       FontFamily="Cascadia Mono" FontSize="10" HorizontalAlignment="Right"/>
         </Grid>
     </Grid>
 </Window>

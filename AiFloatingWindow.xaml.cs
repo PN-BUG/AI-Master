@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -26,7 +28,9 @@ public partial class AiFloatingWindow : Window
     private bool _isDockCollapsed;
     private double _expandedLeft;
     private double _expandedTop;
-    private double _secondaryTaskNaturalWidth;
+    private IReadOnlyList<AiThreadSummary> _displayTasks = Array.Empty<AiThreadSummary>();
+    private int _visibleTaskCount = -1;
+    private bool _hasSizedForFirstSnapshot;
     private bool _autoCollapse;
     private double _fontScale;
     private string _theme = ThemeModes.Dark;
@@ -34,6 +38,8 @@ public partial class AiFloatingWindow : Window
 
     private const double DockThreshold = 30;
     private const double PeekSize = 8;
+    private const double BaseWindowHeight = 98;
+    private const double SecondaryTaskRowHeight = 18;
 
     private enum DockEdge { None, Left, Right, Top }
 
@@ -96,17 +102,55 @@ public partial class AiFloatingWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        var workArea = GetCurrentMonitorWorkArea();
-        Left = workArea.Right - Width - 22;
-        Top = workArea.Bottom - Height - 22;
+        if (!RestorePlacement())
+        {
+            var workArea = GetCurrentMonitorWorkArea();
+            Left = workArea.Right - Width - 22;
+            Top = workArea.Bottom - Height - 22;
+        }
         _timer.Start();
         await RefreshAsync();
+    }
+
+    private bool RestorePlacement()
+    {
+        var saved = _service.Settings.FloatingWindowPlacement;
+        if (saved is not { IsValid: true }) return false;
+
+        Left = saved.Left;
+        Top = saved.Top;
+        var placement = FitPlacementToWorkArea(saved, GetCurrentMonitorWorkArea(), MinWidth, MinHeight);
+        if (placement is null) return false;
+
+        Width = placement.Value.Width;
+        Height = placement.Value.Height;
+        Left = placement.Value.Left;
+        Top = placement.Value.Top;
+        _hasSizedForFirstSnapshot = true;
+        DetectDockAfterDrag();
+        return true;
+    }
+
+    internal static Rect? FitPlacementToWorkArea(AiFloatingWindowPlacement? saved, Rect workArea,
+        double minWidth, double minHeight)
+    {
+        if (saved is not { IsValid: true } || workArea.IsEmpty ||
+            !double.IsFinite(workArea.Left) || !double.IsFinite(workArea.Top) ||
+            !double.IsFinite(workArea.Width) || !double.IsFinite(workArea.Height) ||
+            workArea.Width <= 0 || workArea.Height <= 0) return null;
+
+        var width = Math.Clamp(saved.Width, minWidth, Math.Max(minWidth, workArea.Width));
+        var height = Math.Clamp(saved.Height, minHeight, Math.Max(minHeight, workArea.Height));
+        var left = Math.Clamp(saved.Left, workArea.Left, Math.Max(workArea.Left, workArea.Right - width));
+        var top = Math.Clamp(saved.Top, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - height));
+        return new Rect(left, top, width, height);
     }
 
     private async void Window_Closed(object? sender, EventArgs e)
     {
         _timer.Stop();
         _dockHideTimer.Stop();
+        SavePlacement();
         LocalizationService.LanguageChanged -= LocalizationService_LanguageChanged;
         _lifetime.Cancel();
         await _service.DisposeAsync();
@@ -161,19 +205,37 @@ public partial class AiFloatingWindow : Window
                 new() { Title = snapshot.TaskName, Status = snapshot.TaskStatus, ModelName = snapshot.ModelName,
                     ReasoningEffort = snapshot.ReasoningEffort }
             };
-        BuildSecondaryTasks(tasks);
-        ResizeToTelemetry(tasks.Count);
+        _displayTasks = tasks;
+        PrimaryTaskRow.Tag = tasks[0].Id;
+        var primaryHasLink = BuildTaskUri(tasks[0].Id) is not null;
+        PrimaryTaskRow.Cursor = primaryHasLink ? Cursors.Hand : Cursors.Arrow;
+        PrimaryTaskRow.Style = primaryHasLink ? (Style)FindResource("TaskHoverRow") : null;
+        if (!_hasSizedForFirstSnapshot)
+        {
+            _hasSizedForFirstSnapshot = true;
+            Height = BaseWindowHeight + Math.Clamp(tasks.Count - 1, 0, 2) * SecondaryTaskRowHeight;
+        }
+        RefreshVisibleTaskRows(force: true);
         ApplyStatusVisual(snapshot.TaskStatus);
     }
 
-    private void BuildSecondaryTasks(IReadOnlyList<AiThreadSummary> tasks)
+    private void RefreshVisibleTaskRows(bool force = false)
     {
+        if (SecondaryTasksPanel is null) return;
+        var availableHeight = ActualHeight > 0 ? ActualHeight : Height;
+        var visibleTaskCount = CalculateVisibleTaskCount(availableHeight, _displayTasks.Count);
+        if (!force && visibleTaskCount == _visibleTaskCount) return;
+        _visibleTaskCount = visibleTaskCount;
+
         SecondaryTasksPanel.Children.Clear();
-        _secondaryTaskNaturalWidth = 0;
-        foreach (var task in tasks.Skip(1).Take(2))
+        foreach (var task in _displayTasks.Skip(1).Take(Math.Max(0, visibleTaskCount - 1)))
         {
             var color = ThemeBrush(StatusBrushKey(task.Status));
-            var row = new Grid { Height = 18 };
+            var hasLink = BuildTaskUri(task.Id) is not null;
+            var row = new Grid { Height = 18, Tag = task.Id,
+                Style = hasLink ? (Style)FindResource("TaskHoverRow") : null,
+                Cursor = hasLink ? Cursors.Hand : Cursors.Arrow };
+            row.MouseLeftButtonDown += TaskRow_MouseLeftButtonDown;
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -195,59 +257,98 @@ public partial class AiFloatingWindow : Window
             row.Children.Add(title);
             row.Children.Add(status);
             row.ToolTip = $"{task.DisplayTitle}\n{LocalizedStatus(task.Status)} · {task.ModelName ?? "--"} {task.ReasoningEffort?.ToUpperInvariant()}";
-            row.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            _secondaryTaskNaturalWidth = Math.Max(_secondaryTaskNaturalWidth, row.DesiredSize.Width);
             SecondaryTasksPanel.Children.Add(row);
         }
     }
 
-    private void ResizeToTelemetry(int taskCount)
+    internal static int CalculateVisibleTaskCount(double windowHeight, int taskCount)
     {
-        static double NaturalWidth(FrameworkElement element)
+        if (taskCount <= 0) return 0;
+        var extraRows = (int)Math.Floor(Math.Max(0, windowHeight - BaseWindowHeight) / SecondaryTaskRowHeight);
+        return Math.Min(taskCount, 1 + extraRows);
+    }
+
+    internal static Uri? BuildTaskUri(string? threadId) => Guid.TryParse(threadId, out var id)
+        ? new Uri($"codex://threads/{id:D}")
+        : null;
+
+    private void TaskRow_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement row || BuildTaskUri(row.Tag as string) is not { } uri) return;
+        e.Handled = true;
+        _dockHideTimer.Stop();
+        try
         {
-            element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            return element.DesiredSize.Width;
+            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this,
+                LocalizationService.IsEnglish ? $"Could not open the Codex task: {ex.Message}" : $"无法打开 Codex 任务：{ex.Message}",
+                LocalizationService.IsEnglish ? "Open task" : "打开任务",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void Window_SizeChanged(object sender, SizeChangedEventArgs e) => RefreshVisibleTaskRows();
+
+    private void ResizeThumb_DragStarted(object sender, DragStartedEventArgs e)
+    {
+        _hasSizedForFirstSnapshot = true;
+        _dockHideTimer.Stop();
+        StopPositionAnimations();
+        _isDockCollapsed = false;
+        _dockEdge = DockEdge.None;
+        _dockWorkArea = Rect.Empty;
+        PeekHandle.Visibility = Visibility.Collapsed;
+    }
+
+    private void ResizeThumb_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        if (sender is not Thumb { Tag: string direction }) return;
+
+        var width = ActualWidth;
+        var height = ActualHeight;
+        var left = Left;
+        var top = Top;
+        var maxWidth = double.IsInfinity(MaxWidth) ? double.MaxValue : MaxWidth;
+        var maxHeight = double.IsInfinity(MaxHeight) ? double.MaxValue : MaxHeight;
+
+        if (direction.Contains("Left", StringComparison.Ordinal))
+        {
+            var targetWidth = Math.Clamp(width - e.HorizontalChange, MinWidth, maxWidth);
+            left += width - targetWidth;
+            width = targetWidth;
+        }
+        else if (direction.Contains("Right", StringComparison.Ordinal))
+        {
+            width = Math.Clamp(width + e.HorizontalChange, MinWidth, maxWidth);
         }
 
-        // Window/Shell borders and inner horizontal margins.
-        const double chrome = 23;
-        var top = 12 + NaturalWidth(BrandText) + 6 + NaturalWidth(SyncAgeText) + 54;
-        var task = Math.Max(NaturalWidth(TaskStatusBadge) + 5 + NaturalWidth(TaskNameText),
-            _secondaryTaskNaturalWidth);
-        var reasoning = string.IsNullOrWhiteSpace(ReasoningText.Text) ? 0 : 4 + NaturalWidth(ReasoningText);
-        var telemetry = 54 + 1 + 6 + NaturalWidth(ModelText) + reasoning;
-        var targetWidth = Math.Clamp(Math.Ceiling(Math.Max(top, Math.Max(task, telemetry)) + chrome),
-            MinWidth, MaxWidth);
-        var targetHeight = 98 + Math.Clamp(taskCount - 1, 0, 2) * 18;
-        if (Math.Abs(targetWidth - Width) < 0.5 && Math.Abs(targetHeight - Height) < 0.5) return;
-
-        var workArea = _dockEdge == DockEdge.None ? GetCurrentMonitorWorkArea() : GetDockWorkArea();
-        var oldRight = Left + Width;
-        var oldBottom = Top + Height;
-        Width = targetWidth;
-        Height = targetHeight;
-        switch (_dockEdge)
+        if (direction.Contains("Top", StringComparison.Ordinal))
         {
-            case DockEdge.Left:
-                _expandedLeft = workArea.Left;
-                _expandedTop = Math.Clamp(_expandedTop, workArea.Top, workArea.Bottom - Height);
-                if (!_isDockCollapsed) { Left = _expandedLeft; Top = _expandedTop; }
-                break;
-            case DockEdge.Right:
-                _expandedLeft = workArea.Right - Width;
-                _expandedTop = Math.Clamp(_expandedTop, workArea.Top, workArea.Bottom - Height);
-                if (!_isDockCollapsed) { Left = _expandedLeft; Top = _expandedTop; }
-                break;
-            case DockEdge.Top:
-                _expandedLeft = Math.Clamp(_expandedLeft, workArea.Left, workArea.Right - Width);
-                Left = _expandedLeft;
-                Top = _isDockCollapsed ? workArea.Top - Height + PeekSize : workArea.Top;
-                break;
-            default:
-                Left = Math.Clamp(oldRight - Width, workArea.Left, workArea.Right - Width);
-                Top = Math.Clamp(oldBottom - Height, workArea.Top, workArea.Bottom - Height);
-                break;
+            var targetHeight = Math.Clamp(height - e.VerticalChange, MinHeight, maxHeight);
+            top += height - targetHeight;
+            height = targetHeight;
         }
+        else if (direction.Contains("Bottom", StringComparison.Ordinal))
+        {
+            height = Math.Clamp(height + e.VerticalChange, MinHeight, maxHeight);
+        }
+
+        Left = left;
+        Top = top;
+        Width = width;
+        Height = height;
+    }
+
+    private void ResizeThumb_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        var workArea = GetCurrentMonitorWorkArea();
+        Left = Math.Clamp(Left, workArea.Left, Math.Max(workArea.Left, workArea.Right - Width));
+        Top = Math.Clamp(Top, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height));
+        DetectDockAfterDrag();
+        SavePlacement();
     }
 
     private void RenderError(Exception ex)
@@ -299,6 +400,30 @@ public partial class AiFloatingWindow : Window
             PeekHandle.Visibility = Visibility.Collapsed;
             DragMove();
             DetectDockAfterDrag();
+            SavePlacement();
+        }
+    }
+
+    private void SavePlacement()
+    {
+        var saved = new AiFloatingWindowPlacement
+        {
+            Left = _dockEdge == DockEdge.None ? Left : _expandedLeft,
+            Top = _dockEdge == DockEdge.None ? Top : _expandedTop,
+            Width = ActualWidth > 0 ? ActualWidth : Width,
+            Height = ActualHeight > 0 ? ActualHeight : Height
+        };
+        if (!saved.IsValid) return;
+
+        try
+        {
+            var settings = _service.ReloadSettings();
+            settings.FloatingWindowPlacement = saved;
+            _service.SaveSettings(settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Debug.WriteLine($"[AiFloatingWindow] Could not save placement: {ex.Message}");
         }
     }
 
