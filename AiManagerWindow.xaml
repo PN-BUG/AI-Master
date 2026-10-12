@@ -538,14 +538,14 @@
                             <TextBlock Grid.Row="4" Text="清零方式" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,12,8,0"/>
                             <WrapPanel Grid.Row="4" Grid.Column="1" Margin="0,12,0,0">
                                 <RadioButton x:Name="SharedUsageWeeklyRadio" GroupName="SharedUsageResetMode" Content="固定每周"
-                                             Foreground="{DynamicResource Ink}" Margin="0,0,18,5"/>
+                                             Foreground="{DynamicResource Ink}" Margin="0,0,18,5" Checked="SharedUsageResetMode_Checked"/>
                                 <RadioButton x:Name="SharedUsageAccountResetRadio" GroupName="SharedUsageResetMode" Content="重置时清零"
-                                             Foreground="{DynamicResource Ink}" Margin="0,0,18,5"/>
+                                             Foreground="{DynamicResource Ink}" Margin="0,0,18,5" Checked="SharedUsageResetMode_Checked"/>
                                 <RadioButton x:Name="SharedUsageNeverRadio" GroupName="SharedUsageResetMode" Content="不清零"
-                                             IsChecked="True" Foreground="{DynamicResource Ink}" Margin="0,0,0,5"/>
+                                             IsChecked="True" Foreground="{DynamicResource Ink}" Margin="0,0,0,5" Checked="SharedUsageResetMode_Checked"/>
                             </WrapPanel>
                             <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,5,0,0" Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap"
-                                       Text="固定每周：本机周一开始新周期；重置时清零：检测到官方账号周额度恢复时清零；不清零：持续累计。仅影响当前设备，保存后生效。"/>
+                                       Text="固定每周：本机周一开始新周期；重置时清零：检测到官方账号周额度恢复时清零；不清零：持续累计。仅影响当前设备，切换后立即保存并刷新用量。"/>
                             <WrapPanel Grid.Row="6" Grid.ColumnSpan="2" Margin="0,9,0,0">
                                 <Button x:Name="SharedUsageClearButton" Content="手动清零" Style="{StaticResource ActionButton}"
                                         Height="30" Margin="0,0,9,0" Click="ClearSharedUsage_Click"

@@ -58,7 +58,7 @@ No Codex credentials or session data are sent to the public feed. The source is 
 2. Keep the server URL set to `https://www.woliux.com` and enter a recognizable device name.
 3. Select **Generate key**, then **Save & sync**.
 4. Select **Copy key** and paste the same key on your other devices. Give each device a distinct name.
-5. Choose this device's **Reset policy**, then **Save & sync**. The card shows each synced device's count under its own policy and its share of the group total.
+5. Choose this device's **Reset policy**. Switching immediately saves it, recalculates usage and syncs, without another **Save & sync** click. The card shows each synced device's count under its own policy and its share of the group total.
 
 - **Fixed weekly**: count Monday through Sunday in local time; the next refresh in a new week starts a new period.
 - **Clear on reset**: clear when official account weekly quota enters a new window after expiry or a substantial confirmed recovery. The first reading establishes a baseline; short quota windows and community previews do not trigger clearing. AIMaster must successfully refresh official account data. A recovery while the app is closed is processed when the next reading confirms it.

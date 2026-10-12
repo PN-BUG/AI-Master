@@ -9,7 +9,7 @@ namespace AIMaster.Services;
 internal sealed class AiManagerService : IAsyncDisposable
 {
     private readonly CodexAppServerClient _client = new();
-    private readonly SharedUsageClient _sharedUsageClient = new();
+    private readonly SharedUsageClient _sharedUsageClient;
     private readonly SemaphoreSlim _sharedUsageGate = new(1, 1);
     private SharedUsageCounter? _sharedUsageCounter;
     private string? _sharedUsageCounterDevice;
@@ -65,8 +65,10 @@ internal sealed class AiManagerService : IAsyncDisposable
         long Tokens,
         bool IsLegacy = false);
 
-    public AiManagerService(string? settingsPath = null, string? sharedUsageSourceHome = null)
+    public AiManagerService(string? settingsPath = null, string? sharedUsageSourceHome = null,
+        SharedUsageClient? sharedUsageClient = null)
     {
+        _sharedUsageClient = sharedUsageClient ?? new SharedUsageClient();
         _settingsPath = settingsPath ?? AppPaths.GetSettingsFile();
         _sharedUsageSourceHome = sharedUsageSourceHome;
         Settings = LoadSettings();

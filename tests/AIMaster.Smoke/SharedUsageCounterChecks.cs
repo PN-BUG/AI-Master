@@ -1,8 +1,11 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
@@ -18,6 +21,44 @@ internal static partial class Program
     private sealed class SharedUsageTestApp : App
     {
         protected override void OnStartup(StartupEventArgs e) { }
+    }
+
+    private sealed class SharedUsageSyncTestHandler : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+        public long LastTokens { get; private set; }
+        public Uri? LastEndpoint { get; private set; }
+        public bool Fail { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            LastEndpoint = request.RequestUri;
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+            var payload = body.RootElement;
+            LastTokens = payload.GetProperty("totalTokens").GetInt64();
+            if (Fail) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = new StringContent("{\"success\":false,\"error\":\"Test server unavailable\"}")
+            };
+            var total = LastTokens + 200;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    group = new { deviceCount = 2, totalTokens = total },
+                    devices = new[]
+                    {
+                        new { deviceId = payload.GetProperty("deviceId").GetString(), deviceName = "Test PC",
+                            totalTokens = LastTokens, tokenSharePercent = LastTokens * 100d / total,
+                            sessionCount = payload.GetProperty("sessionCount").GetInt32(), mostUsedModel = "unknown", updatedAt = DateTimeOffset.Now },
+                        new { deviceId = (string?)"other-device", deviceName = "Other PC", totalTokens = 200L,
+                            tokenSharePercent = 200 * 100d / total, sessionCount = 2, mostUsedModel = "unknown", updatedAt = DateTimeOffset.Now }
+                    }
+                }))
+            };
+        }
     }
 
     private static void VerifySharedUsageCounter()
@@ -147,10 +188,8 @@ internal static partial class Program
 
         var app = new SharedUsageTestApp { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
-        void ClickAndWait(Button button, Button? completionButton = null)
+        void WaitForSharedOperation(Button completion)
         {
-            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            var completion = completionButton ?? button;
             if (completion.IsEnabled) return;
             var frame = new DispatcherFrame();
             var deadline = DateTime.UtcNow.AddSeconds(10);
@@ -160,6 +199,11 @@ internal static partial class Program
             Dispatcher.PushFrame(frame);
             timer.Stop();
             Check(completion.IsEnabled, "shared usage button finishes its asynchronous operation");
+        }
+        void ClickAndWait(Button button, Button? completionButton = null)
+        {
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            WaitForSharedOperation(completionButton ?? button);
         }
         foreach (var language in new[] { LocalizationService.Chinese, LocalizationService.English })
         {
@@ -226,6 +270,73 @@ internal static partial class Program
             using (var output = File.Create(Path.Combine(root, "shared-usage-" + language + ".png"))) encoder.Save(output);
             window.Close();
         }
+        var switchingDirectory = Path.Combine(root, "switching");
+        var switchingSource = Path.Combine(switchingDirectory, "codex");
+        var switchingSessions = Path.Combine(switchingSource, "sessions");
+        Directory.CreateDirectory(switchingSessions);
+        var switchingSettingsPath = Path.Combine(switchingDirectory, "settings.json");
+        var switchingSettings = new AiManagerSettings
+        {
+            SharedUsageEnabled = true, SharedUsageDeviceName = "Test PC",
+            SharedUsageServerUrl = "https://sync.example.test", SharedUsageSyncKeyProtected = LocalSecretProtection.Protect(new string('x', 32))
+        };
+        File.WriteAllText(switchingSettingsPath, JsonSerializer.Serialize(switchingSettings));
+        string SwitchingRecord(long tokens, DateTimeOffset at) => JsonSerializer.Serialize(new
+        {
+            type = "token_usage_record", timestamp = at, payload = new { usage = new { total_tokens = tokens } }
+        }) + "\n";
+        var switchingNow = DateTimeOffset.Now;
+        var switchingToday = DateOnly.FromDateTime(switchingNow.LocalDateTime);
+        var switchingMonday = switchingToday.AddDays(-(((int)switchingToday.DayOfWeek + 6) % 7));
+        var switchingLog = Path.Combine(switchingSessions, "current.jsonl");
+        File.WriteAllText(switchingLog, SwitchingRecord(40, switchingNow));
+        File.WriteAllText(Path.Combine(switchingSessions, "old.jsonl"), SwitchingRecord(100,
+            new DateTimeOffset(switchingMonday.AddDays(-1).ToDateTime(TimeOnly.MinValue), switchingNow.Offset)));
+        var handler = new SharedUsageSyncTestHandler();
+        var switchingService = new AiManagerService(switchingSettingsPath, switchingSource, new SharedUsageClient(handler));
+        var switchingWindow = new AiManagerWindow(switchingService);
+        switchingWindow.LoadSharedUsageControls();
+        var switchSave = (Button)switchingWindow.FindName("SharedUsageSaveButton");
+        var switchClear = (Button)switchingWindow.FindName("SharedUsageClearButton");
+        var switchRestore = (Button)switchingWindow.FindName("SharedUsageRestoreButton");
+        var switchItems = (ItemsControl)switchingWindow.FindName("SharedDeviceItems");
+        Check(handler.RequestCount == 0 && !File.Exists(Path.Combine(switchingDirectory,
+                "shared-usage-" + switchingSettings.SharedUsageDeviceId + ".json")),
+            "loading saved radio choices does not save, scan or upload usage");
+        // Keep connection edits pending while switching only the count policy.
+        ((TextBox)switchingWindow.FindName("SharedUsageServerUrlBox")).Text = "https://unsaved.example.test";
+        foreach (var mode in new[] { SharedUsageResetModes.Weekly, SharedUsageResetModes.Never, SharedUsageResetModes.AccountReset })
+        {
+            var before = handler.RequestCount;
+            ((RadioButton)switchingWindow.FindName(mode == SharedUsageResetModes.Weekly ? "SharedUsageWeeklyRadio"
+                : mode == SharedUsageResetModes.Never ? "SharedUsageNeverRadio" : "SharedUsageAccountResetRadio")).IsChecked = true;
+            WaitForSharedOperation(switchSave);
+            var expected = mode == SharedUsageResetModes.Weekly ? 40 : 140;
+            var displayed = switchItems.Items.Cast<AiDeviceUsage>().Single(item => item.IsCurrentDevice);
+            Check(handler.RequestCount == before + 1 && handler.LastTokens == expected && displayed.TotalTokens == expected &&
+                  Math.Abs(displayed.TokenSharePercent - expected * 100d / (expected + 200)) < 0.01 &&
+                  switchingService.ReloadSettings().SharedUsageResetMode == mode,
+                "switching to " + mode + " immediately saves, uploads and refreshes usage and percentage without Save & sync");
+            Check(switchItems.Items.Cast<AiDeviceUsage>().Single(item => !item.IsCurrentDevice).TotalTokens == 200 &&
+                  handler.LastEndpoint!.Host == "sync.example.test",
+                "policy switching retains other-device counts and pending connection edits");
+        }
+        ClickAndWait(switchClear);
+        File.AppendAllText(switchingLog, SwitchingRecord(25, switchingNow));
+        ((RadioButton)switchingWindow.FindName("SharedUsageNeverRadio")).IsChecked = true;
+        WaitForSharedOperation(switchSave);
+        Check(switchItems.Items.Cast<AiDeviceUsage>().Single(item => item.IsCurrentDevice).TotalTokens == 25 && switchRestore.IsEnabled,
+            "switching policies rescans newly added usage and keeps the existing clear and undo baseline");
+        ClickAndWait(switchRestore, switchSave);
+        Check(switchItems.Items.Cast<AiDeviceUsage>().Single(item => item.IsCurrentDevice).TotalTokens == 165,
+            "restore still includes prior and subsequent usage after switching policies");
+        handler.Fail = true;
+        ((RadioButton)switchingWindow.FindName("SharedUsageWeeklyRadio")).IsChecked = true;
+        WaitForSharedOperation(switchSave);
+        Check(switchingService.ReloadSettings().SharedUsageResetMode == SharedUsageResetModes.Weekly &&
+              ((TextBlock)switchingWindow.FindName("SharedUsageStatusText")).Text.Contains("Test server unavailable"),
+            "sync failure preserves the selected policy and displays a retryable error");
+        switchingWindow.Close();
         app.ExitApplication();
         Console.WriteLine("Shared usage test artifacts: " + root);
     }

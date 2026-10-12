@@ -10,7 +10,13 @@ internal sealed class SharedUsageClient : IDisposable
 {
     internal const string SyncKeyHeader = "X-AIMaster-Sync-Key";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
+    private readonly HttpClient _httpClient;
+
+    public SharedUsageClient(HttpMessageHandler? handler = null)
+    {
+        _httpClient = handler is null ? new HttpClient() : new HttpClient(handler);
+        _httpClient.Timeout = TimeSpan.FromSeconds(8);
+    }
 
     private sealed class UploadRequest
     {

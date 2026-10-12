@@ -115,8 +115,8 @@ public static class LocalizationService
         ["共享统计"] = "SHARED USAGE", ["启用共享统计"] = "Enable shared usage",
         ["清零方式"] = "Reset policy", ["固定每周"] = "Fixed weekly", ["重置时清零"] = "Clear on reset",
         ["不清零"] = "Never clear", ["手动清零"] = "Clear manually", ["恢复"] = "Restore",
-        ["固定每周：本机周一开始新周期；重置时清零：检测到官方账号周额度恢复时清零；不清零：持续累计。仅影响当前设备，保存后生效。"] =
-            "Fixed weekly: a new period starts Monday in local time. Clear on reset: clear when official account weekly quota recovers. Never clear: keep accumulating. Applies only to this device after saving.",
+        ["固定每周：本机周一开始新周期；重置时清零：检测到官方账号周额度恢复时清零；不清零：持续累计。仅影响当前设备，切换后立即保存并刷新用量。"] =
+            "Fixed weekly: a new period starts Monday in local time. Clear on reset: clear when official account weekly quota recovers. Never clear: keep accumulating. Switching saves the policy and refreshes usage immediately for this device.",
         ["仅清零当前设备的共享计数，不删除本地会话记录。"] = "Clear shared counts for this device only; local session logs are retained.",
         ["撤销当前设备最近一次清零，并保留之后新增的用量；固定每周仍只显示本周。"] =
             "Undo this device's last clear and retain subsequent usage; fixed weekly still shows only the current week.",
