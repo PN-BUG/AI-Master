@@ -15,6 +15,7 @@ AIMaster 是一个可独立运行的 Windows Codex 用量与任务监控工具�
 ![AIMaster 中文主面板](docs/images/dashboard-zh.png)
 
 - 显示 Codex 总额度、7 天窗口、5 小时窗口与重置时间。
+- 自动追踪 [codex-reset.com](https://codex-reset.com/) 的重置预告与公告，新事件发送 Windows 通知；用官方账号额度变化单独检测额度恢复。
 - 根据近期消耗速度预测额度是否会提前耗尽。
 - 设置预警线和暂停线，越线时提醒并暂停当前连接可见的任务。
 - 用折线图展示本周一至周日的剩余额度估算与未来预测，并可切换账号总消耗速度或仅按本机消耗速度推演。
@@ -46,7 +47,9 @@ AIMaster 是一个可独立运行的 Windows Codex 用量与任务监控工具�
 
 完整独立版无需另外安装 .NET Desktop Runtime；轻量版体积更小，适合已经安装 .NET 8 Desktop Runtime 的电脑。两个版本均不包含 Codex 本身。
 
-AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“检查更新”。发现新版后会显示“立即更新”，自动选择与当前架构及轻量/独立模式匹配的 ZIP，校验后退出、替换并重启；失败时会恢复旧版本，本地设置不会被覆盖。
+AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“检查更新”。查到 Release 后可点“查看更新内容”阅读发布说明；如果 GitHub 未返回说明，应用会打开该版本的发布页。发现新版后会显示“立即更新”，自动选择与当前架构及轻量/独立模式匹配的 ZIP，校验后退出、替换并重启；失败时会恢复旧版本，本地设置不会被覆盖。
+
+更新以当前运行的 EXE 所在目录为准，原地覆盖并重启，不依赖快捷方式。仅生成发布包不会更新运行副本；开发时可用 `update-running.ps1` 安装最新本地构建，详见 [更新约定](docs/UPDATES.md)。
 
 ## 使用要求
 
@@ -73,7 +76,7 @@ AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“�
 
 AIMaster 启动本机的 `codex app-server --listen stdio://` 并使用 Codex 自己维护的登录状态。工具不会读取、复制或保存登录令牌。
 
-共享统计默认关闭。启用后仅向 `https://www.woliu.top/api/v1/aimaster/sync` 上传设备周汇总，不上传 Codex 凭证、任务内容、项目名称或路径；同步密钥使用 Windows DPAPI 加密后保存在本机。
+共享统计默认关闭。启用后仅向 `https://www.woliux.com/api/v1/aimaster/sync` 上传设备周汇总，不上传 Codex 凭证、任务内容、项目名称或路径；同步密钥使用 Windows DPAPI 加密后保存在本机。
 
 当 App Server 暂时不可用时，任务列表会从 `%USERPROFILE%\.codex\sessions` 中的本地会话记录降级读取。设置保存在 `%LOCALAPPDATA%\AIMaster\settings.json`。第一次启动会自动迁移旧版 `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` 设置。
 

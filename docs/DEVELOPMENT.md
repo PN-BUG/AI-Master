@@ -69,6 +69,8 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release -- 
 
 输出固定在 `release/AIMaster-<runtime>-<mode>`，重复构建只清理这个经过校验的目标目录。
 
+打包与安装更新是两个步骤。要将最新源码应用到当前运行副本，使用 `.\update-running.ps1`；它以运行进程的 EXE 所在目录为准原地替换并重启。更新约定、回滚和测试见 [UPDATES.md](UPDATES.md)。发布时同时上传生成的 `.zip.sha256` 校验附件。
+
 一键同时生成 Windows x64 完整版、轻量版及两个 ZIP：
 
 ```powershell
@@ -84,14 +86,26 @@ WPF 窗口
   -> AiManagerService
       -> CodexAppServerClient -> codex app-server（额度、模型、在线任务）
       -> 本地 JSONL 扫描       -> %USERPROFILE%\.codex\sessions（任务降级数据）
-      -> SharedUsageClient     -> https://www.woliu.top/api/v1/aimaster/sync（可选设备周汇总）
+      -> SharedUsageClient     -> https://www.woliux.com/api/v1/aimaster/sync（可选设备周汇总）
   -> AiManagerSnapshot / AiFloatingSnapshot
   -> 主面板与悬浮窗渲染
 ```
 
 App Server 请求使用独立超时；任务、模型或历史用量等可选请求失败时，不应阻止本地任务降级和已有额度信息显示。
 
+重置信号由 `CodexResetClient` 读取 `https://codex-reset.com/api/feed` 和 `/api/forecast`，使用独立的两分钟计时器，不依赖 App Server 连接。只读取公开数据并发送标识项目的 User-Agent，不携带 Codex 登录信息。遵守 `Retry-After`；数据过期或请求失败时保留上次显示并停止信号通知。`CodexResetTracker` 将已见事件原子保存到设置目录的 `reset-signal-state.json`，首次成功读取静默建立基线。`AccountResetTracker` 单独比较官方额度快照，公共公告不得直接改动额度。
+
+重置信号的定向回归测试（含离线中英文卡片渲染）：
+
+```powershell
+dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -- --reset-tests --output .\artifacts\reset-signals
+```
+
 共享统计默认关闭。客户端只上传设备级周汇总，`X-AIMaster-Sync-Key` 使用 Windows DPAPI 加密保存在本机设置中；项目、任务与 Codex 登录数据不得进入共享请求。公网服务接口和 Supabase 持久化由 `woliu` 项目维护。
+
+`SharedUsageCounter` 独立保存当前设备的计数、清零基线和一次恢复记录（设置目录的 `shared-usage-<deviceId>.json`）。按会话匿名标识、日期和模型保留最高已采集计数，清零不修改 JSONL。日历周、本次官方周额度恢复之后、持续累计三种策略只改变当前设备上传的数值；接口仍使用公共日历周封装，以兼容同组同周期查询。共享扫描包含 `sessions` 和 `archived_sessions`，同名会话不会因归档重复计数。操作、自动刷新和网络同步串行化，防止旧计数覆盖清零结果。官方周额度比较持久化，第一次读数不清零，短时额度和社区信号不清零；本机状态保存失败时不应用清零。
+
+定向验证（离线，不发送共享请求）：`dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -- --shared-usage-tests`。
 
 应用使用 `OnExplicitShutdown`：主窗口的关闭事件只隐藏窗口，`App` 持有系统托盘图标并维持后台进程；只有托盘“退出”会关闭窗口、释放 App Server 与图标资源并调用 `Shutdown()`。
 

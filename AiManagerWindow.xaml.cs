@@ -17,16 +17,18 @@ namespace AIMaster;
 
 public partial class AiManagerWindow : Window
 {
-    private readonly AiManagerService _service = new();
+    private readonly AiManagerService _service;
     private readonly DispatcherTimer _timer = new();
     private readonly CancellationTokenSource _lifetime = new();
     private bool _refreshing;
     private bool _localGuardPaused;
     private bool _overrideCurrentBreach;
     private bool _alertedForCurrentBreach;
+    private readonly QuotaNotificationTracker _quotaNotifications = new();
     private bool _checkingForUpdates;
     private bool _showLocalForecast;
     private string _theme = ThemeModes.Dark;
+    private UpdateCheckResult? _latestRelease;
     private UpdateCheckResult? _availableUpdate;
     private IReadOnlyList<AiRemainingForecastPoint> _weeklyRemainingForecast =
         Array.Empty<AiRemainingForecastPoint>();
@@ -46,7 +48,7 @@ public partial class AiManagerWindow : Window
     private static readonly string[] DefaultDashboardLayout =
     [
         "left:quota", "left:limits", "left:threads", "left:localUsage", "left:dailyUsage",
-        "right:guard", "right:forecast", "right:settings", "right:sharedUsage"
+        "right:guard", "right:resetSignals", "right:forecast", "right:settings", "right:sharedUsage"
     ];
 
     private sealed record DashboardCardState(
@@ -59,8 +61,11 @@ public partial class AiManagerWindow : Window
         Thumb ResizeThumb,
         double ExpandedMinHeight);
 
-    public AiManagerWindow()
+    public AiManagerWindow() : this(new AiManagerService()) { }
+
+    internal AiManagerWindow(AiManagerService service)
     {
+        _service = service;
         InitializeComponent();
         ApplyTheme(_service.Settings.Theme, refreshContent: false);
         InitializeDashboardCards();
@@ -75,6 +80,7 @@ public partial class AiManagerWindow : Window
     {
         LoadPolicyControls();
         LoadSharedUsageControls();
+        InitializeResetMonitoring();
         _timer.Interval = TimeSpan.FromSeconds(Math.Clamp(_service.Settings.RefreshSeconds, 30, 600));
         _timer.Start();
         _ = CheckForUpdatesAsync(showUpToDate: false);
@@ -84,8 +90,12 @@ public partial class AiManagerWindow : Window
     private async void Window_Closed(object? sender, EventArgs e)
     {
         _timer.Stop();
+        _resetTimer.Stop();
         LocalizationService.LanguageChanged -= LocalizationService_LanguageChanged;
         _lifetime.Cancel();
+        if (_resetRefreshTask is not null)
+            try { await _resetRefreshTask; } catch (OperationCanceledException) { }
+        _resetClient.Dispose();
         await _service.DisposeAsync();
         _lifetime.Dispose();
     }
@@ -102,8 +112,126 @@ public partial class AiManagerWindow : Window
 
     private void FloatingWindow_Click(object sender, RoutedEventArgs e) => AiFloatingWindow.ShowOrActivate();
 
+    private void OfficialWebsite_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://woliux.com/tools/aimaster") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            WpfMessageBox.Show(this,
+                L($"无法打开官网：{ex.Message}", $"Unable to open the official website: {ex.Message}"),
+                L("进入官网", "Visit website"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e) =>
         await CheckForUpdatesAsync(showUpToDate: true);
+
+    private void ViewUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_latestRelease is not { } release) return;
+        var releaseNotes = release.ReleaseNotes;
+        if (string.IsNullOrWhiteSpace(releaseNotes))
+        {
+            OpenReleasePage(release.ReleasePageUrl);
+            return;
+        }
+
+        var dialog = new Window
+        {
+            Owner = this,
+            Title = L($"AIMaster {release.LatestVersion} 更新内容", $"What's new in AIMaster {release.LatestVersion}"),
+            Icon = Icon,
+            Width = 680,
+            Height = 520,
+            MinWidth = 480,
+            MinHeight = 320,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = (Brush)FindResource("AppBackground"),
+            FontFamily = FontFamily
+        };
+        var layout = new Grid { Margin = new Thickness(20) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var heading = new TextBlock
+        {
+            Text = L($"AIMaster {release.LatestVersion} · 发布说明", $"AIMaster {release.LatestVersion} · Release notes"),
+            Foreground = (Brush)FindResource("Ink"),
+            FontSize = 18,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 14)
+        };
+        layout.Children.Add(heading);
+
+        var notes = new TextBox
+        {
+            Text = releaseNotes.Trim(),
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Background = (Brush)FindResource("InputSurface"),
+            Foreground = (Brush)FindResource("Ink"),
+            BorderBrush = (Brush)FindResource("LineStrong"),
+            Padding = new Thickness(14),
+            FontSize = 13
+        };
+        Grid.SetRow(notes, 1);
+        layout.Children.Add(notes);
+
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 14, 0, 0)
+        };
+        var pageButton = new Button
+        {
+            Content = L("在 GitHub 查看", "View on GitHub"),
+            Padding = new Thickness(14, 7, 14, 7),
+            Margin = new Thickness(0, 0, 8, 0),
+            Background = (Brush)FindResource("ButtonSurface"),
+            Foreground = (Brush)FindResource("Ink"),
+            BorderBrush = (Brush)FindResource("LineStrong"),
+            Cursor = Cursors.Hand
+        };
+        pageButton.Click += (_, _) => OpenReleasePage(release.ReleasePageUrl);
+        actions.Children.Add(pageButton);
+        var closeButton = new Button
+        {
+            Content = L("关闭", "Close"),
+            Padding = new Thickness(14, 7, 14, 7),
+            Background = (Brush)FindResource("ButtonSurface"),
+            Foreground = (Brush)FindResource("Ink"),
+            BorderBrush = (Brush)FindResource("LineStrong"),
+            Cursor = Cursors.Hand,
+            IsDefault = true
+        };
+        closeButton.Click += (_, _) => dialog.Close();
+        actions.Children.Add(closeButton);
+        Grid.SetRow(actions, 2);
+        layout.Children.Add(actions);
+        dialog.Content = layout;
+        dialog.ShowDialog();
+    }
+
+    private void OpenReleasePage(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            WpfMessageBox.Show(this,
+                L($"无法打开发布页面：{ex.Message}", $"Unable to open the release page: {ex.Message}"),
+                L("查看更新内容", "What's new"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 
     private async void InstallUpdate_Click(object sender, RoutedEventArgs e) =>
         await InstallUpdateAsync();
@@ -125,13 +253,17 @@ public partial class AiManagerWindow : Window
                 ]);
             if (!result.ReleaseFound)
             {
+                _latestRelease = null;
                 _availableUpdate = null;
+                ViewUpdateButton.Visibility = Visibility.Collapsed;
                 InstallUpdateButton.Visibility = Visibility.Collapsed;
                 if (showUpToDate)
                     SetFooterStatus(L("AIMaster 目前还没有已发布的 GitHub Release。",
                         "AIMaster does not have a published GitHub Release yet."));
                 return;
             }
+            _latestRelease = result;
+            ViewUpdateButton.Visibility = Visibility.Visible;
             if (!result.UpdateAvailable)
             {
                 _availableUpdate = null;
@@ -247,6 +379,7 @@ public partial class AiManagerWindow : Window
         {
             ("quota", "主额度跑道", QuotaCard),
             ("guard", "任务闸门", GuardCard),
+            ("resetSignals", "重置信号", ResetSignalsCard),
             ("limits", "额度窗口", LimitsCard),
             ("forecast", "消耗预测 / 本周", ForecastCard),
             ("threads", "最近任务", ThreadsCard),
@@ -666,6 +799,8 @@ public partial class AiManagerWindow : Window
         {
             var snapshot = await _service.RefreshAsync(_lifetime.Token);
             RenderSnapshot(snapshot);
+            ObserveAccountRecovery(snapshot);
+            ApplyQuotaNotification(snapshot);
             await ApplyGuardAsync(snapshot);
             SyncStatusText.Text = L("已连接", "Connected");
             SyncStatusText.ToolTip = null;
@@ -720,6 +855,7 @@ public partial class AiManagerWindow : Window
             .FirstOrDefault();
         RenderLocalUsage(snapshot.LocalUsage, snapshot.DailyUsage, weeklyLimit?.UsedPercent);
         RenderSharedUsage(snapshot.SharedUsage);
+        RenderDailyQuota(snapshot);
         SetFooterStatus(snapshot.LifetimeTokens is { } lifetime
             ? (LocalizationService.IsEnglish ? $"Lifetime {FormatTokens(lifetime)} tokens · From Codex App Server" : $"累计 {FormatTokens(lifetime)} tokens · 数据来自 Codex App Server")
             : L("数据来自 Codex App Server；认证由 Codex 管理。", "Data comes from Codex App Server; authentication is managed by Codex."));
@@ -756,6 +892,15 @@ public partial class AiManagerWindow : Window
         _weeklyRemainingForecast = AiManagerService.BuildWeeklyRemainingForecast(snapshot, forecast);
         RenderRemainingForecastChart();
         RenderUsageBars(_showLocalForecast ? snapshot.LocalUsage.DailyUsage : snapshot.DailyUsage);
+    }
+
+    private void ApplyQuotaNotification(AiManagerSnapshot snapshot)
+    {
+        var settings = _service.Settings;
+        RenderDailyQuota(snapshot, notify: true);
+        if (_quotaNotifications.Evaluate(snapshot.Limits, settings) is { } notification)
+            App.Current.ShowQuotaNotification(notification,
+                notification.IsPauseLimit ? settings.PausePercent : settings.WarningPercent);
     }
 
     private async Task ApplyGuardAsync(AiManagerSnapshot snapshot)
@@ -868,10 +1013,20 @@ public partial class AiManagerWindow : Window
             return;
         }
 
+        var dailyEnabled = DailyQuotaWarningCheck.IsChecked == true;
+        var dailyValid = TryReadDailyQuotaPercent(DailyQuotaLimitBox.Text, out var dailyPercent);
+        if (dailyEnabled && !dailyValid)
+        {
+            SetFooterStatus(L("每日预警线需在 0.1–100% 之间。", "Daily warning must be between 0.1% and 100%."), warning: true);
+            return;
+        }
         var settings = _service.ReloadSettings();
+        settings.DailyQuotaWarningEnabled = dailyEnabled;
+        if (dailyValid) settings.DailyQuotaLimitPercent = dailyPercent;
         settings.WarningPercent = warning;
         settings.PausePercent = pause;
         settings.AutoPause = AutoPauseCheck.IsChecked == true;
+        settings.QuotaNotificationsEnabled = QuotaNotificationsCheck.IsChecked == true;
         settings.FloatingFontScale = floatingFontScale;
         _service.SaveSettings(settings);
         AiFloatingWindow.ApplySavedFontScale(floatingFontScale);
@@ -879,6 +1034,7 @@ public partial class AiManagerWindow : Window
         if (_service.LastSnapshot is { } snapshot)
         {
             ApplyQuotaVisual(snapshot.MainLimit?.UsedPercent ?? 0);
+            ApplyQuotaNotification(snapshot);
             await ApplyGuardAsync(snapshot);
         }
     }
@@ -890,14 +1046,18 @@ public partial class AiManagerWindow : Window
         FloatingFontPercentBox.Text = (_service.Settings.FloatingFontScale * 100)
             .ToString("0", CultureInfo.InvariantCulture);
         AutoPauseCheck.IsChecked = _service.Settings.AutoPause;
+        QuotaNotificationsCheck.IsChecked = _service.Settings.QuotaNotificationsEnabled;
+        DailyQuotaWarningCheck.IsChecked = _service.Settings.DailyQuotaWarningEnabled;
+        DailyQuotaLimitBox.Text = _service.Settings.DailyQuotaLimitPercent.ToString("0.#", CultureInfo.InvariantCulture);
     }
 
-    private void LoadSharedUsageControls()
+    internal void LoadSharedUsageControls()
     {
         SharedUsageEnabledCheck.IsChecked = _service.Settings.SharedUsageEnabled;
         SharedUsageServerUrlBox.Text = _service.Settings.SharedUsageServerUrl;
         SharedUsageDeviceNameBox.Text = _service.Settings.SharedUsageDeviceName;
         SharedUsageSyncKeyBox.Password = _service.Settings.SharedUsageSyncKey;
+        LoadSharedUsageResetMode();
     }
 
     private void GenerateSharedSyncKey_Click(object sender, RoutedEventArgs e)
@@ -940,7 +1100,8 @@ public partial class AiManagerWindow : Window
             return;
         }
 
-        SharedUsageSaveButton.IsEnabled = false;
+        if (_sharedUsageEditing) return;
+        SetSharedUsageBusy(true);
         try
         {
             var settings = _service.ReloadSettings();
@@ -948,6 +1109,7 @@ public partial class AiManagerWindow : Window
             settings.SharedUsageServerUrl = serverUrl;
             settings.SharedUsageDeviceName = deviceName;
             settings.SharedUsageSyncKey = syncKey;
+            settings.SharedUsageResetMode = SelectedSharedUsageResetMode();
             _service.SaveSettings(settings);
             if (!enabled)
             {
@@ -957,24 +1119,24 @@ public partial class AiManagerWindow : Window
             }
 
             SharedUsageStatusText.Text = L("正在同步设备数据…", "Syncing device usage…");
-            if (_service.LastSnapshot is null)
-            {
-                await RefreshAsync();
-                return;
-            }
-            var localUsage = _service.LastSnapshot.LocalUsage;
-            var sharedUsage = await _service.SyncSharedUsageAsync(localUsage, _lifetime.Token);
+            var sharedUsage = await _service.SyncSharedUsageAsync(_lifetime.Token);
             RenderSharedUsage(sharedUsage);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            SharedUsageStatusText.Text = L("共享设置或计数保存失败：", "Unable to save sharing settings or counts: ") + ex.Message;
+            SetFooterStatus(SharedUsageStatusText.Text, warning: true);
+        }
         finally
         {
-            SharedUsageSaveButton.IsEnabled = true;
+            SetSharedUsageBusy(false);
         }
     }
 
     private void RenderSharedUsage(AiSharedUsageSummary usage)
     {
+        SharedUsageRestoreButton.IsEnabled = !_sharedUsageEditing && _service.CanRestoreSharedUsage;
         SharedDeviceItems.ItemsSource = null;
         SharedDeviceItems.ItemsSource = usage.Devices;
         SharedDeviceItems.Visibility = usage.Devices.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -1335,6 +1497,7 @@ public partial class AiManagerWindow : Window
     private void LocalizationService_LanguageChanged(object? sender, EventArgs e)
     {
         if (_service.LastSnapshot is { } snapshot) RenderSnapshot(snapshot);
+        RenderResetSignals();
         LocalizationService.Apply(this);
         UpdateLanguageButton();
         UpdateThemeButton();

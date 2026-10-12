@@ -34,8 +34,8 @@ codex login
 
 ## 共享统计无法同步
 
-1. 浏览器访问 `https://www.woliu.top/api/v1/aimaster/health`，应看到 `status: ok`。
-2. 确认服务器地址填写为 `https://www.woliu.top`，不要附加 `/api/v1/aimaster/sync`。
+1. 浏览器访问 `https://www.woliux.com/api/v1/aimaster/health`，应看到 `status: ok`。
+2. 确认服务器地址填写为 `https://www.woliux.com`，不要附加 `/api/v1/aimaster/sync`。
 3. 确认所有设备粘贴的是同一条同步密钥，且密钥至少 32 个字符。
 4. 每台设备使用不同的设备名称，并点击“保存并同步”。
 5. 如果提示请求过于频繁，等待一分钟后再同步。

@@ -11,7 +11,8 @@ public sealed record UpdateCheckResult(
     string ReleasePageUrl,
     bool UpdateAvailable,
     bool ReleaseFound = true,
-    IReadOnlyList<GitHubReleaseAsset>? Assets = null)
+    IReadOnlyList<GitHubReleaseAsset>? Assets = null,
+    string? ReleaseNotes = null)
 {
     public IReadOnlyList<GitHubReleaseAsset> ReleaseAssets => Assets ?? Array.Empty<GitHubReleaseAsset>();
 }
@@ -109,6 +110,9 @@ public static class GitHubUpdateChecker
             ? urlNode.GetString()
             : null;
         releasePageUrl ??= $"https://github.com/{owner}/{repository}/releases/latest";
+        var releaseNotes = root.TryGetProperty("body", out var bodyNode) && bodyNode.ValueKind == JsonValueKind.String
+            ? bodyNode.GetString()
+            : null;
         var assets = new List<GitHubReleaseAsset>();
         if (root.TryGetProperty("assets", out var assetsNode) && assetsNode.ValueKind == JsonValueKind.Array)
         {
@@ -135,7 +139,8 @@ public static class GitHubUpdateChecker
             releasePageUrl,
             IsNewerVersion(latestVersion, currentVersion),
             ReleaseFound: true,
-            Assets: assets);
+            Assets: assets,
+            ReleaseNotes: releaseNotes);
     }
 
     public static string BuildLatestReleaseApiUrl(string owner, string repository) =>
@@ -171,7 +176,7 @@ public static class GitHubUpdateChecker
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(name => new GitHubReleaseAsset(
                 name,
-                $"https://github.com/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repository)}/releases/latest/download/{Uri.EscapeDataString(name)}",
+                $"https://github.com/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repository)}/releases/download/{Uri.EscapeDataString(latestVersion)}/{Uri.EscapeDataString(name)}",
                 0,
                 null))
             .ToArray();

@@ -6,7 +6,7 @@
 
 ## Main dashboard
 
-The dashboard contains nine card types:
+The dashboard contains ten card types:
 
 1. **Primary quota runway** shows remaining quota, usage, and the next reset.
 2. **Task guard** shows protection status and can pause tasks visible to the current connection.
@@ -17,6 +17,7 @@ The dashboard contains nine card types:
 7. **Today / hourly usage** shows this device's tokens today, today's estimated share of the account's total weekly quota, and a local-token line chart for hours 00–23. The share is estimated from this week's account token history and weekly-window usage; it stays unavailable when the data is incomplete.
 8. **Guard policy** configures warning and pause thresholds, automatic pausing, and floating-window text size.
 9. **Shared usage** groups devices using the same sync key and shows each device's tokens, group share, top model, session count, and last sync time.
+10. **Reset signals** monitors public reset previews and announcements, with source links and separate detection of official account quota recovery.
 
 Select **Sync now** to reconnect to Codex and refresh all data.
 
@@ -33,17 +34,39 @@ Select **Sync now** to reconnect to Codex and refresh all data.
 - **Warning** changes the dashboard to a warning state when usage reaches the selected percentage.
 - **Pause limit** activates the blocking state at the selected percentage.
 - **Automatic pause** attempts to interrupt running tasks visible to the current App Server connection.
+- **Quota warning notifications** is enabled by default. Uncheck it and select **Save & apply** to disable Windows notifications. The highest usage window triggers one warning and another when it reaches the pause limit. Further refreshes stay quiet until usage falls below the warning line. Notifications include the window, usage and reset time; clicking opens the dashboard. Monitoring continues in the tray after closing the main window. This switch is independent of automatic pause.
 - **Floating font size** adjusts overlay text from 100% to 150%.
+- **Daily account quota warning** is optional. Set 0.1–100% of the total weekly quota as the daily warning and select **Save & apply**. Today's account usage is estimated from token shares in the current Codex weekly cycle across all devices. Cycle boundaries within a day can introduce error; this is not an official daily quota bill. Missing history suppresses alerts.
+- **Use recommendation** fills the average quota share of completed active calendar days in the current cycle plus 20%, rounded up to 0.1%. Today and the partial first cycle day are excluded. Save to apply it. During continuous monitoring, the same daily limit triggers once per local day; the notification switch controls delivery. Daily warnings do not pause tasks.
 
 Live control is scoped to the App Server connection. Tasks running in another Codex window may need to be stopped in that window.
+
+## Reset signals
+
+Monitoring is enabled by default and reads public data from [codex-reset.com](https://codex-reset.com/) every two minutes. Both switches save immediately. Disable notifications to keep the card updating quietly, or disable monitoring to stop public API requests. Monitoring continues in the tray when the main window is hidden.
+
+- The card shows active previews, recent announcements, check time and source fetch time. **View source** opens the original announcement.
+- The first fresh poll establishes a quiet baseline. Subsequent new events notify once; local event history prevents duplicates after restarting. Events observed while muted are not replayed when notifications are enabled again.
+- Stale data, request failures and alert-history storage failures pause signal notifications. Forecast probabilities, unconfirmed candidates and banked-reset grants are not global resets.
+- Community reports do not confirm delivery to your account. Official account usage is checked separately: recovery requires usage to drop substantially to 10% or below and a new future reset window. Initial readings and percentage corrections alone do not trigger recovery alerts.
+
+No Codex credentials or session data are sent to the public feed. The source is an independent community tracker, unaffiliated with OpenAI, and cannot predict unpublished reset decisions. See the [API contract](https://codex-reset.com/developers).
 
 ## Multi-device shared usage
 
 1. Select **Enable shared usage** on the first device.
-2. Keep the server URL set to `https://www.woliu.top` and enter a recognizable device name.
+2. Keep the server URL set to `https://www.woliux.com` and enter a recognizable device name.
 3. Select **Generate key**, then **Save & sync**.
 4. Select **Copy key** and paste the same key on your other devices. Give each device a distinct name.
-5. After the other devices save and sync, the card displays the current week's usage for the group.
+5. Choose this device's **Reset policy**, then **Save & sync**. The card shows each synced device's count under its own policy and its share of the group total.
+
+- **Fixed weekly**: count Monday through Sunday in local time; the next refresh in a new week starts a new period.
+- **Clear on reset**: clear when official account weekly quota enters a new window after expiry or a substantial confirmed recovery. The first reading establishes a baseline; short quota windows and community previews do not trigger clearing. AIMaster must successfully refresh official account data. A recovery while the app is closed is processed when the next reading confirms it.
+- **Never clear** (default): continue accumulating across weeks, initially including available local Codex session history.
+
+**Clear manually** resets only this device's shared count. **Restore** undoes its last manual or account-recovery clear and retains subsequent usage. Restore is disabled afterwards or when no clear is available; fixed weekly still counts only the current week. These buttons save the selected policy, retain session logs, and do not change other devices, the dashboard's local statistics, or account quota.
+
+Counts and undo history persist across restarts and updates. Deleting logs does not reduce already collected usage. Offline actions are saved locally and uploaded on the next successful sync. The server still groups device listings by calendar week, so each device must sync again to appear in the next week's list. Devices may select different policies; the group total sums their respective counts.
 
 The sync key grants access to the shared usage group, so share it only between your own devices. AIMaster encrypts it locally with Windows DPAPI. Uploads contain only the device ID and name, weekly period, tokens, session count, top model, and capture time. Codex login tokens, task content, prompts, project names, and project paths are never uploaded.
 

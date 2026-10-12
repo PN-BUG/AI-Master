@@ -15,6 +15,7 @@ AIMaster is a standalone Windows monitor for Codex quota and task activity. It b
 ![AIMaster dashboard in English](docs/images/dashboard-en.png)
 
 - View total Codex quota, 7-day and 5-hour windows, usage percentages, and reset times.
+- Monitor reset previews and announcements from [codex-reset.com](https://codex-reset.com/), notify on new events, and detect account quota recovery separately from official account data.
 - Forecast the remaining weekly quota from Monday through Sunday, switching between the whole account's consumption rate and a projection based only on this device's rate.
 - Track this device's weekly Codex tokens and token-weighted top model, estimate device/project quota attribution from same-period account token history, and show each project's top model without assigning multi-device usage entirely to the current machine.
 - Show today's local tokens, their estimated share of the account's total weekly quota, and an hourly usage line chart from 00 through 23.
@@ -27,7 +28,7 @@ AIMaster is a standalone Windows monitor for Codex quota and task activity. It b
 - Resize and reposition the overlay with persistent placement, click a task to open it in Codex, and adjust text from 100% to 150% in the main-window settings.
 - Dock and auto-hide the overlay on the top, left, or right edge of any monitor. Refreshing pauses while hidden.
 - Switch between Simplified Chinese and English instantly.
-- Check GitHub Releases automatically or install an available update directly from the app.
+- Check GitHub Releases automatically, read the latest release notes, or install an available update directly from the app.
 - Keep monitoring in the system tray after closing the main window.
 
 ## Download and run
@@ -42,6 +43,8 @@ Download a prebuilt Windows x64 package from [GitHub Releases](https://github.co
 3. Run `AIMaster.exe`.
 
 Both packages require Codex and preserve local settings during in-app updates. The standalone package does not require a separate .NET Desktop Runtime installation.
+
+Updates replace files in the running executable's directory and restart from that same path, regardless of shortcuts. Creating release packages does not update a running copy; developers can use `update-running.ps1` to build and install locally. See [the update contract](docs/UPDATES.md) for transaction and recovery details. Release uploads must include the generated `.zip.sha256` files as well as ZIP packages.
 
 ## Requirements
 
@@ -67,7 +70,7 @@ Open it with **Floating monitor** in the main window:
 
 AIMaster starts the local `codex app-server --listen stdio://` process and uses the sign-in state maintained by Codex. It does not read, copy, or store login tokens.
 
-Shared usage is disabled by default. When enabled, only weekly device aggregates are sent to `https://www.woliu.top/api/v1/aimaster/sync`; Codex credentials, task content, project names, and paths are excluded. The sync key is encrypted locally with Windows DPAPI.
+Shared usage is disabled by default. When enabled, only weekly device aggregates are sent to `https://www.woliux.com/api/v1/aimaster/sync`; Codex credentials, task content, project names, and paths are excluded. The sync key is encrypted locally with Windows DPAPI.
 
 When App Server data is unavailable, AIMaster falls back to local session records under `%USERPROFILE%\.codex\sessions` for the task list. Settings are stored in `%LOCALAPPDATA%\AIMaster\settings.json`. Existing `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` settings are migrated on first launch.
 

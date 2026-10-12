@@ -47,3 +47,4 @@ Desktop.ini
 # committing large binaries to repository history.
 /release/AIMaster-*/
 /release/*.zip
+/release/*.zip.sha256

@@ -10,7 +10,19 @@ internal sealed class AiManagerService : IAsyncDisposable
 {
     private readonly CodexAppServerClient _client = new();
     private readonly SharedUsageClient _sharedUsageClient = new();
+    private readonly SemaphoreSlim _sharedUsageGate = new(1, 1);
+    private SharedUsageCounter? _sharedUsageCounter;
+    private string? _sharedUsageCounterDevice;
+    public bool CanRestoreSharedUsage
+    {
+        get
+        {
+            try { return GetSharedUsageCounter(Settings.SharedUsageDeviceId).CanRestore; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return false; }
+        }
+    }
     private readonly string _settingsPath;
+    private readonly string? _sharedUsageSourceHome;
     private readonly ConcurrentDictionary<string, RolloutCursor> _rolloutCursors =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, LocalUsageCursor> _localUsageCursors =
@@ -53,9 +65,10 @@ internal sealed class AiManagerService : IAsyncDisposable
         long Tokens,
         bool IsLegacy = false);
 
-    public AiManagerService()
+    public AiManagerService(string? settingsPath = null, string? sharedUsageSourceHome = null)
     {
-        _settingsPath = AppPaths.GetSettingsFile();
+        _settingsPath = settingsPath ?? AppPaths.GetSettingsFile();
+        _sharedUsageSourceHome = sharedUsageSourceHome;
         Settings = LoadSettings();
     }
 
@@ -82,7 +95,14 @@ internal sealed class AiManagerService : IAsyncDisposable
         var usage = await usageTask;
         var threads = await threadsTask;
         var localData = await localDataTask;
-        var sharedUsage = await _sharedUsageClient.SyncAsync(Settings, localData.Usage, cancellationToken);
+        var limits = ParseLimits(rate);
+        AiSharedUsageSummary sharedUsage;
+        try { sharedUsage = await SyncSharedUsageAsync(cancellationToken, limits: limits); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            sharedUsage = new AiSharedUsageSummary { Enabled = Settings.SharedUsageEnabled,
+                Error = LocalizationService.L("本机共享计数读取或保存失败：", "Unable to read or save local shared counts: ") + ex.Message };
+        }
 
         var serverThreads = threads is { } threadValue ? ParseThreads(threadValue) : new();
         var mergedThreads = SortTasksByStatusAndTime(MergeFloatingTasks(serverThreads, localData.Tasks)
@@ -91,7 +111,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             .ToList();
         LastSnapshot = new AiManagerSnapshot
         {
-            Limits = ParseLimits(rate),
+            Limits = limits,
             DailyUsage = usage is { } usageValue ? ParseDailyUsage(usageValue) : new(),
             LifetimeTokens = usage is { } usageSummary ? ParseLifetimeTokens(usageSummary) : null,
             Threads = mergedThreads,
@@ -392,10 +412,76 @@ internal sealed class AiManagerService : IAsyncDisposable
         return Settings;
     }
 
-    public Task<AiSharedUsageSummary> SyncSharedUsageAsync(
-        AiLocalUsageSummary localUsage,
-        CancellationToken cancellationToken = default) =>
-        _sharedUsageClient.SyncAsync(Settings, localUsage, cancellationToken);
+    public async Task<AiSharedUsageSummary> SyncSharedUsageAsync(
+        CancellationToken cancellationToken = default,
+        SharedUsageCounterAction action = SharedUsageCounterAction.None,
+        IReadOnlyList<AiLimitWindow>? limits = null)
+    {
+        await _sharedUsageGate.WaitAsync(cancellationToken);
+        try
+        {
+            // Snapshot settings so a UI edit cannot change device identity midway through a sync.
+            var settings = JsonSerializer.Deserialize<AiManagerSettings>(JsonSerializer.Serialize(Settings))!;
+            settings.SharedUsageSyncKey = Settings.SharedUsageSyncKey;
+            if (!settings.SharedUsageEnabled && action == SharedUsageCounterAction.None)
+                return new AiSharedUsageSummary { Enabled = false };
+            var counter = GetSharedUsageCounter(settings.SharedUsageDeviceId);
+            var usage = await Task.Run(() =>
+            {
+                // A manual clear covers all available history, so changing policy afterwards
+                // cannot bring back previously unscanned old usage.
+                var samples = ReadSharedUsageSamples(action == SharedUsageCounterAction.Clear
+                    ? SharedUsageResetModes.Never : settings.SharedUsageResetMode, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                return counter.Update(samples, settings.SharedUsageResetMode, DateTimeOffset.Now, limits, action);
+            }, cancellationToken);
+            return await _sharedUsageClient.SyncAsync(settings, usage, cancellationToken);
+        }
+        finally { _sharedUsageGate.Release(); }
+    }
+
+    private SharedUsageCounter GetSharedUsageCounter(string deviceId)
+    {
+        if (_sharedUsageCounter is null || _sharedUsageCounterDevice != deviceId)
+        {
+            _sharedUsageCounter = new SharedUsageCounter(Path.Combine(Path.GetDirectoryName(_settingsPath)!,
+                $"shared-usage-{deviceId}.json"));
+            _sharedUsageCounterDevice = deviceId;
+        }
+        return _sharedUsageCounter;
+    }
+
+    private List<SharedUsageSample> ReadSharedUsageSamples(string mode, CancellationToken cancellationToken)
+    {
+        var configuredHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        var codexHome = _sharedUsageSourceHome ?? (string.IsNullOrWhiteSpace(configuredHome)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex")
+            : configuredHome);
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var monday = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
+        var earliestWriteUtc = monday.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
+        var samples = new List<SharedUsageSample>();
+        // Archived rollouts keep the same session identity and must not count a second time.
+        foreach (var folder in new[] { "sessions", "archived_sessions" })
+        {
+            var root = Path.Combine(codexHome, folder);
+            if (!Directory.Exists(root)) continue;
+            foreach (var path in Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (mode == SharedUsageResetModes.Weekly && File.GetLastWriteTimeUtc(path) < earliestWriteUtc) continue;
+                ScanLocalUsageFile(path, DateOnly.FromDateTime(File.GetLastWriteTime(path)), cancellationToken);
+                var sessionId = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                    Encoding.UTF8.GetBytes(Path.GetFileNameWithoutExtension(path))));
+                var cursor = _localUsageCursors[path];
+                lock (cursor.Sync)
+                    samples.AddRange(cursor.Records.GroupBy(item => (item.Date, item.ModelName))
+                        .Select(group => new SharedUsageSample(sessionId, group.Key.Date, group.Key.ModelName,
+                            group.Sum(item => item.Tokens))));
+            }
+        }
+        return samples;
+    }
 
     public AiForecast BuildForecast(AiManagerSnapshot snapshot)
     {
@@ -775,8 +861,16 @@ internal sealed class AiManagerService : IAsyncDisposable
                 : new Dictionary<string, AiDashboardCardSize>(settings.DashboardCardSizes,
                     StringComparer.OrdinalIgnoreCase);
             settings.SharedUsageServerUrl = string.IsNullOrWhiteSpace(settings.SharedUsageServerUrl)
-                ? "https://www.woliu.top"
+                ? "https://www.woliux.com"
                 : settings.SharedUsageServerUrl.Trim();
+            settings.SharedUsageResetMode = SharedUsageResetModes.Normalize(settings.SharedUsageResetMode);
+            if (Uri.TryCreate(settings.SharedUsageServerUrl, UriKind.Absolute, out var sharedUsageUri) &&
+                (sharedUsageUri.Host.Equals("www.woliu.top", StringComparison.OrdinalIgnoreCase) ||
+                 sharedUsageUri.Host.Equals("woliu.top", StringComparison.OrdinalIgnoreCase)) &&
+                sharedUsageUri.AbsolutePath == "/" && string.IsNullOrEmpty(sharedUsageUri.Query) &&
+                string.IsNullOrEmpty(sharedUsageUri.Fragment) && string.IsNullOrEmpty(sharedUsageUri.UserInfo) &&
+                sharedUsageUri.IsDefaultPort)
+                settings.SharedUsageServerUrl = "https://www.woliux.com";
             settings.SharedUsageSyncKey = LocalSecretProtection.Unprotect(settings.SharedUsageSyncKeyProtected);
             settings.SharedUsageDeviceId = Guid.TryParse(settings.SharedUsageDeviceId, out var deviceId)
                 ? deviceId.ToString("D")
@@ -1192,11 +1286,17 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var cursor in _rolloutCursors.Values) cursor.PendingLine.Dispose();
-        _rolloutCursors.Clear();
-        foreach (var cursor in _localUsageCursors.Values) cursor.PendingLine.Dispose();
-        _localUsageCursors.Clear();
-        _sharedUsageClient.Dispose();
-        await _client.DisposeAsync();
+        // A local clear may still be scanning on a worker when the window closes.
+        await _sharedUsageGate.WaitAsync();
+        try
+        {
+            foreach (var cursor in _rolloutCursors.Values) cursor.PendingLine.Dispose();
+            _rolloutCursors.Clear();
+            foreach (var cursor in _localUsageCursors.Values) cursor.PendingLine.Dispose();
+            _localUsageCursors.Clear();
+            _sharedUsageClient.Dispose();
+            await _client.DisposeAsync();
+        }
+        finally { _sharedUsageGate.Release(); }
     }
 }

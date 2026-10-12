@@ -150,13 +150,20 @@
             <StackPanel>
                 <TextBlock Text="AI / CONTROL DESK" Foreground="{DynamicResource Signal}" FontFamily="Cascadia Mono"
                            FontSize="11" FontWeight="SemiBold"/>
-                <TextBlock Text="AIMaster" Foreground="{DynamicResource Ink}" FontSize="26" FontWeight="Bold" Margin="0,2,0,0"/>
+                <WrapPanel Margin="0,2,0,0">
+                    <TextBlock Text="AIMaster" Foreground="{DynamicResource Ink}" FontSize="26" FontWeight="Bold"/>
+                    <Button x:Name="OfficialWebsiteButton" Content="进入官网" ToolTip="在默认浏览器中打开 AIMaster 官网"
+                            Style="{StaticResource ActionButton}" Height="28" Padding="10,0" FontSize="12"
+                            VerticalAlignment="Center" Margin="12,0,0,0" Click="OfficialWebsite_Click"/>
+                </WrapPanel>
                 <TextBlock Text="看清额度跑道，在撞线之前停下来。" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,2,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock x:Name="SyncStatusText" Text="等待连接" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
                 <Button x:Name="CheckUpdateButton" Content="⇩ 检查更新" ToolTip="检查 GitHub 新版本"
                         Style="{StaticResource ActionButton}" Click="CheckUpdate_Click" Margin="0,0,8,0"/>
+                <Button x:Name="ViewUpdateButton" Content="查看更新内容" ToolTip="查看最新版本的发布说明"
+                        Style="{StaticResource ActionButton}" Click="ViewUpdate_Click" Margin="0,0,8,0" Visibility="Collapsed"/>
                 <Button x:Name="InstallUpdateButton" Content="⇩ 立即更新" ToolTip="下载并安装新版本"
                         Style="{StaticResource SignalButton}" Click="InstallUpdate_Click" Margin="0,0,8,0" Visibility="Collapsed"/>
                 <Button x:Name="LanguageButton" Content="EN" ToolTip="切换语言" Style="{StaticResource ActionButton}" Click="LanguageButton_Click" Margin="0,0,8,0"/>
@@ -251,6 +258,50 @@
                     </Grid>
                 </Border>
 
+                <Border x:Name="ResetSignalsCard" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="275">
+                    <StackPanel>
+                        <TextBlock Text="重置信号" Style="{StaticResource Label}"/>
+                        <CheckBox x:Name="ResetMonitoringCheck" Content="自动监测重置信号（每 2 分钟）"
+                                  Foreground="{DynamicResource Ink}" Margin="0,12,0,0"
+                                  Checked="ResetSettings_Changed" Unchecked="ResetSettings_Changed"/>
+                        <CheckBox x:Name="ResetNotificationsCheck" Content="新信号及账号额度恢复时通知"
+                                  Foreground="{DynamicResource Ink}" Margin="0,8,0,10"
+                                  Checked="ResetSettings_Changed" Unchecked="ResetSettings_Changed"/>
+                        <TextBlock x:Name="ResetSignalStatusText" Text="等待重置信号" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource Ink}" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock x:Name="ResetLastAnnouncementText" Text="上次重置记录未知" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,6,0,0"/>
+                        <ItemsControl x:Name="ResetSignalItems" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="0,8">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <Button Content="{Binding SourceActionText}" Tag="{Binding Url}" Click="ResetSource_Click"
+                                                        DockPanel.Dock="Right" Style="{StaticResource ActionButton}"
+                                                        Height="24" FontSize="10" Padding="8,0" Margin="8,0,0,0"/>
+                                                <TextBlock Text="{Binding Heading}" Foreground="{DynamicResource SignalText}" FontSize="11" TextWrapping="Wrap"/>
+                                            </DockPanel>
+                                            <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource Muted}" FontSize="11"
+                                                       TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="48" Margin="0,5,0,0"
+                                                       ToolTip="{Binding Summary}"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock x:Name="ResetAccountRecoveryText" Text="官方账号数据：尚未检测到额度恢复"
+                                   TextWrapping="Wrap" Foreground="{DynamicResource Ink}" FontSize="11" Margin="0,8,0,0"/>
+                        <TextBlock Text="社区转述和预告不代表额度已到账；以官方账号数据为准。"
+                                   Foreground="{DynamicResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                        <Button Content="数据来源：codex-reset.com" Tag="https://codex-reset.com/zh/" Click="ResetSource_Click"
+                                Style="{StaticResource ActionButton}" HorizontalAlignment="Left" Height="26" FontSize="11"
+                                Margin="0,10,0,0"/>
+                        <TextBlock x:Name="ResetCheckedText" Text="每 2 分钟自动检查" Foreground="{DynamicResource Subtle}"
+                                   FontSize="10" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    </StackPanel>
+                </Border>
+
                 <Border x:Name="ForecastCard" Grid.Row="1" Grid.Column="2" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="370">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -325,7 +376,7 @@
                         <TextBlock Text="保护策略" Style="{StaticResource Label}"/>
                         <Grid Grid.Row="1" Margin="0,12,0,8">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="86"/></Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <TextBlock Text="预警线" Foreground="{DynamicResource Ink}" VerticalAlignment="Center"/>
                             <TextBox x:Name="WarningPercentBox" Grid.Column="1" Text="70" FontFamily="Cascadia Mono" HorizontalContentAlignment="Right"/>
                             <TextBlock Grid.Row="1" Text="暂停线" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,10,0,0"/>
@@ -334,6 +385,23 @@
                             <TextBox x:Name="FloatingFontPercentBox" Grid.Row="2" Grid.Column="1" Text="120" FontFamily="Cascadia Mono"
                                      HorizontalContentAlignment="Right" Margin="0,10,0,0"/>
                             <CheckBox x:Name="AutoPauseCheck" Grid.Row="3" Grid.ColumnSpan="2" Content="超出暂停线时中断可见任务并提示（窗口打开时监控）" Foreground="{DynamicResource Ink}" Margin="0,14,0,0"/>
+                            <CheckBox x:Name="QuotaNotificationsCheck" Grid.Row="4" Grid.ColumnSpan="2" Foreground="{DynamicResource Ink}" Margin="0,10,0,0">
+                                <TextBlock Text="额度预警通知栏提示" TextWrapping="Wrap"/>
+                            </CheckBox>
+                            <StackPanel Grid.Row="5" Grid.ColumnSpan="2" Margin="0,16,0,0">
+                                <CheckBox x:Name="DailyQuotaWarningCheck" Foreground="{DynamicResource Ink}">
+                                    <TextBlock Text="启用每日账号额度预警" TextWrapping="Wrap"/>
+                                </CheckBox>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="86"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="每日预警线（0.1–100%）" Foreground="{DynamicResource Ink}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox x:Name="DailyQuotaLimitBox" Grid.Column="1" Text="10" FontFamily="Cascadia Mono" HorizontalContentAlignment="Right"/>
+                                </Grid>
+                                <TextBlock x:Name="DailyQuotaStatusText" Text="等待每日额度数据" Foreground="{DynamicResource Subtle}" TextWrapping="Wrap" FontSize="11" Margin="0,8,0,0"/>
+                                <TextBlock Text="按账号本周期 Token 比例与周额度占用估算，包含所有设备；非官方每日额度账单。" Foreground="{DynamicResource Subtle}" TextWrapping="Wrap" FontSize="11" Margin="0,6,0,0"/>
+                                <TextBlock x:Name="DailyRecommendationText" Text="完整用量数据不足，暂不能推荐；可手动填写。" Foreground="{DynamicResource Muted}" TextWrapping="Wrap" FontSize="11" Margin="0,8,0,0"/>
+                                <Button x:Name="UseDailyRecommendationButton" Content="使用推荐值" Style="{StaticResource ActionButton}" Click="UseDailyRecommendation_Click" IsEnabled="False" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+                            </StackPanel>
                         </Grid>
                         <Button Grid.Row="2" Content="保存并应用" Style="{StaticResource SignalButton}" HorizontalAlignment="Right" Click="SavePolicy_Click"/>
                     </Grid>
@@ -432,7 +500,7 @@
                     </Grid>
                 </Border>
 
-                <Border x:Name="SharedUsageCard" Grid.Row="5" Grid.ColumnSpan="3" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="380">
+                <Border x:Name="SharedUsageCard" Grid.Row="5" Grid.ColumnSpan="3" Style="{StaticResource PanelCard}" Margin="0,8,0,0" MinHeight="490">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
@@ -445,15 +513,16 @@
                         <TextBlock Grid.Row="1" Text="使用相同同步密钥的设备归为一组；不会上传 Codex 凭证、任务内容、项目名称或路径。"
                                    Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,10"/>
                         <Grid Grid.Row="2">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="78"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="96"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <CheckBox x:Name="SharedUsageEnabledCheck" Grid.ColumnSpan="2" Content="启用共享统计"
                                       Foreground="{DynamicResource Ink}"/>
                             <TextBlock Grid.Row="1" Text="服务器地址" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
                             <TextBox x:Name="SharedUsageServerUrlBox" Grid.Row="1" Grid.Column="1"
-                                     Text="https://www.woliu.top" Margin="0,9,0,0"/>
+                                     Text="https://www.woliux.com" Margin="0,9,0,0"/>
                             <TextBlock Grid.Row="2" Text="设备名称" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
                             <TextBox x:Name="SharedUsageDeviceNameBox" Grid.Row="2" Grid.Column="1" Margin="0,9,0,0"/>
                             <TextBlock Grid.Row="3" Text="同步密钥" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,9,8,0"/>
@@ -466,6 +535,25 @@
                                 <Button Grid.Column="2" Content="复制密钥" Style="{StaticResource ActionButton}" Height="30"
                                         Padding="9,0" Margin="7,0,0,0" Click="CopySharedSyncKey_Click"/>
                             </Grid>
+                            <TextBlock Grid.Row="4" Text="清零方式" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,12,8,0"/>
+                            <WrapPanel Grid.Row="4" Grid.Column="1" Margin="0,12,0,0">
+                                <RadioButton x:Name="SharedUsageWeeklyRadio" GroupName="SharedUsageResetMode" Content="固定每周"
+                                             Foreground="{DynamicResource Ink}" Margin="0,0,18,5"/>
+                                <RadioButton x:Name="SharedUsageAccountResetRadio" GroupName="SharedUsageResetMode" Content="重置时清零"
+                                             Foreground="{DynamicResource Ink}" Margin="0,0,18,5"/>
+                                <RadioButton x:Name="SharedUsageNeverRadio" GroupName="SharedUsageResetMode" Content="不清零"
+                                             IsChecked="True" Foreground="{DynamicResource Ink}" Margin="0,0,0,5"/>
+                            </WrapPanel>
+                            <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,5,0,0" Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap"
+                                       Text="固定每周：本机周一开始新周期；重置时清零：检测到官方账号周额度恢复时清零；不清零：持续累计。仅影响当前设备，保存后生效。"/>
+                            <WrapPanel Grid.Row="6" Grid.ColumnSpan="2" Margin="0,9,0,0">
+                                <Button x:Name="SharedUsageClearButton" Content="手动清零" Style="{StaticResource ActionButton}"
+                                        Height="30" Margin="0,0,9,0" Click="ClearSharedUsage_Click"
+                                        ToolTip="仅清零当前设备的共享计数，不删除本地会话记录。"/>
+                                <Button x:Name="SharedUsageRestoreButton" Content="恢复" Style="{StaticResource ActionButton}"
+                                        Height="30" IsEnabled="False" Click="RestoreSharedUsage_Click"
+                                        ToolTip="撤销当前设备最近一次清零，并保留之后新增的用量；固定每周仍只显示本周。"/>
+                            </WrapPanel>
                         </Grid>
                         <Grid Grid.Row="3" Margin="0,10,0,10">
                             <TextBlock x:Name="SharedUsageStatusText" Text="等待共享设置" Foreground="{DynamicResource Signal}"

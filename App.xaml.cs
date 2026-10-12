@@ -24,6 +24,24 @@ public partial class App : WpfApplication
     protected override void OnStartup(StartupEventArgs e)
     {
         LocalizationService.Initialize(LoadSavedLanguage() ?? CultureInfo.CurrentUICulture.Name);
+        if (!e.Args.Contains("--update-restart", StringComparer.Ordinal))
+        {
+            var processPath = Environment.ProcessPath;
+            var updateLock = processPath is null ? null : Path.Combine(Path.GetDirectoryName(processPath)!, ".aimaster-update.lock");
+            if (updateLock is not null && File.Exists(updateLock))
+            {
+                try { using var probe = File.Open(updateLock, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); }
+                catch (IOException)
+                {
+                    WpfMessageBox.Show(
+                        LocalizationService.IsEnglish ? "AIMaster is being updated. Please wait for it to restart." : "AIMaster 正在更新，请等待程序自动重启。",
+                        LocalizationService.IsEnglish ? "Update in progress" : "正在更新",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    Shutdown();
+                    return;
+                }
+            }
+        }
         _instanceMutex = new Mutex(true, "AIMaster_Standalone_v1", out var createdNew);
         if (!createdNew)
         {
@@ -77,6 +95,7 @@ public partial class App : WpfApplication
             if (args.Button == Forms.MouseButtons.Left) Dispatcher.Invoke(ShowMainWindow);
         };
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowMainWindow);
+        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(ShowMainWindow);
         LocalizationService.LanguageChanged += LocalizationService_LanguageChanged;
         UpdateTrayLanguage();
     }
@@ -100,6 +119,30 @@ public partial class App : WpfApplication
         _trayIcon.ShowBalloonTip(2500);
     }
 
+    internal void ShowQuotaNotification(QuotaNotification notification, double threshold)
+    {
+        if (IsExiting || _trayIcon?.Visible != true) return;
+        var limit = notification.Limit;
+        var title = notification.IsPauseLimit
+            ? LocalizationService.L("AIMaster · 额度达到暂停线", "AIMaster · Quota pause limit reached")
+            : LocalizationService.L("AIMaster · 额度预警", "AIMaster · Quota warning");
+        var message = LocalizationService.L(
+            $"{limit.DisplayName} · {limit.WindowName} 已用 {limit.UsedPercent:0.#}%（提醒线 {threshold:0.#}%）。{limit.ResetText}。单击查看详情。",
+            $"{limit.DisplayName} · {limit.WindowName}: {limit.UsedPercent:0.#}% used (threshold {threshold:0.#}%). {limit.ResetText}. Click for details.");
+        _trayIcon.ShowBalloonTip(5000, title, message, Forms.ToolTipIcon.Warning);
+    }
+
+    internal void ShowDailyQuotaNotification(double used, double limit)
+    {
+        if (IsExiting || _trayIcon?.Visible != true) return;
+        _trayIcon.ShowBalloonTip(5000,
+            LocalizationService.L("AIMaster · 每日限额预警", "AIMaster · Daily usage warning"),
+            LocalizationService.L(
+                $"今日账号消耗约 {used:0.##}% 周总额度，达到每日预警线 {limit:0.#}%。按账号 Token 比例估算，含所有设备，次日重新计数。单击查看详情。",
+                $"Today's account usage is about {used:0.##}% of total weekly quota, reaching the daily warning of {limit:0.#}%. Estimated from account token shares across all devices; resets next local day. Click for details."),
+            Forms.ToolTipIcon.Warning);
+    }
+
     public void ExitApplication()
     {
         if (IsExiting) return;
@@ -107,6 +150,13 @@ public partial class App : WpfApplication
         if (_trayIcon is not null) _trayIcon.Visible = false;
         foreach (Window window in Windows.Cast<Window>().ToList()) window.Close();
         Shutdown();
+    }
+
+    internal void ShowResetNotification(string title, string message)
+    {
+        if (IsExiting || _trayIcon?.Visible != true) return;
+        _trayIcon.ShowBalloonTip(7000, "AIMaster · " + title,
+            message.Length > 240 ? message[..237] + "…" : message, Forms.ToolTipIcon.Info);
     }
 
     private void LocalizationService_LanguageChanged(object? sender, EventArgs e) => UpdateTrayLanguage();

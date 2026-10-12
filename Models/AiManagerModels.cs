@@ -24,6 +24,20 @@ public static class FloatingFontScales
         double.IsFinite(value) ? Math.Clamp(value, Minimum, Maximum) : Default;
 }
 
+public static class SharedUsageResetModes
+{
+    public const string Weekly = "weekly";
+    public const string AccountReset = "accountReset";
+    public const string Never = "never";
+
+    public static string Normalize(string? value) => value switch
+    {
+        Weekly => Weekly,
+        AccountReset => AccountReset,
+        _ => Never
+    };
+}
+
 public sealed class AiManagerSettings
 {
     [JsonPropertyName("theme")]
@@ -31,6 +45,21 @@ public sealed class AiManagerSettings
 
     [JsonPropertyName("warningPercent")]
     public double WarningPercent { get; set; } = 70;
+
+    [JsonPropertyName("quotaNotificationsEnabled")]
+    public bool QuotaNotificationsEnabled { get; set; } = true;
+
+    [JsonPropertyName("dailyQuotaWarningEnabled")]
+    public bool DailyQuotaWarningEnabled { get; set; }
+
+    [JsonPropertyName("dailyQuotaLimitPercent")]
+    public double DailyQuotaLimitPercent { get; set; } = 10;
+
+    [JsonPropertyName("resetMonitoringEnabled")]
+    public bool ResetMonitoringEnabled { get; set; } = true;
+
+    [JsonPropertyName("resetNotificationsEnabled")]
+    public bool ResetNotificationsEnabled { get; set; } = true;
 
     [JsonPropertyName("pausePercent")]
     public double PausePercent { get; set; } = 90;
@@ -72,8 +101,11 @@ public sealed class AiManagerSettings
     [JsonPropertyName("sharedUsageEnabled")]
     public bool SharedUsageEnabled { get; set; }
 
+    [JsonPropertyName("sharedUsageResetMode")]
+    public string SharedUsageResetMode { get; set; } = SharedUsageResetModes.Never;
+
     [JsonPropertyName("sharedUsageServerUrl")]
-    public string SharedUsageServerUrl { get; set; } = "https://www.woliu.top";
+    public string SharedUsageServerUrl { get; set; } = "https://www.woliux.com";
 
     [JsonPropertyName("sharedUsageSyncKeyProtected")]
     public string SharedUsageSyncKeyProtected { get; set; } = string.Empty;

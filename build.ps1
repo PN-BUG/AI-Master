@@ -61,6 +61,12 @@ if ([IO.Path]::GetDirectoryName($outputFullPath) -ne $releaseFullPath) {
 
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 if (Test-Path -LiteralPath $outputDir) {
+    $running = @(Get-Process -Name AIMaster -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -and [IO.Path]::GetDirectoryName($_.Path) -ieq $outputFullPath
+    })
+    if ($running.Count -gt 0) {
+        throw 'This package directory is in use. Run .\update-running.ps1 to update the running application in place.'
+    }
     Remove-Item -LiteralPath $outputDir -Recurse -Force
 }
 if (Test-Path -LiteralPath $archivePath) {
@@ -117,6 +123,9 @@ $hash = if (Test-Path -LiteralPath $archivePath) {
     (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
 } else {
     (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+}
+if (-not $NoZip) {
+    [IO.File]::WriteAllText(($archivePath + '.sha256'), $hash.ToLowerInvariant(), $utf8WithoutBom)
 }
 
 Write-Host ("SUCCESS: {0:N2} MB" -f ($bytes / 1MB)) -ForegroundColor Green

@@ -18,9 +18,26 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--shared-usage-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifySharedUsageCounter();
+            return 0;
+        }
+        if (args.Contains("--reset-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyResetSignals(args);
+            return 0;
+        }
         var app = new App();
         app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--quota-notifications", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyQuotaNotifications();
+            app.ExitApplication();
+            return 0;
+        }
+        VerifyQuotaNotifications();
         if (args.Contains("--capture-docs", StringComparer.OrdinalIgnoreCase))
         {
             var outputDirectory = args.SkipWhile(arg => !string.Equals(arg, "--output", StringComparison.OrdinalIgnoreCase))
@@ -51,14 +68,16 @@ internal static partial class Program
             "self-updater selects the matching lightweight package");
         Check(ApplicationUpdater.SelectAsset(updateAssets, "AIMaster", "win-x64", "standalone")?.SizeBytes == 200,
             "self-updater selects the matching standalone package");
+        VerifyUpdaterPreparation();
         VerifyOneClickPackager();
         VerifyBilingualDocumentation();
         var parsedRelease = GitHubUpdateChecker.ParseReleaseJson(
-            "{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/PN-BUG/AI-Master/releases/tag/v1.2.0\",\"assets\":[{\"name\":\"AIMaster-win-x64-lightweight.zip\",\"browser_download_url\":\"https://github.com/PN-BUG/AI-Master/releases/download/v1.2.0/AIMaster-win-x64-lightweight.zip\",\"size\":123,\"digest\":\"sha256:abcd\"}]}",
+            "{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/PN-BUG/AI-Master/releases/tag/v1.2.0\",\"body\":\"## Changes\\nA new feature\",\"assets\":[{\"name\":\"AIMaster-win-x64-lightweight.zip\",\"browser_download_url\":\"https://github.com/PN-BUG/AI-Master/releases/download/v1.2.0/AIMaster-win-x64-lightweight.zip\",\"size\":123,\"digest\":\"sha256:abcd\"}]}",
             "1.0.0", "PN-BUG", "AI-Master");
         Check(parsedRelease.UpdateAvailable && parsedRelease.ReleaseAssets.Count == 1 &&
+              parsedRelease.ReleaseNotes == "## Changes\nA new feature" &&
               parsedRelease.ReleaseAssets[0].Digest == "sha256:abcd",
-            "update checker parses release assets and SHA-256 digests");
+            "update checker parses release notes, assets, and SHA-256 digests");
         var fallbackRelease = GitHubUpdateChecker.ParseLatestReleasePageUri(
             new Uri("https://github.com/PN-BUG/AI-Master/releases/tag/v1.2.0"),
             "1.0.0", "PN-BUG", "AI-Master",
@@ -66,7 +85,7 @@ internal static partial class Program
         Check(fallbackRelease.UpdateAvailable && fallbackRelease.LatestVersion == "v1.2.0" &&
               fallbackRelease.ReleaseAssets.Count == 2 &&
               fallbackRelease.ReleaseAssets[0].DownloadUrl ==
-              "https://github.com/PN-BUG/AI-Master/releases/latest/download/AIMaster-win-x64-lightweight.zip",
+              "https://github.com/PN-BUG/AI-Master/releases/download/v1.2.0/AIMaster-win-x64-lightweight.zip",
             "rate-limit fallback resolves the latest tag and direct-update packages");
         VerifySharedUsageContract();
         using (var protocolValues = System.Text.Json.JsonDocument.Parse(
@@ -99,10 +118,13 @@ internal static partial class Program
         Check(main.FindName("CheckUpdateButton") is Button updateButton &&
               Equals(updateButton.Content, "⇩ Check for updates"),
             "main window exposes the localized manual update check");
+        Check(main.FindName("ViewUpdateButton") is Button notesButton &&
+              Equals(notesButton.Content, "What's new") && notesButton.Visibility == Visibility.Collapsed,
+            "release notes action appears after finding a release");
         Check(main.FindName("InstallUpdateButton") is Button installButton &&
               Equals(installButton.Content, "⇩ Update now") && installButton.Visibility == Visibility.Collapsed,
             "main window exposes the localized direct-update action on demand");
-        Check(main.FindName("SharedUsageServerUrlBox") is TextBox { Text: "https://www.woliu.top" } &&
+        Check(main.FindName("SharedUsageServerUrlBox") is TextBox { Text: "https://www.woliux.com" } &&
               main.FindName("SharedUsageSyncKeyBox") is PasswordBox,
             "shared usage card exposes the deployed woliu endpoint and a masked sync key");
         Check(main.FindName("AccountForecastButton") is Button { Content: "Account" } &&
@@ -273,6 +295,78 @@ internal static partial class Program
         Console.WriteLine($"PASS: {message}");
     }
 
+    private static void VerifyUpdaterPreparation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"AIMaster-preparation-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var options = new SelfUpdateOptions("AIMaster", "lightweight", false, true);
+        try
+        {
+            var installation = Path.Combine(root, "installation with 'quote and spaces");
+            Directory.CreateDirectory(installation);
+            var executable = Path.Combine(installation, "AIMaster.exe");
+            File.WriteAllText(executable, "old");
+            Check(ApplicationUpdater.GetInstallationDirectory(executable) == installation,
+                "installation directory is derived from the executable rather than the working directory or shortcuts");
+            var archivePath = Path.Combine(root, "package.zip");
+            using (var archive = System.IO.Compression.ZipFile.Open(archivePath, System.IO.Compression.ZipArchiveMode.Create))
+            using (var writer = new StreamWriter(archive.CreateEntry("package\\AIMaster.exe").Open())) writer.Write("new");
+            using (var input = File.OpenRead(archivePath))
+            {
+                var digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(input));
+                ApplicationUpdater.VerifyDigest(new GitHubReleaseAsset("package.zip", "", 0, $"sha256:{digest}"), archivePath, options);
+            }
+            foreach (var invalidDigest in new[] { null, "sha256:bad", "md5:1234", "sha256:" + new string('0', 64) })
+            {
+                var rejected = false;
+                try { ApplicationUpdater.VerifyDigest(new GitHubReleaseAsset("package.zip", "", 0, invalidDigest), archivePath, options); }
+                catch (InvalidDataException) { rejected = true; }
+                Check(rejected, "missing, malformed, unsupported, or mismatched digests cannot install a package");
+            }
+            var stageRoot = Path.Combine(root, "extracted");
+            ApplicationUpdater.ExtractArchiveSafely(archivePath, stageRoot, options);
+            var stagedDirectory = Path.Combine(stageRoot, "package");
+            Check(File.ReadAllText(Path.Combine(stagedDirectory, "AIMaster.exe")) == "new",
+                "archive extraction accepts existing Windows release path separators");
+            foreach (var invalidPath in new[] { "../escape.exe", "..\\escape.exe", "package/AIMaster.exe:stream", "package/../escape.exe", "package./escape.exe" })
+            {
+                var badArchive = Path.Combine(root, $"bad-{Guid.NewGuid():N}.zip");
+                using (var archive = System.IO.Compression.ZipFile.Open(badArchive, System.IO.Compression.ZipArchiveMode.Create))
+                using (var writer = new StreamWriter(archive.CreateEntry(invalidPath).Open())) writer.Write("bad");
+                var rejected = false;
+                try { ApplicationUpdater.ExtractArchiveSafely(badArchive, Path.Combine(root, Guid.NewGuid().ToString("N")), options); }
+                catch (InvalidDataException) { rejected = true; }
+                Check(rejected, "archive traversal, alternate data streams, and ambiguous paths are rejected");
+            }
+            var workspace = Path.Combine(root, "workspace");
+            Directory.CreateDirectory(workspace);
+            var scriptPath = Path.Combine(root, "generated-updater.ps1");
+            var restartMock = """
+                function Start-Process {
+                    param($FilePath, $WorkingDirectory, $ArgumentList, [switch]$PassThru)
+                    $process = New-Object PSObject -Property @{ HasExited = $false; ExitCode = 0 }
+                    $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { return $false }
+                    return $process
+                }
+                """;
+            File.WriteAllText(scriptPath, restartMock + "\n" + ApplicationUpdater.BuildUpdaterScript(int.MaxValue, 0,
+                stagedDirectory, executable, workspace, Path.Combine(root, "logs"), options), new UTF8Encoding(true));
+            var startInfo = new System.Diagnostics.ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true };
+            foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath }) startInfo.ArgumentList.Add(argument);
+            using var process = System.Diagnostics.Process.Start(startInfo)!;
+            if (!process.WaitForExit(15000)) { process.Kill(); throw new InvalidOperationException("Generated updater did not finish."); }
+            if (process.ExitCode != 0 || File.ReadAllText(executable) != "new")
+            {
+                var errorPath = Path.Combine(workspace, "error.txt");
+                throw new InvalidOperationException($"Generated updater failed ({process.ExitCode}): " +
+                    (File.Exists(errorPath) ? File.ReadAllText(errorPath) : File.ReadAllText(scriptPath)));
+            }
+            Check(process.ExitCode == 0 && File.ReadAllText(executable) == "new",
+                "the generated embedded updater runs successfully with quoted installation paths");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static void VerifyOneClickPackager()
     {
         var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
@@ -316,8 +410,8 @@ internal static partial class Program
     {
         var normalized = AiManagerWindow.NormalizeDashboardLayout(
             ["right:quota", "left:quota", "left:unknown", "right:forecast"]);
-        Check(normalized.Count == 9 && normalized[0] == "right:quota" &&
-              normalized[1] == "right:forecast" && normalized.Select(item => item.Split(':')[1]).Distinct().Count() == 9,
+        Check(normalized.Count == 10 && normalized[0] == "right:quota" &&
+              normalized[1] == "right:forecast" && normalized.Select(item => item.Split(':')[1]).Distinct().Count() == 10,
             "dashboard layout preserves valid card moves and restores every missing card once");
     }
 
@@ -327,7 +421,7 @@ internal static partial class Program
             .Where(item => Equals(item.Style, main.FindResource("CardResizeThumb")))
             .ToList();
         var quotaCard = (Border)main.FindName("QuotaCard");
-        Check(resizeThumbs.Count == 9 && resizeThumbs.All(item => Grid.GetRow(item) == 2 && Grid.GetRowSpan(item) == 1) &&
+        Check(resizeThumbs.Count == 10 && resizeThumbs.All(item => Grid.GetRow(item) == 2 && Grid.GetRowSpan(item) == 1) &&
               main.FindName("DailyUsageCanvas") is Canvas &&
               double.IsNaN(quotaCard.Width) && quotaCard.HorizontalAlignment == HorizontalAlignment.Stretch,
             "dashboard cards keep fluid widths and reserve a separate row for height handles");
@@ -386,9 +480,9 @@ internal static partial class Program
 
     private static void VerifySharedUsageContract()
     {
-        Check(SharedUsageClient.TryBuildSyncEndpoint("https://www.woliu.top", out var endpoint, out _) &&
-              endpoint!.AbsoluteUri == "https://www.woliu.top/api/v1/aimaster/sync" &&
-              !SharedUsageClient.TryBuildSyncEndpoint("http://www.woliu.top", out _, out _) &&
+        Check(SharedUsageClient.TryBuildSyncEndpoint("https://www.woliux.com", out var endpoint, out _) &&
+              endpoint!.AbsoluteUri == "https://www.woliux.com/api/v1/aimaster/sync" &&
+              !SharedUsageClient.TryBuildSyncEndpoint("http://www.woliux.com", out _, out _) &&
               SharedUsageClient.TryBuildSyncEndpoint("http://localhost:3000", out _, out _),
             "shared usage requires HTTPS publicly and targets the deployed woliu API");
 

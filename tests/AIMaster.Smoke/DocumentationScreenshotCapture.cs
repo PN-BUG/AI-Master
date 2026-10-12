@@ -37,11 +37,11 @@ internal static class DocumentationScreenshotCapture
             "documentation-demo-sync-key-123456";
         Invoke(main, "RenderSnapshot", managerSnapshot);
         var mainContent = main.Content as FrameworkElement ?? main;
-        Arrange(mainContent, 1180, 1420);
+        Arrange(mainContent, 1180, 2100);
         Invoke(main, "RenderRemainingForecastChart");
         Invoke(main, "RenderTodayUsageChart");
-        Arrange(mainContent, 1180, 1420);
-        SavePng(mainContent, 1180, 1420,
+        Arrange(mainContent, 1180, 2100);
+        SavePng(mainContent, 1180, 2100,
             Path.Combine(outputDirectory, $"dashboard-{suffix}.png"));
 
         var floating = new AiFloatingWindow();
