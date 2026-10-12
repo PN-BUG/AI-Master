@@ -17,12 +17,13 @@ internal sealed class AiManagerService : IAsyncDisposable
     {
         get
         {
-            try { return GetSharedUsageCounter(Settings.SharedUsageDeviceId).CanRestore; }
+            try { return GetSharedUsageCounter(Settings.SharedUsageDeviceId).CanRestoreMode(Settings.SharedUsageResetMode); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return false; }
         }
     }
     private readonly string _settingsPath;
     private readonly string? _sharedUsageSourceHome;
+    private readonly Func<CancellationToken, Task<IReadOnlyList<AiLimitWindow>>>? _sharedUsageLimitsReader;
     private readonly ConcurrentDictionary<string, RolloutCursor> _rolloutCursors =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, LocalUsageCursor> _localUsageCursors =
@@ -63,14 +64,17 @@ internal sealed class AiManagerService : IAsyncDisposable
         string ProjectPath,
         string? ModelName,
         long Tokens,
-        bool IsLegacy = false);
+        bool IsLegacy = false,
+        DateTimeOffset? Timestamp = null);
 
     public AiManagerService(string? settingsPath = null, string? sharedUsageSourceHome = null,
-        SharedUsageClient? sharedUsageClient = null)
+        SharedUsageClient? sharedUsageClient = null,
+        Func<CancellationToken, Task<IReadOnlyList<AiLimitWindow>>>? sharedUsageLimitsReader = null)
     {
         _sharedUsageClient = sharedUsageClient ?? new SharedUsageClient();
         _settingsPath = settingsPath ?? AppPaths.GetSettingsFile();
         _sharedUsageSourceHome = sharedUsageSourceHome;
+        _sharedUsageLimitsReader = sharedUsageLimitsReader;
         Settings = LoadSettings();
     }
 
@@ -428,16 +432,37 @@ internal sealed class AiManagerService : IAsyncDisposable
             if (!settings.SharedUsageEnabled && action == SharedUsageCounterAction.None)
                 return new AiSharedUsageSummary { Enabled = false };
             var counter = GetSharedUsageCounter(settings.SharedUsageDeviceId);
+            if (limits is null)
+            {
+                if (_sharedUsageLimitsReader is not null) limits = await _sharedUsageLimitsReader(cancellationToken);
+                else
+                {
+                    limits = LastSnapshot?.Limits ?? _floatingLimits;
+                    if (settings.SharedUsageResetMode == SharedUsageResetModes.AccountReset && _client.IsConnected)
+                    {
+                        var rate = await TryRequestAsync("account/rateLimits/read", null, TimeSpan.FromSeconds(8), cancellationToken);
+                        if (rate is { } currentRate) limits = ParseLimits(currentRate);
+                    }
+                }
+            }
             var usage = await Task.Run(() =>
             {
-                // A manual clear covers all available history, so changing policy afterwards
-                // cannot bring back previously unscanned old usage.
-                var samples = ReadSharedUsageSamples(action == SharedUsageCounterAction.Clear
+                // Capture available history for this policy's manual baseline, keeping the
+                // other policies' independent baselines untouched.
+                var samples = ReadSharedUsageSamples(action == SharedUsageCounterAction.Clear || counter.RequiresTimestampMigration
                     ? SharedUsageResetModes.Never : settings.SharedUsageResetMode, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 return counter.Update(samples, settings.SharedUsageResetMode, DateTimeOffset.Now, limits, action);
             }, cancellationToken);
-            return await _sharedUsageClient.SyncAsync(settings, usage, cancellationToken);
+            // An unknown boundary must not upload a fake zero or lifetime total as reset-period usage.
+            if (usage.Error is not null)
+                return new AiSharedUsageSummary { Enabled = settings.SharedUsageEnabled, Error = usage.Error, CountedFrom = usage.CountedFrom };
+            var response = await _sharedUsageClient.SyncAsync(settings, usage, cancellationToken);
+            return new AiSharedUsageSummary
+            {
+                Enabled = response.Enabled, Error = response.Error, SyncedAt = response.SyncedAt,
+                Devices = response.Devices, TotalTokens = response.TotalTokens, CountedFrom = usage.CountedFrom
+            };
         }
         finally { _sharedUsageGate.Release(); }
     }
@@ -447,7 +472,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         if (_sharedUsageCounter is null || _sharedUsageCounterDevice != deviceId)
         {
             _sharedUsageCounter = new SharedUsageCounter(Path.Combine(Path.GetDirectoryName(_settingsPath)!,
-                $"shared-usage-{deviceId}.json"));
+                $"shared-usage-{deviceId}.json"), Settings.SharedUsageResetMode);
             _sharedUsageCounterDevice = deviceId;
         }
         return _sharedUsageCounter;
@@ -477,9 +502,9 @@ internal sealed class AiManagerService : IAsyncDisposable
                     Encoding.UTF8.GetBytes(Path.GetFileNameWithoutExtension(path))));
                 var cursor = _localUsageCursors[path];
                 lock (cursor.Sync)
-                    samples.AddRange(cursor.Records.GroupBy(item => (item.Date, item.ModelName))
+                    samples.AddRange(cursor.Records.GroupBy(item => (item.Date, item.ModelName, item.Timestamp))
                         .Select(group => new SharedUsageSample(sessionId, group.Key.Date, group.Key.ModelName,
-                            group.Sum(item => item.Tokens))));
+                            group.Sum(item => item.Tokens), group.Key.Timestamp)));
             }
         }
         return samples;
@@ -738,7 +763,7 @@ internal sealed class AiManagerService : IAsyncDisposable
                 : fallbackDate.ToDateTime(TimeOnly.MinValue);
             cursor.Records.Add(new LocalUsageRecord(DateOnly.FromDateTime(localDateTime), localDateTime.Hour,
                 cursor.ProjectPath ?? LocalizationService.L("未归属项目", "Unassigned"),
-                cursor.ModelName, tokens, isLegacy));
+                cursor.ModelName, tokens, isLegacy, hasTimestamp ? timestamp : null));
         }
         catch (JsonException)
         {

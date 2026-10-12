@@ -1136,6 +1136,18 @@ public partial class AiManagerWindow : Window
 
     private void RenderSharedUsage(AiSharedUsageSummary usage)
     {
+        var countedFrom = usage.CountedFrom;
+        if (countedFrom is null && _service.Settings.SharedUsageResetMode == SharedUsageResetModes.Weekly)
+        {
+            var today = DateTime.Today;
+            countedFrom = new DateTimeOffset(today.AddDays(-(((int)today.DayOfWeek + 6) % 7)));
+        }
+        SharedUsagePeriodText.Text = countedFrom is { } from
+            ? L($"当前设备统计范围：{from.LocalDateTime:yyyy-MM-dd HH:mm} 至今",
+                $"This device's period: {from.LocalDateTime:yyyy-MM-dd HH:mm} to now")
+            : _service.Settings.SharedUsageResetMode == SharedUsageResetModes.AccountReset
+                ? L("当前设备统计范围：等待官方周额度重置时间", "This device's period: awaiting the official weekly reset time")
+                : L("当前设备统计范围：全部本地历史", "This device's period: all local history");
         SharedUsageRestoreButton.IsEnabled = !_sharedUsageEditing && _service.CanRestoreSharedUsage;
         SharedDeviceItems.ItemsSource = null;
         SharedDeviceItems.ItemsSource = usage.Devices;

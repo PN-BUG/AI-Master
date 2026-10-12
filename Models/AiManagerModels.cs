@@ -215,6 +215,8 @@ public sealed class AiProjectUsage
 
 public sealed class AiLocalUsageSummary
 {
+    public DateTimeOffset? CountedFrom { get; init; }
+    public string? Error { get; init; }
     public DateOnly PeriodStart { get; init; }
     public DateOnly PeriodEnd { get; init; }
     public long TotalTokens { get; init; }
@@ -259,6 +261,7 @@ public sealed class AiDeviceUsage
 
 public sealed class AiSharedUsageSummary
 {
+    public DateTimeOffset? CountedFrom { get; init; }
     public bool Enabled { get; init; }
     public string? Error { get; init; }
     public DateTimeOffset? SyncedAt { get; init; }

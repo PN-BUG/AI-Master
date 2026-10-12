@@ -103,7 +103,7 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -- --reset-tes
 
 共享统计默认关闭。客户端只上传设备级周汇总，`X-AIMaster-Sync-Key` 使用 Windows DPAPI 加密保存在本机设置中；项目、任务与 Codex 登录数据不得进入共享请求。公网服务接口和 Supabase 持久化由 `woliu` 项目维护。
 
-`SharedUsageCounter` 独立保存当前设备的计数、清零基线和一次恢复记录（设置目录的 `shared-usage-<deviceId>.json`）。按会话匿名标识、日期和模型保留最高已采集计数，清零不修改 JSONL。日历周、本次官方周额度恢复之后、持续累计三种策略只改变当前设备上传的数值；接口仍使用公共日历周封装，以兼容同组同周期查询。共享扫描包含 `sessions` 和 `archived_sessions`，同名会话不会因归档重复计数。操作、自动刷新和网络同步串行化，防止旧计数覆盖清零结果。官方周额度比较持久化，第一次读数不清零，短时额度和社区信号不清零；本机状态保存失败时不应用清零。
+`SharedUsageCounter` 独立保存当前设备的时间戳用量账本及按模式划分的手动清零、恢复记录（设置目录的 `shared-usage-<deviceId>.json`）。按匿名会话标识、模型和 UTC 时间戳保留最高已采集计数，清零不修改 JSONL。每周模式筛选本机周一 00:00 至今，重置模式筛选官方 `codex` 周窗口的 `ResetsAt - WindowDurationMinutes` 至今，不清零模式累计全部历史；模式切换本身不会建立清零基线。自然周期变化保留检测前已产生的周期内用量。官方窗口信息持久化；切换到重置方式时使用最新官方读数，未知或过期的窗口及无法区分重置前后的无时间戳记录会阻止共享上传。旧按日账本首次扫描时迁移为时间戳记录，保留手动清零和恢复数据，无法重读的历史保留为日残余。接口仍使用公共日历周封装，以兼容同组同周期查询。共享扫描包含 `sessions` 和 `archived_sessions`，同名会话不会因归档重复计数。操作、自动刷新和网络同步串行化，防止旧计数覆盖清零结果；本机状态保存失败时不应用清零。
 
 定向验证（离线，不发送共享请求）：`dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -- --shared-usage-tests`。
 
