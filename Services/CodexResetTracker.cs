@@ -44,23 +44,66 @@ internal sealed class CodexResetTracker
 
 internal sealed class AccountResetTracker
 {
-    private readonly Dictionary<string, AiLimitWindow> _previous = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _reported = new(StringComparer.Ordinal);
+    internal sealed record Observation(AiLimitWindow Limit, DateTimeOffset CheckedAt);
+    internal sealed class State
+    {
+        public Dictionary<string, Observation> Previous { get; set; } = new();
+        public DateTimeOffset? LastRecoveryAt { get; set; }
+    }
+
+    private readonly string? _path;
+    private State _state = new();
+    public DateTimeOffset? LastRecoveryAt => _state.LastRecoveryAt;
+
+    public AccountResetTracker(string? path = null)
+    {
+        _path = path;
+        try
+        {
+            if (path is not null && File.Exists(path))
+                _state = JsonSerializer.Deserialize<State>(File.ReadAllText(path)) ?? new();
+            if (_state.Previous is null) _state = new();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AccountResetTracker] Re-establishing baseline: {ex.Message}");
+        }
+    }
 
     public IReadOnlyList<AiLimitWindow> Observe(IEnumerable<AiLimitWindow> limits, DateTimeOffset now)
     {
+        var next = new State { Previous = new(_state.Previous), LastRecoveryAt = _state.LastRecoveryAt };
         var recovered = new List<AiLimitWindow>();
         foreach (var current in limits)
         {
-            if (current.ResetsAt is null || !double.IsFinite(current.UsedPercent) ||
+            if (current.ResetsAt is null || current.WindowDurationMinutes <= 0 || !double.IsFinite(current.UsedPercent) ||
                 current.UsedPercent is < 0 or > 100) continue;
-            var key = $"{current.LimitId}:{current.WindowDurationMinutes}:{current.IsPrimary}";
-            if (_previous.TryGetValue(key, out var old) && old.ResetsAt is { } oldReset &&
-                current.ResetsAt > oldReset && current.ResetsAt > now &&
-                old.UsedPercent - current.UsedPercent >= 20 && current.UsedPercent <= 10 &&
-                _reported.Add($"{key}:{current.ResetsAt.Value.ToUnixTimeSeconds()}")) recovered.Add(current);
-            _previous[key] = current;
+            var start = current.ResetsAt.Value.AddMinutes(-current.WindowDurationMinutes);
+            if (start > now) continue;
+            // Slot names can change; the account bucket and duration identify the window.
+            var key = $"{current.LimitId.ToLowerInvariant()}:{current.WindowDurationMinutes}";
+            if (next.Previous.TryGetValue(key, out var old))
+            {
+                if (now < old.CheckedAt || current.ResetsAt < old.Limit.ResetsAt) continue;
+                // The official period crossed our last observation. Low prior usage and
+                // consumption accrued before a delayed poll must not suppress a reset alert.
+                if (current.ResetsAt > old.Limit.ResetsAt && current.ResetsAt > now &&
+                    start <= now && (start >= old.CheckedAt || old.Limit.ResetsAt <= now))
+                    recovered.Add(current);
+            }
+            next.Previous[key] = new(current, now);
         }
+        if (next.Previous.Count == 0) return [];
+        if (recovered.Count > 0) next.LastRecoveryAt = now;
+        // Commit before reporting; a failed write must leave the reset available for retry.
+        if (_path is not null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            var temporary = _path + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(next));
+            File.Move(temporary, _path, overwrite: true);
+        }
+        _state = next;
         return recovered;
     }
 }

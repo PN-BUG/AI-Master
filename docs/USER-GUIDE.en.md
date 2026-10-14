@@ -6,7 +6,17 @@
 
 ## Main dashboard
 
-The dashboard contains ten card types:
+The main window has five functional pages and opens on **Quota overview**:
+
+| Page | Contents |
+|---|---|
+| Quota overview | Primary quota runway, quota windows, reset signals |
+| Task monitor | Recent tasks, task guard, manual pause |
+| Usage analysis | Local and project usage, today's hourly usage, weekly forecast |
+| Shared usage | Device sync, clear and restore, group usage; displayed at full page width |
+| Settings | Guard policy, daily warnings, floating text size, language, theme, updates, help |
+
+The pages contain ten functional card types:
 
 1. **Primary quota runway** shows remaining quota, usage, and the next reset.
 2. **Task guard** shows protection status and can pause tasks visible to the current connection.
@@ -19,14 +29,15 @@ The dashboard contains ten card types:
 9. **Shared usage** groups devices using the same sync key and shows each device's tokens, group share, top model, session count, and last sync time.
 10. **Reset signals** monitors public reset previews and announcements, with source links and separate detection of official account quota recovery.
 
-Select **Sync now** to reconnect to Codex and refresh all data.
+**Sync now** and **Floating monitor** remain at the top. Select **Sync now** to reconnect to Codex and refresh all data. Switching pages preserves unsaved form edits and keeps background monitoring running.
 
 ### Card layout
 
-- Drag a card header to reorder it or move it between columns.
+- Drag the top or side edges of a card to reorder it or move it between columns within its functional page. Shared usage uses one column; application controls stay in the right column of Settings.
 - Select the arrow in the upper-right corner to collapse or expand a card.
-- Drag the handle at the bottom of a card to adjust its height. Card width fills its column and follows the window size automatically.
-- Double-click the resize handle to restore its adaptive size.
+- Drag the bottom edge of a card to adjust its height. Card width fills its column and follows the window size automatically.
+- Hover over the question mark in a card header for explanations and interaction tips. Drag areas have no visible icons.
+- Double-click the bottom edge to restore its adaptive size.
 - Card order, collapsed state, and custom height are saved automatically.
 
 ## Guard policy
@@ -48,7 +59,7 @@ Monitoring is enabled by default and reads public data from [codex-reset.com](ht
 - The card shows active previews, recent announcements, check time and source fetch time. **View source** opens the original announcement.
 - The first fresh poll establishes a quiet baseline. Subsequent new events notify once; local event history prevents duplicates after restarting. Events observed while muted are not replayed when notifications are enabled again.
 - Stale data, request failures and alert-history storage failures pause signal notifications. Forecast probabilities, unconfirmed candidates and banked-reset grants are not global resets.
-- Community reports do not confirm delivery to your account. Official account usage is checked separately: recovery requires usage to drop substantially to 10% or below and a new future reset window. Initial readings and percentage corrections alone do not trigger recovery alerts.
+- Community reports do not confirm delivery to your account. Official quota period boundaries are checked separately: a confirmed new period triggers recovery without requiring high prior usage or current usage below 10%. Initial readings, periods that have not started, and percentage corrections alone do not trigger alerts. The baseline and last recovery time persist locally, preventing repeats after restart and allowing the next check to detect a period that changed while the app was closed.
 
 No Codex credentials or session data are sent to the public feed. The source is an independent community tracker, unaffiliated with OpenAI, and cannot predict unpublished reset decisions. See the [API contract](https://codex-reset.com/developers).
 
@@ -112,7 +123,7 @@ Conversation titles work well as stable identifiers. The latest-request mode is 
 
 ## Language switching
 
-Select `EN` or `中文` in the upper-right corner of the main window. The dashboard, floating monitor, tray menu, status text, and reset times switch immediately, and the choice is saved locally.
+Open **Settings**, then select `EN` or `中文` under **Appearance and language**. The dashboard, floating monitor, tray menu, status text, and reset times switch immediately, and the choice is saved locally.
 
 ![AIMaster 中文主面板](images/dashboard-zh.png)
 

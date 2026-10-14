@@ -87,6 +87,37 @@
             <Setter Property="Foreground" Value="{DynamicResource DangerText}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource DangerBorder}"/>
         </Style>
+        <Style x:Key="PageButton" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource Muted}"/>
+            <Setter Property="Padding" Value="18,10"/>
+            <Setter Property="Margin" Value="0,0,8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Root" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}"
+                                BorderThickness="1" CornerRadius="7" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource ButtonHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource SignalSoft}"/>
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Signal}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource SignalText}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Signal}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="CardChromeButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
             <Setter Property="Width" Value="24"/>
             <Setter Property="Height" Value="22"/>
@@ -95,17 +126,13 @@
             <Setter Property="FontSize" Value="12"/>
         </Style>
         <Style x:Key="CardResizeThumb" TargetType="Thumb">
-            <Setter Property="Width" Value="28"/>
-            <Setter Property="Height" Value="14"/>
+            <Setter Property="Height" Value="8"/>
             <Setter Property="Cursor" Value="SizeNS"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Thumb">
-                        <Grid Background="{TemplateBinding Background}">
-                            <Path Data="M 5,6 L 23,6 M 9,10 L 19,10" Stroke="{DynamicResource Subtle}"
-                                  StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
-                        </Grid>
+                        <Border Background="{TemplateBinding Background}"/>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -141,6 +168,7 @@
     <Grid Margin="20,15,20,14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -152,32 +180,57 @@
                            FontSize="11" FontWeight="SemiBold"/>
                 <WrapPanel Margin="0,2,0,0">
                     <TextBlock Text="AIMaster" Foreground="{DynamicResource Ink}" FontSize="26" FontWeight="Bold"/>
-                    <Button x:Name="OfficialWebsiteButton" Content="进入官网" ToolTip="在默认浏览器中打开 AIMaster 官网"
-                            Style="{StaticResource ActionButton}" Height="28" Padding="10,0" FontSize="12"
-                            VerticalAlignment="Center" Margin="12,0,0,0" Click="OfficialWebsite_Click"/>
                 </WrapPanel>
                 <TextBlock Text="看清额度跑道，在撞线之前停下来。" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,2,0,0"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock x:Name="SyncStatusText" Text="等待连接" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                <Button x:Name="CheckUpdateButton" Content="⇩ 检查更新" ToolTip="检查 GitHub 新版本"
-                        Style="{StaticResource ActionButton}" Click="CheckUpdate_Click" Margin="0,0,8,0"/>
-                <Button x:Name="ViewUpdateButton" Content="查看更新内容" ToolTip="查看最新版本的发布说明"
-                        Style="{StaticResource ActionButton}" Click="ViewUpdate_Click" Margin="0,0,8,0" Visibility="Collapsed"/>
-                <Button x:Name="InstallUpdateButton" Content="⇩ 立即更新" ToolTip="下载并安装新版本"
-                        Style="{StaticResource SignalButton}" Click="InstallUpdate_Click" Margin="0,0,8,0" Visibility="Collapsed"/>
-                <Button x:Name="LanguageButton" Content="EN" ToolTip="切换语言" Style="{StaticResource ActionButton}" Click="LanguageButton_Click" Margin="0,0,8,0"/>
-                <Button x:Name="ThemeButton" Content="☀ 日间" ToolTip="切换到日间模式" Style="{StaticResource ActionButton}" Click="ThemeButton_Click" Margin="0,0,8,0"/>
                 <Button x:Name="FloatingWindowButton" Content="▣ 悬浮监控" Style="{StaticResource ActionButton}" Click="FloatingWindow_Click" Margin="0,0,8,0"/>
                 <Button x:Name="RefreshButton" Content="↻ 立即同步" Style="{StaticResource SignalButton}" Click="Refresh_Click"/>
             </StackPanel>
         </Grid>
 
-        <ScrollViewer x:Name="DashboardScrollViewer" Grid.Row="1"
+        <StackPanel Grid.Row="1" Margin="0,0,0,12">
+            <WrapPanel>
+                <RadioButton x:Name="QuotaPageButton" Content="额度概览" Tag="quota" GroupName="DashboardPages" Style="{StaticResource PageButton}" Checked="DashboardPage_Checked"/>
+                <RadioButton x:Name="TasksPageButton" Content="任务监控" Tag="tasks" GroupName="DashboardPages" Style="{StaticResource PageButton}" Checked="DashboardPage_Checked"/>
+                <RadioButton x:Name="UsagePageButton" Content="用量分析" Tag="usage" GroupName="DashboardPages" Style="{StaticResource PageButton}" Checked="DashboardPage_Checked"/>
+                <RadioButton x:Name="SharedPageButton" Content="共享统计" Tag="shared" GroupName="DashboardPages" Style="{StaticResource PageButton}" Checked="DashboardPage_Checked"/>
+                <RadioButton x:Name="SettingsPageButton" Content="设置" Tag="settings" GroupName="DashboardPages" Style="{StaticResource PageButton}" Checked="DashboardPage_Checked"/>
+            </WrapPanel>
+            <TextBlock x:Name="PageDescriptionText" Foreground="{DynamicResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="2,2,0,0"/>
+        </StackPanel>
+
+        <ScrollViewer x:Name="DashboardScrollViewer" Grid.Row="2"
                       VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
             <Grid x:Name="DashboardGrid">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.35*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="1*"/></Grid.ColumnDefinitions>
+
+                <Border x:Name="ApplicationSettingsCard" Style="{StaticResource PanelCard}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="外观与语言" Style="{StaticResource Label}"/>
+                        <WrapPanel Margin="0,12,0,20">
+                            <Button x:Name="LanguageButton" Content="EN" ToolTip="切换语言" Style="{StaticResource ActionButton}" Click="LanguageButton_Click" Margin="0,0,8,6"/>
+                            <Button x:Name="ThemeButton" Content="☀ 日间" ToolTip="切换到日间模式" Style="{StaticResource ActionButton}" Click="ThemeButton_Click" Margin="0,0,0,6"/>
+                        </WrapPanel>
+                        <TextBlock Text="版本与帮助" Style="{StaticResource Label}"/>
+                        <WrapPanel Margin="0,12,0,8">
+                            <Button x:Name="CheckUpdateButton" Content="⇩ 检查更新" ToolTip="检查 GitHub 新版本"
+                                    Style="{StaticResource ActionButton}" Click="CheckUpdate_Click" Margin="0,0,8,6"/>
+                            <Button x:Name="ViewUpdateButton" Content="查看更新内容" ToolTip="查看最新版本的发布说明"
+                                    Style="{StaticResource ActionButton}" Click="ViewUpdate_Click" Margin="0,0,8,6" Visibility="Collapsed"/>
+                            <Button x:Name="InstallUpdateButton" Content="⇩ 立即更新" ToolTip="下载并安装新版本"
+                                    Style="{StaticResource SignalButton}" Click="InstallUpdate_Click" Margin="0,0,0,6" Visibility="Collapsed"/>
+                        </WrapPanel>
+                        <WrapPanel>
+                            <Button x:Name="OfficialWebsiteButton" Content="进入官网" ToolTip="在默认浏览器中打开 AIMaster 官网"
+                                    Style="{StaticResource ActionButton}" Click="OfficialWebsite_Click" Margin="0,0,8,6"/>
+                            <Button x:Name="AboutButton" Content="关于" ToolTip="查看 AIMaster 信息与交流群"
+                                    Style="{StaticResource ActionButton}" Click="About_Click" Margin="0,0,0,6"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
 
                 <Border x:Name="QuotaCard" Grid.Row="0" Grid.Column="0" Style="{StaticResource PanelCard}" MinHeight="168">
                     <Grid>
@@ -208,7 +261,7 @@
                                 </Grid>
                             </StackPanel>
                         </Grid>
-                        <TextBlock Grid.Row="2" Text="刻度线使用账户返回的百分比；不同模型可能拥有独立窗口。" Foreground="{DynamicResource Subtle}" FontSize="11"/>
+                        <TextBlock Tag="CardHelp" Grid.Row="2" Text="刻度线使用账户返回的百分比；不同模型可能拥有独立窗口。" Foreground="{DynamicResource Subtle}" FontSize="11"/>
                     </Grid>
                 </Border>
 
@@ -233,7 +286,7 @@
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <Grid><TextBlock Text="额度窗口" Style="{StaticResource Label}"/>
                             <TextBlock x:Name="ResetCreditText" Text="" Foreground="{DynamicResource Muted}" FontSize="11" HorizontalAlignment="Right"/></Grid>
-                        <TextBlock Grid.Row="1" Text="账户可能同时返回总额度和特定模型额度；守卫以最高占用为准。" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,5,0,7"/>
+                        <TextBlock Tag="CardHelp" Grid.Row="1" Text="账户可能同时返回总额度和特定模型额度；守卫以最高占用为准。" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,5,0,7"/>
                         <ItemsControl x:Name="LimitItems" Grid.Row="2">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -292,7 +345,7 @@
                         </ItemsControl>
                         <TextBlock x:Name="ResetAccountRecoveryText" Text="官方账号数据：尚未检测到额度恢复"
                                    TextWrapping="Wrap" Foreground="{DynamicResource Ink}" FontSize="11" Margin="0,8,0,0"/>
-                        <TextBlock Text="社区转述和预告不代表额度已到账；以官方账号数据为准。"
+                        <TextBlock Tag="CardHelp" Text="社区转述和预告不代表额度已到账；以官方账号数据为准。"
                                    Foreground="{DynamicResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,6,0,0"/>
                         <Button Content="数据来源：codex-reset.com" Tag="https://codex-reset.com/zh/" Click="ResetSource_Click"
                                 Style="{StaticResource ActionButton}" HorizontalAlignment="Left" Height="26" FontSize="11"
@@ -316,7 +369,7 @@
                         </Grid>
                         <StackPanel Grid.Row="1" Margin="0,9,0,0">
                             <TextBlock x:Name="ForecastSummaryText" Text="等待数据" Foreground="{DynamicResource Ink}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                            <TextBlock x:Name="ForecastScopeNoteText" Text="汇总该账号所有设备的用量" Foreground="{DynamicResource Muted}"
+                            <TextBlock Tag="CardHelp" x:Name="ForecastScopeNoteText" Text="汇总该账号所有设备的用量" Foreground="{DynamicResource Muted}"
                                        FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                         <Grid Grid.Row="2" Margin="0,15,0,0">
@@ -353,7 +406,7 @@
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <TextBlock Text="最近任务" Style="{StaticResource Label}"/>
-                        <TextBlock Grid.Row="1" Text="运行态只对当前 App Server 连接可见；其他 Codex 窗口可能显示为历史记录。" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,7,0,9"/>
+                        <TextBlock Tag="CardHelp" Grid.Row="1" Text="运行态只对当前 App Server 连接可见；其他 Codex 窗口可能显示为历史记录。" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,7,0,9"/>
                         <ListBox x:Name="ThreadList" Grid.Row="2" Background="Transparent" BorderThickness="0"
                                  ScrollViewer.VerticalScrollBarVisibility="Hidden" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListBox.ItemTemplate>
@@ -384,7 +437,9 @@
                             <TextBlock Grid.Row="2" Text="浮窗字号（100–150%）" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,10,0,0"/>
                             <TextBox x:Name="FloatingFontPercentBox" Grid.Row="2" Grid.Column="1" Text="120" FontFamily="Cascadia Mono"
                                      HorizontalContentAlignment="Right" Margin="0,10,0,0"/>
-                            <CheckBox x:Name="AutoPauseCheck" Grid.Row="3" Grid.ColumnSpan="2" Content="超出暂停线时中断可见任务并提示（窗口打开时监控）" Foreground="{DynamicResource Ink}" Margin="0,14,0,0"/>
+                            <CheckBox x:Name="AutoPauseCheck" Grid.Row="3" Grid.ColumnSpan="2" Foreground="{DynamicResource Ink}" Margin="0,14,0,0">
+                                <TextBlock Text="超出暂停线时中断可见任务并提示（窗口打开时监控）" TextWrapping="Wrap"/>
+                            </CheckBox>
                             <CheckBox x:Name="QuotaNotificationsCheck" Grid.Row="4" Grid.ColumnSpan="2" Foreground="{DynamicResource Ink}" Margin="0,10,0,0">
                                 <TextBlock Text="额度预警通知栏提示" TextWrapping="Wrap"/>
                             </CheckBox>
@@ -398,7 +453,7 @@
                                     <TextBox x:Name="DailyQuotaLimitBox" Grid.Column="1" Text="10" FontFamily="Cascadia Mono" HorizontalContentAlignment="Right"/>
                                 </Grid>
                                 <TextBlock x:Name="DailyQuotaStatusText" Text="等待每日额度数据" Foreground="{DynamicResource Subtle}" TextWrapping="Wrap" FontSize="11" Margin="0,8,0,0"/>
-                                <TextBlock Text="按账号本周期 Token 比例与周额度占用估算，包含所有设备；非官方每日额度账单。" Foreground="{DynamicResource Subtle}" TextWrapping="Wrap" FontSize="11" Margin="0,6,0,0"/>
+                                <TextBlock Tag="CardHelp" Text="按账号本周期 Token 比例与周额度占用估算，包含所有设备；非官方每日额度账单。" Foreground="{DynamicResource Subtle}" TextWrapping="Wrap" FontSize="11" Margin="0,6,0,0"/>
                                 <TextBlock x:Name="DailyRecommendationText" Text="完整用量数据不足，暂不能推荐；可手动填写。" Foreground="{DynamicResource Muted}" TextWrapping="Wrap" FontSize="11" Margin="0,8,0,0"/>
                                 <Button x:Name="UseDailyRecommendationButton" Content="使用推荐值" Style="{StaticResource ActionButton}" Click="UseDailyRecommendation_Click" IsEnabled="False" HorizontalAlignment="Left" Margin="0,8,0,0"/>
                             </StackPanel>
@@ -425,9 +480,9 @@
                                        FontSize="11" TextWrapping="Wrap" Margin="0,9,18,0"/>
                             <TextBlock x:Name="LocalUsageEstimateText" Text="等待账户与本机记录" Foreground="{DynamicResource Signal}"
                                        FontSize="11" TextWrapping="Wrap" Margin="0,8,18,0"/>
-                            <TextBlock Text="本机 Token 来自本地会话日志；账户 Token 来自 Codex 用量历史。" Foreground="{DynamicResource Subtle}"
+                            <TextBlock Tag="CardHelp" Text="本机 Token 来自本地会话日志；账户 Token 来自 Codex 用量历史。" Foreground="{DynamicResource Subtle}"
                                        FontSize="11" TextWrapping="Wrap" Margin="0,8,18,0"/>
-                            <TextBlock Text="额度占比按同周期 Token 比例估算，不等于官方设备账单。" Foreground="{DynamicResource Subtle}"
+                            <TextBlock Tag="CardHelp" Text="额度占比按同周期 Token 比例估算，不等于官方设备账单。" Foreground="{DynamicResource Subtle}"
                                        FontSize="11" TextWrapping="Wrap" Margin="0,5,18,0"/>
                         </StackPanel>
                         <Border Grid.Column="1" Background="{DynamicResource Line}"/>
@@ -479,7 +534,7 @@
                             <TextBlock Text="TOKEN / 今日" Foreground="{DynamicResource Muted}" FontFamily="Cascadia Mono" FontSize="11"/>
                             <TextBlock x:Name="DailyUsageShareText" Text="周总额度占比暂不可用" Foreground="{DynamicResource Signal}"
                                        FontFamily="Cascadia Mono" FontSize="11" TextWrapping="Wrap" Margin="0,12,18,0"/>
-                            <TextBlock Text="按账号本周 Token 历史与周窗口已用比例估算，不是官方逐日账单。"
+                            <TextBlock Tag="CardHelp" Text="按账号本周 Token 历史与周窗口已用比例估算，不是官方逐日账单。"
                                        Foreground="{DynamicResource Subtle}" FontSize="11" TextWrapping="Wrap" Margin="0,9,18,0"/>
                         </StackPanel>
                         <Border Grid.Column="1" Background="{DynamicResource Line}"/>
@@ -510,7 +565,7 @@
                             <TextBlock Text="共享统计" Style="{StaticResource Label}"/>
                             <TextBlock x:Name="SharedUsageSummaryText" Foreground="{DynamicResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
                         </Grid>
-                        <TextBlock Grid.Row="1" Text="使用相同同步密钥的设备归为一组；不会上传 Codex 凭证、任务内容、项目名称或路径。"
+                        <TextBlock Tag="CardHelp" Grid.Row="1" Text="使用相同同步密钥的设备归为一组；不会上传 Codex 凭证、任务内容、项目名称或路径。"
                                    Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,10"/>
                         <Grid Grid.Row="2">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="96"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -544,7 +599,7 @@
                                 <RadioButton x:Name="SharedUsageNeverRadio" GroupName="SharedUsageResetMode" Content="不清零"
                                              IsChecked="True" Foreground="{DynamicResource Ink}" Margin="0,0,0,5" Checked="SharedUsageResetMode_Checked"/>
                             </WrapPanel>
-                            <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,5,0,0" Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap"
+                            <TextBlock Tag="CardHelp" Grid.Row="5" Grid.ColumnSpan="2" Margin="0,5,0,0" Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap"
                                        Text="固定每周：本周一至今；重置时清零：上次官方周额度重置至今；不清零：持续累计。仅影响当前设备，切换后立即保存并按时间范围重新计算。"/>
                             <TextBlock x:Name="SharedUsagePeriodText" Grid.Row="6" Grid.ColumnSpan="2" Margin="0,7,0,0"
                                        Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Text="当前设备统计范围：全部本地历史"/>
@@ -597,7 +652,7 @@
             </Grid>
         </ScrollViewer>
 
-        <Grid Grid.Row="2" Margin="2,8,2,0">
+        <Grid Grid.Row="3" Margin="2,8,2,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <TextBlock x:Name="FooterStatusText" Text="数据只保存在本机；认证由 Codex 管理。" Foreground="{DynamicResource Subtle}"
                        FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"

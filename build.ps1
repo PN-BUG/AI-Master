@@ -4,12 +4,20 @@ param(
     [ValidateSet('win-x64', 'win-arm64')][string]$Runtime = 'win-x64',
     [Alias('FrameworkDependent')][switch]$Lightweight,
     [switch]$All,
-    [switch]$NoZip
+    [switch]$NoZip,
+    [string]$OutputRoot = (Join-Path $PSScriptRoot 'release')
 )
 
 $ErrorActionPreference = 'Stop'
 $projectPath = Join-Path $PSScriptRoot 'AIMaster.csproj'
-$releaseRoot = Join-Path $PSScriptRoot 'release'
+$releaseRoot = [IO.Path]::GetFullPath($OutputRoot)
+
+function Get-PackageSha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '') }
+    finally { $algorithm.Dispose(); $stream.Dispose() }
+}
 
 if ($All) {
     if ($Lightweight) {
@@ -19,6 +27,7 @@ if ($All) {
     $commonArguments = @{
         Configuration = $Configuration
         Runtime = $Runtime
+        OutputRoot = $releaseRoot
     }
     if ($NoZip) { $commonArguments.NoZip = $true }
 
@@ -120,9 +129,9 @@ if (-not $NoZip) {
 
 $bytes = (Get-ChildItem -LiteralPath $outputDir -File -Recurse | Measure-Object Length -Sum).Sum
 $hash = if (Test-Path -LiteralPath $archivePath) {
-    (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+    Get-PackageSha256 $archivePath
 } else {
-    (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+    Get-PackageSha256 $exe
 }
 if (-not $NoZip) {
     [IO.File]::WriteAllText(($archivePath + '.sha256'), $hash.ToLowerInvariant(), $utf8WithoutBom)

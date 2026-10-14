@@ -21,7 +21,8 @@ AIMaster is a standalone Windows monitor for Codex quota and task activity. It b
 - Show today's local tokens, their estimated share of the account's total weekly quota, and an hourly usage line chart from 00 through 23.
 - Optionally group multiple devices through Woliu shared usage and show each device's token share, top model, session count, and last sync time.
 - Configure warning and pause thresholds; optionally interrupt tasks visible to the current App Server connection.
-- Collapse cards, drag their headers between two columns, and resize them from the lower-right corner. Layout and sizes persist automatically.
+- Navigate between Quota overview, Task monitor, Usage analysis, Shared usage, and Settings. Sync and the floating monitor stay at the top; language, theme, and updates are in Settings.
+- Collapse cards, drag their top or side edges within each page, and adjust height from the bottom edge. Width follows the window; layouts and heights persist automatically.
 - View up to eight recent tasks in the overlay, ordered by status and update time.
 - Use either the Codex conversation title or the latest user request as the displayed task name.
 - Inspect the active model and reasoning effort.
@@ -29,6 +30,7 @@ AIMaster is a standalone Windows monitor for Codex quota and task activity. It b
 - Dock and auto-hide the overlay on the top, left, or right edge of any monitor. Refreshing pauses while hidden.
 - Switch between Simplified Chinese and English instantly.
 - Check GitHub Releases automatically, read the latest release notes, or install an available update directly from the app.
+- Open About from the main window for the version, developer, and license, with a link to the [Woliu Studio QQ community](https://qm.qq.com/q/2a93fRANJO).
 - Keep monitoring in the system tray after closing the main window.
 
 ## Download and run
@@ -90,7 +92,7 @@ Create both the standalone and lightweight folders and ZIP archives:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -All
 ```
 
-On Windows, you can also double-click `package-all.cmd`. All generated packages are placed under `release`.
+On Windows, you can also double-click `package-all.cmd`. It first stops the running AIMaster and confirms that it has exited, then builds both packages, updates the original installation directory, and opens the new version. With no running instance, it opens the newly packaged standalone build. Build failures preserve the old outputs and reopen the previous application; update failures use the transaction engine to restore it. All generated packages are placed under `release`. Use `build.ps1 -All` above to generate distribution packages only.
 
 Other packaging options:
 

@@ -13,7 +13,7 @@ public partial class AiManagerWindow
     private readonly DispatcherTimer _resetTimer = new() { Interval = CodexResetClient.PollInterval };
     private readonly CodexResetTracker _resetTracker = new(Path.Combine(
         Path.GetDirectoryName(AppPaths.GetSettingsFile())!, "reset-signal-state.json"));
-    private readonly AccountResetTracker _accountResetTracker = new();
+    private readonly AccountResetTracker _accountResetTracker;
     private Task? _resetRefreshTask;
     private CodexResetSnapshot? _resetSnapshot;
     private bool _resetControlsLoaded;
@@ -112,7 +112,13 @@ public partial class AiManagerWindow
 
     private void ObserveAccountRecovery(AiManagerSnapshot snapshot)
     {
-        var recovered = _accountResetTracker.Observe(snapshot.Limits, snapshot.CapturedAt);
+        IReadOnlyList<AiLimitWindow> recovered;
+        try { recovered = _accountResetTracker.Observe(snapshot.Limits, snapshot.CapturedAt); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetFooterStatus(L("账号重置记录保存失败：", "Unable to save account reset history: ") + ex.Message, warning: true);
+            return;
+        }
         if (recovered.Count == 0) return;
         _lastAccountRecovery = snapshot.CapturedAt;
         RenderResetSignals();

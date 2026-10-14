@@ -1,0 +1,59 @@
+<Window x:Class="AIMaster.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding TitleText}" Width="540" Height="510" MinWidth="420" MinHeight="340"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource AppBackground}">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+                    <Image Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Width="56" Height="56" Margin="0,0,14,0"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="AIMaster" Foreground="{DynamicResource Ink}" FontSize="26" FontWeight="Bold"/>
+                        <TextBlock Text="{Binding VersionText}" Foreground="{DynamicResource Muted}" FontSize="12"/>
+                    </StackPanel>
+                </StackPanel>
+                <TextBlock Text="{Binding Description}" Foreground="{DynamicResource Ink}" FontSize="13"
+                           TextWrapping="Wrap" Margin="0,0,0,12"/>
+                <TextBlock Text="{Binding StudioText}" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,0,0,4"/>
+                <TextBlock Text="{Binding LicenseText}" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,0,0,20"/>
+
+                <Border Style="{DynamicResource PanelCard}">
+                    <StackPanel>
+                        <TextBlock Text="{Binding LinksHeading}" Style="{DynamicResource Label}" Margin="0,0,0,12"/>
+                        <TextBlock FontSize="13" Margin="0,0,0,10">
+                            <Hyperlink NavigateUri="https://woliux.com/tools/aimaster" RequestNavigate="Link_RequestNavigate"
+                                       Foreground="{DynamicResource Signal}" ToolTip="https://woliux.com/tools/aimaster">
+                                <Run Text="{Binding WebsiteText, Mode=OneWay}"/>
+                            </Hyperlink>
+                        </TextBlock>
+                        <TextBlock FontSize="13" Margin="0,0,0,16">
+                            <Hyperlink NavigateUri="https://github.com/PN-BUG/AI-Master" RequestNavigate="Link_RequestNavigate"
+                                       Foreground="{DynamicResource Signal}" ToolTip="https://github.com/PN-BUG/AI-Master">
+                                <Run Text="{Binding RepositoryText, Mode=OneWay}"/>
+                            </Hyperlink>
+                        </TextBlock>
+                        <TextBlock Text="{Binding CommunityHeading}" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,0,0,7"/>
+                        <TextBlock FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap">
+                            <Hyperlink NavigateUri="https://qm.qq.com/q/2a93fRANJO" RequestNavigate="Link_RequestNavigate"
+                                       Foreground="{DynamicResource Signal}" ToolTip="https://qm.qq.com/q/2a93fRANJO">
+                                <Run Text="{Binding CommunityText, Mode=OneWay}"/>
+                            </Hyperlink>
+                        </TextBlock>
+                        <TextBlock Text="https://qm.qq.com/q/2a93fRANJO" Foreground="{DynamicResource Muted}"
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+        <Button Grid.Row="1" Content="{Binding CloseText}" Style="{DynamicResource ActionButton}"
+                HorizontalAlignment="Right" MinWidth="80" Margin="0,18,0,0"
+                IsDefault="True" IsCancel="True" Click="Close_Click"/>
+    </Grid>
+</Window>

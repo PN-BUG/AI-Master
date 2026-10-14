@@ -10,7 +10,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>AIMaster</AssemblyName>
     <RootNamespace>AIMaster</RootNamespace>
-    <Version>1.3.3</Version>
+    <Version>1.3.4</Version>
     <ApplicationIcon>Resources\AIMaster.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -28,5 +28,6 @@
     <EmbeddedResource Include="Resources\ApplyUpdate.ps1" LogicalName="SharedUpdates.ApplyUpdate.ps1" />
     <Compile Remove="tests\**\*.cs" />
     <Compile Remove="artifacts\**\*.cs" />
+    <Page Remove="artifacts\**\*.xaml" />
   </ItemGroup>
 </Project>

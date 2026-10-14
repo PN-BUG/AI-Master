@@ -37,8 +37,8 @@ public partial class AiManagerWindow : Window
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _collapsedDashboardCards =
         new(StringComparer.OrdinalIgnoreCase);
-    private StackPanel _leftDashboardColumn = null!;
-    private StackPanel _rightDashboardColumn = null!;
+    private readonly Dictionary<string, DashboardPageState> _dashboardPages = new();
+    private string _activeDashboardPage = "quota";
     private Point _cardDragStart;
     private Border? _draggedCard;
     private const double MinimumCardWidth = 280;
@@ -48,8 +48,18 @@ public partial class AiManagerWindow : Window
     private static readonly string[] DefaultDashboardLayout =
     [
         "left:quota", "left:limits", "left:threads", "left:localUsage", "left:dailyUsage",
-        "right:guard", "right:resetSignals", "right:forecast", "right:settings", "right:sharedUsage"
+        "right:guard", "right:resetSignals", "right:forecast", "left:settings", "right:sharedUsage"
     ];
+
+    private sealed class DashboardPageState(
+        Grid host, StackPanel leftColumn, StackPanel rightColumn, string description)
+    {
+        public Grid Host { get; } = host;
+        public StackPanel LeftColumn { get; } = leftColumn;
+        public StackPanel RightColumn { get; } = rightColumn;
+        public string Description { get; } = description;
+        public double ScrollOffset { get; set; }
+    }
 
     private sealed record DashboardCardState(
         string Id,
@@ -57,6 +67,8 @@ public partial class AiManagerWindow : Window
         Border Card,
         UIElement Body,
         TextBlock HeaderTitle,
+        Button HelpButton,
+        TextBlock InteractionHelp,
         Button ToggleButton,
         Thumb ResizeThumb,
         double ExpandedMinHeight);
@@ -66,14 +78,18 @@ public partial class AiManagerWindow : Window
     internal AiManagerWindow(AiManagerService service)
     {
         _service = service;
+        _accountResetTracker = new AccountResetTracker(service.AccountResetStatePath);
+        _lastAccountRecovery = _accountResetTracker.LastRecoveryAt;
         InitializeComponent();
         ApplyTheme(_service.Settings.Theme, refreshContent: false);
         InitializeDashboardCards();
         _timer.Tick += async (_, _) => await RefreshAsync();
         LocalizationService.LanguageChanged += LocalizationService_LanguageChanged;
         LocalizationService.Apply(this);
+        UpdateDashboardChromeLanguage();
         UpdateLanguageButton();
         UpdateThemeButton();
+        UpdateDashboardPageLanguage();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -111,6 +127,8 @@ public partial class AiManagerWindow : Window
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
 
     private void FloatingWindow_Click(object sender, RoutedEventArgs e) => AiFloatingWindow.ShowOrActivate();
+
+    private void About_Click(object sender, RoutedEventArgs e) => new AboutWindow(this).ShowDialog();
 
     private void OfficialWebsite_Click(object sender, RoutedEventArgs e)
     {
@@ -276,8 +294,8 @@ public partial class AiManagerWindow : Window
 
             _availableUpdate = result;
             InstallUpdateButton.Visibility = Visibility.Visible;
-            SetFooterStatus(L($"发现 AIMaster {result.LatestVersion}，可立即更新。",
-                $"AIMaster {result.LatestVersion} is available. Ready to update."));
+            SetFooterStatus(L($"发现 AIMaster {result.LatestVersion}，请在“设置”页更新。",
+                $"AIMaster {result.LatestVersion} is available. Open Settings to update."));
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex)
@@ -395,18 +413,66 @@ public partial class AiManagerWindow : Window
             WrapDashboardCard(id, title, card);
         }
 
+        DashboardGrid.Children.Remove(ApplicationSettingsCard);
+
         DashboardGrid.RowDefinitions.Clear();
         DashboardGrid.ColumnDefinitions.Clear();
-        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
-        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-        DashboardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        _leftDashboardColumn = CreateDashboardColumn();
-        _rightDashboardColumn = CreateDashboardColumn();
-        Grid.SetColumn(_rightDashboardColumn, 2);
-        DashboardGrid.Children.Add(_leftDashboardColumn);
-        DashboardGrid.Children.Add(_rightDashboardColumn);
+        AddDashboardPage("quota", "查看账户剩余额度、额度窗口和重置信号。");
+        AddDashboardPage("tasks", "查看最近任务，并管理当前连接可见任务的暂停状态。");
+        AddDashboardPage("usage", "分析本机、项目和当日用量，查看本周消耗预测。");
+        AddDashboardPage("shared", "配置设备同步，并比较同组设备的共享用量。", singleColumn: true);
+        AddDashboardPage("settings", "调整保护策略、浮窗字号、语言和主题，管理版本更新。");
+        _dashboardPages["settings"].RightColumn.Children.Add(ApplicationSettingsCard);
         ApplyDashboardLayout();
+        QuotaPageButton.IsChecked = true;
+    }
+
+    private void AddDashboardPage(string id, string description, bool singleColumn = false)
+    {
+        var host = new Grid { Tag = id, Visibility = Visibility.Collapsed };
+        host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
+        host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(singleColumn ? 0 : 14) });
+        host.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = singleColumn ? new GridLength(0) : new GridLength(1, GridUnitType.Star)
+        });
+        var left = CreateDashboardColumn();
+        var right = CreateDashboardColumn();
+        Grid.SetColumn(right, 2);
+        if (singleColumn) right.Visibility = Visibility.Collapsed;
+        host.Children.Add(left);
+        host.Children.Add(right);
+        DashboardGrid.Children.Add(host);
+        _dashboardPages.Add(id, new DashboardPageState(host, left, right, description));
+    }
+
+    private static string GetDashboardPageId(string cardId) => cardId switch
+    {
+        "quota" or "limits" or "resetSignals" => "quota",
+        "threads" or "guard" => "tasks",
+        "localUsage" or "dailyUsage" or "forecast" => "usage",
+        "sharedUsage" => "shared",
+        "settings" => "settings",
+        _ => throw new ArgumentOutOfRangeException(nameof(cardId))
+    };
+
+    private void DashboardPage_Checked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton { Tag: string id } || !_dashboardPages.TryGetValue(id, out var selected)) return;
+        _dashboardPages[_activeDashboardPage].ScrollOffset = DashboardScrollViewer.VerticalOffset;
+        _activeDashboardPage = id;
+        foreach (var page in _dashboardPages.Values)
+            page.Host.Visibility = ReferenceEquals(page, selected) ? Visibility.Visible : Visibility.Collapsed;
+        UpdateDashboardPageLanguage();
+        DashboardScrollViewer.UpdateLayout();
+        DashboardScrollViewer.ScrollToVerticalOffset(selected.ScrollOffset);
+    }
+
+    private void UpdateDashboardPageLanguage()
+    {
+        SharedPageButton.Content = L("共享统计", "Shared usage");
+        if (_dashboardPages.TryGetValue(_activeDashboardPage, out var page))
+            PageDescriptionText.Text = LocalizationService.T(page.Description);
     }
 
     private StackPanel CreateDashboardColumn()
@@ -437,24 +503,24 @@ public partial class AiManagerWindow : Window
         card.AllowDrop = true;
         card.DragOver += DashboardCard_DragOver;
         card.Drop += DashboardCard_Drop;
+        card.PreviewMouseLeftButtonDown += CardEdge_MouseLeftButtonDown;
+        card.PreviewMouseLeftButtonUp += CardEdge_MouseLeftButtonUp;
+        card.PreviewMouseMove += CardEdge_MouseMove;
+        card.MouseLeave += (_, _) => card.ClearValue(CursorProperty);
+        card.LostMouseCapture += (_, _) => _draggedCard = null;
 
         var frame = new Grid();
         frame.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         frame.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        frame.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var header = new Grid
         {
             Tag = id,
             Background = Brushes.Transparent,
-            Cursor = Cursors.SizeAll,
-            Margin = new Thickness(0, 0, 0, 4),
-            ToolTip = L("拖动调整布局", "Drag to rearrange")
+            Margin = new Thickness(0, 0, 0, 4)
         };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.PreviewMouseLeftButtonDown += CardHeader_MouseLeftButtonDown;
-        header.MouseMove += CardHeader_MouseMove;
 
         var headerTitle = new TextBlock
         {
@@ -462,17 +528,36 @@ public partial class AiManagerWindow : Window
             Style = (Style)FindResource("Label"),
             VerticalAlignment = VerticalAlignment.Center
         };
-        var grip = new TextBlock
+        var helpContent = new StackPanel { MaxWidth = 340 };
+        var interactionHelp = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        helpContent.Children.Add(interactionHelp);
+        foreach (var hint in FindCardHelp(body))
         {
-            Text = "⋮⋮",
-            Foreground = ThemeBrush("Subtle"),
-            FontFamily = new FontFamily("Cascadia Mono"),
-            FontSize = 12,
-            VerticalAlignment = VerticalAlignment.Center,
-            IsHitTestVisible = false,
-            Margin = new Thickness(8, 0, 7, 0)
+            hint.Visibility = Visibility.Collapsed;
+            var helpText = new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            // Keep the source in the page so language and scope updates reach the tooltip.
+            helpText.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(nameof(TextBlock.Text))
+            {
+                Source = hint,
+                Mode = System.Windows.Data.BindingMode.OneWay
+            });
+            helpContent.Children.Add(helpText);
+        }
+        var helpToolTip = new ToolTip { Content = helpContent };
+        var help = new Button
+        {
+            Content = "?",
+            Style = (Style)FindResource("CardChromeButton"),
+            ToolTip = helpToolTip,
+            Margin = new Thickness(8, 0, 5, 0)
         };
-        Grid.SetColumn(grip, 1);
+        ToolTipService.SetInitialShowDelay(help, 200);
+        ToolTipService.SetShowDuration(help, 60000);
+        Grid.SetColumn(help, 1);
         var toggle = new Button
         {
             Content = "⌃",
@@ -486,17 +571,18 @@ public partial class AiManagerWindow : Window
         {
             Tag = id,
             Style = (Style)FindResource("CardResizeThumb"),
-            HorizontalAlignment = HorizontalAlignment.Right,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Bottom,
-            ToolTip = L("拖动调整卡片高度；双击恢复自适应", "Drag to adjust height; double-click to reset")
+            Margin = new Thickness(-12, 0, -12, -12)
         };
         resizeThumb.DragStarted += CardResize_DragStarted;
         resizeThumb.DragDelta += CardResize_DragDelta;
         resizeThumb.DragCompleted += CardResize_DragCompleted;
         resizeThumb.PreviewMouseDoubleClick += CardResize_MouseDoubleClick;
-        Grid.SetRow(resizeThumb, 2);
+        Grid.SetRowSpan(resizeThumb, 2);
+        Panel.SetZIndex(resizeThumb, 1);
         header.Children.Add(headerTitle);
-        header.Children.Add(grip);
+        header.Children.Add(help);
         header.Children.Add(toggle);
         frame.Children.Add(header);
         Grid.SetRow(body, 1);
@@ -505,7 +591,14 @@ public partial class AiManagerWindow : Window
         card.Child = frame;
 
         _dashboardCards[id] = new DashboardCardState(
-            id, title, card, body, headerTitle, toggle, resizeThumb, card.MinHeight);
+            id, title, card, body, headerTitle, help, interactionHelp, toggle, resizeThumb, card.MinHeight);
+    }
+
+    private static IEnumerable<TextBlock> FindCardHelp(DependencyObject root)
+    {
+        if (root is TextBlock { Tag: "CardHelp" } hint) yield return hint;
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+            foreach (var match in FindCardHelp(child)) yield return match;
     }
 
     private static TextBlock? FindTextBlock(DependencyObject root, string text)
@@ -527,7 +620,11 @@ public partial class AiManagerWindow : Window
         {
             var parts = entry.Split(':', 2);
             if (!_dashboardCards.TryGetValue(parts[1], out var state)) continue;
-            var column = parts[0] == "right" ? _rightDashboardColumn : _leftDashboardColumn;
+            var pageId = GetDashboardPageId(state.Id);
+            var page = _dashboardPages[pageId];
+            // Shared usage uses the full page; settings keeps application controls in the other column.
+            var column = parts[0] == "right" && pageId is not ("shared" or "settings")
+                ? page.RightColumn : page.LeftColumn;
             column.Children.Add(state.Card);
         }
 
@@ -576,25 +673,61 @@ public partial class AiManagerWindow : Window
         if (card.Parent is Panel panel) panel.Children.Remove(card);
     }
 
-    private void CardHeader_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    internal static bool IsCardMoveEdge(Point point, Size size, Thickness padding, bool collapsed)
     {
-        if (sender is not FrameworkElement { Tag: string id } || !_dashboardCards.TryGetValue(id, out var state)) return;
-        if (FindAncestor<Button>(e.OriginalSource as DependencyObject) is not null) return;
-        _cardDragStart = e.GetPosition(this);
-        _draggedCard = state.Card;
+        if (point.X < 0 || point.Y < 0 || point.X > size.Width || point.Y > size.Height) return false;
+        // The bottom edge belongs to the resize Thumb while a card is expanded.
+        if (!collapsed && point.Y >= size.Height - 8) return false;
+        return point.X <= padding.Left || point.X >= size.Width - padding.Right ||
+               point.Y <= padding.Top || (collapsed && point.Y >= size.Height - padding.Bottom);
     }
 
-    private void CardHeader_MouseMove(object sender, MouseEventArgs e)
+    private void CardEdge_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (_draggedCard is null || e.LeftButton != MouseButtonState.Pressed) return;
+        _draggedCard = null;
+        if (sender is not Border { Tag: string id } card || !_dashboardCards.ContainsKey(id) ||
+            !IsCardMoveEdge(e.GetPosition(card), card.RenderSize, card.Padding, _collapsedDashboardCards.Contains(id))) return;
+        _cardDragStart = e.GetPosition(this);
+        if (card.CaptureMouse()) _draggedCard = card;
+        e.Handled = true;
+    }
+
+    private void CardEdge_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_draggedCard is not { } card) return;
+        _draggedCard = null;
+        card.ReleaseMouseCapture();
+        e.Handled = true;
+    }
+
+    private void CardEdge_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (sender is not Border { Tag: string id } hovered) return;
+        if (IsCardMoveEdge(e.GetPosition(hovered), hovered.RenderSize, hovered.Padding, _collapsedDashboardCards.Contains(id)))
+            hovered.Cursor = Cursors.SizeAll;
+        else
+            hovered.ClearValue(CursorProperty);
+        if (_draggedCard is null) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            _draggedCard.ReleaseMouseCapture();
+            _draggedCard = null;
+            return;
+        }
         var current = e.GetPosition(this);
         if (Math.Abs(current.X - _cardDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(current.Y - _cardDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         var card = _draggedCard;
         _draggedCard = null;
+        card.ReleaseMouseCapture();
         card.Opacity = 0.6;
-        DragDrop.DoDragDrop(card, card, DragDropEffects.Move);
-        card.Opacity = 1;
+        try { DragDrop.DoDragDrop(card, card, DragDropEffects.Move); }
+        finally
+        {
+            card.Opacity = 1;
+            card.ClearValue(CursorProperty);
+        }
+        e.Handled = true;
     }
 
     internal static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
@@ -645,6 +778,10 @@ public partial class AiManagerWindow : Window
 
     private void MoveDashboardCard(Border card, StackPanel targetColumn, int targetIndex)
     {
+        if (card.Tag is not string id || !_dashboardCards.ContainsKey(id)) return;
+        var page = _dashboardPages[GetDashboardPageId(id)];
+        if (!ReferenceEquals(targetColumn, page.LeftColumn) && !ReferenceEquals(targetColumn, page.RightColumn)) return;
+        if ((GetDashboardPageId(id) is "shared" or "settings") && !ReferenceEquals(targetColumn, page.LeftColumn)) return;
         if (card.Parent is StackPanel currentColumn)
         {
             var oldIndex = currentColumn.Children.IndexOf(card);
@@ -761,12 +898,16 @@ public partial class AiManagerWindow : Window
     private void SaveDashboardLayout()
     {
         var settings = _service.ReloadSettings();
-        settings.DashboardCardLayout = CaptureDashboardColumn(_leftDashboardColumn, "left")
-            .Concat(CaptureDashboardColumn(_rightDashboardColumn, "right"))
-            .ToList();
+        settings.DashboardCardLayout = CaptureDashboardLayout().ToList();
         settings.CollapsedDashboardCards = _collapsedDashboardCards.OrderBy(id => id).ToList();
         _service.SaveSettings(settings);
     }
+
+    internal IReadOnlyList<string> CaptureDashboardLayout() =>
+        _dashboardPages.Values.SelectMany(page =>
+                CaptureDashboardColumn(page.LeftColumn, "left")
+                    .Concat(CaptureDashboardColumn(page.RightColumn, "right")))
+            .ToArray();
 
     private static IEnumerable<string> CaptureDashboardColumn(Panel column, string name) =>
         column.Children.OfType<Border>()
@@ -783,8 +924,9 @@ public partial class AiManagerWindow : Window
             state.ToggleButton.ToolTip = collapsed
                 ? L("展开卡片", "Expand card")
                 : L("折叠卡片", "Collapse card");
-            state.ResizeThumb.ToolTip = L("拖动调整卡片高度；双击恢复自适应",
-                "Drag to adjust height; double-click to reset");
+            state.InteractionHelp.Text = L("按住卡片上边缘或两侧拖动排序；拖动下边缘调整高度，双击下边缘恢复自适应。",
+                "Drag the top or side edges to rearrange cards. Drag the bottom edge to adjust height; double-click it to reset.");
+            System.Windows.Automation.AutomationProperties.SetName(state.HelpButton, L("卡片帮助", "Card help"));
         }
     }
 
@@ -1180,15 +1322,19 @@ public partial class AiManagerWindow : Window
         var max = Math.Max(1, days.Max(item => item.Tokens));
         foreach (var day in days)
         {
-            var column = new StackPanel { Width = 36, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Bottom };
+            var column = new StackPanel
+            {
+                Width = 36, Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Bottom, Background = Brushes.Transparent
+            };
+            SetChartToolTip(column, LocalizationService.IsEnglish
+                ? $"{day.Date.ToString("MMM d", CultureInfo.InvariantCulture)} · {day.Tokens:N0} tokens"
+                : $"{day.Date:M月d日} · {day.Tokens:N0} Token");
             column.Children.Add(new Border
             {
                 Height = 8 + 54d * day.Tokens / max,
                 Background = ThemeBrush(day.Date == DateOnly.FromDateTime(DateTime.Today) ? "Signal" : "ChartBar"),
-                CornerRadius = new CornerRadius(3),
-                ToolTip = LocalizationService.IsEnglish
-                    ? $"{day.Date.ToString("MMM d", CultureInfo.InvariantCulture)} · {FormatTokens(day.Tokens)} tokens"
-                    : $"{day.Date:M月d日} · {FormatTokens(day.Tokens)} tokens"
+                CornerRadius = new CornerRadius(3)
             });
             column.Children.Add(new TextBlock
             {
@@ -1298,14 +1444,47 @@ public partial class AiManagerWindow : Window
                 Height = 6,
                 Fill = ThemeBrush("Signal"),
                 Stroke = ThemeBrush("Panel"),
-                StrokeThickness = 1,
-                ToolTip = LocalizationService.IsEnglish
-                    ? $"{item.Hour:00}:00–{item.Hour:00}:59 · {FormatTokens(item.Tokens)} tokens"
-                    : $"{item.Hour:00}:00–{item.Hour:00}:59 · {FormatTokens(item.Tokens)} Token"
+                StrokeThickness = 1
             };
             Canvas.SetLeft(marker, point.X - 3);
             Canvas.SetTop(marker, point.Y - 3);
             DailyUsageCanvas.Children.Add(marker);
+        }
+        AddChartHoverTargets(DailyUsageCanvas, points, Enumerable.Range(0, 24)
+            .Select(hour => LocalizationService.IsEnglish
+                ? $"{hour:00}:00–{hour:00}:59 · {byHour.GetValueOrDefault(hour):N0} tokens"
+                : $"{hour:00}:00–{hour:00}:59 · {byHour.GetValueOrDefault(hour):N0} Token")
+            .ToList(), top, height - top);
+    }
+
+    private static void SetChartToolTip(FrameworkElement target, string text)
+    {
+        target.ToolTip = text;
+        ToolTipService.SetInitialShowDelay(target, 0);
+        ToolTipService.SetBetweenShowDelay(target, 0);
+        ToolTipService.SetShowDuration(target, 60000);
+    }
+
+    private static void AddChartHoverTargets(
+        Canvas canvas, IReadOnlyList<Point> points, IReadOnlyList<string> labels, double top, double height)
+    {
+        // Each date/hour owns the area up to the midpoint of its neighbours,
+        // so the line and empty space are as easy to hover as the small markers.
+        for (var index = 0; index < points.Count; index++)
+        {
+            var left = index == 0 ? Math.Max(0, points[index].X - 8)
+                : (points[index - 1].X + points[index].X) / 2;
+            var right = index == points.Count - 1 ? Math.Min(canvas.ActualWidth, points[index].X + 8)
+                : (points[index].X + points[index + 1].X) / 2;
+            var target = new Border
+            {
+                Width = Math.Max(1, right - left), Height = height,
+                Background = Brushes.Transparent
+            };
+            SetChartToolTip(target, labels[index]);
+            Canvas.SetLeft(target, left);
+            Canvas.SetTop(target, top);
+            canvas.Children.Add(target);
         }
     }
 
@@ -1417,10 +1596,7 @@ public partial class AiManagerWindow : Window
                 Height = isToday ? 7 : 5,
                 Fill = ThemeBrush(item.IsProjected ? "Warning" : "Signal"),
                 Stroke = isToday ? ThemeBrush("Panel") : null,
-                StrokeThickness = isToday ? 1.5 : 0,
-                ToolTip = LocalizationService.IsEnglish
-                    ? $"{item.Date.ToString("MMM d", CultureInfo.InvariantCulture)} · {item.RemainingPercent:0.#}% remaining"
-                    : $"{item.Date:M月d日} · 剩余 {item.RemainingPercent:0.#}%"
+                StrokeThickness = isToday ? 1.5 : 0
             };
             Canvas.SetLeft(marker, point.X - marker.Width / 2);
             Canvas.SetTop(marker, point.Y - marker.Height / 2);
@@ -1432,6 +1608,13 @@ public partial class AiManagerWindow : Window
             AddChartText(dayLabel, point.X - (isToday ? 8 : 6), height - bottom + 5,
                 isToday ? "Ink" : "Subtle", 10);
         }
+        AddChartHoverTargets(RemainingForecastCanvas, points, _weeklyRemainingForecast
+            .Select(item => LocalizationService.IsEnglish
+                ? $"{item.Date.ToString("MMM d", CultureInfo.InvariantCulture)} · {item.RemainingPercent:0.##}% remaining" +
+                  (item.IsProjected ? " (projected)" : string.Empty)
+                : $"{item.Date:M月d日} · 剩余 {item.RemainingPercent:0.##}%" +
+                  (item.IsProjected ? "（预测）" : string.Empty))
+            .ToList(), 0, height);
     }
 
     private void AddForecastLine(IEnumerable<Point> source, string brushKey, DoubleCollection? dashArray)
@@ -1514,5 +1697,6 @@ public partial class AiManagerWindow : Window
         UpdateLanguageButton();
         UpdateThemeButton();
         UpdateDashboardChromeLanguage();
+        UpdateDashboardPageLanguage();
     }
 }

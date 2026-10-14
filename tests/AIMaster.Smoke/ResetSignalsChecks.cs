@@ -83,18 +83,7 @@ internal static partial class Program
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
 
-        var account = new AccountResetTracker();
-        AiLimitWindow Limit(double used, DateTimeOffset reset) => new()
-            { LimitId = "codex", UsedPercent = used, ResetsAt = reset, WindowDurationMinutes = 10080 };
-        var oldReset = now.AddDays(3);
-        Check(account.Observe([Limit(90, oldReset)], now).Count == 0 &&
-              account.Observe([], now).Count == 0 &&
-              account.Observe([Limit(5, oldReset)], now).Count == 0,
-            "initial account data, missing data, and usage corrections do not claim a reset");
-        account.Observe([Limit(90, oldReset)], now);
-        var recovered = Limit(5, now.AddDays(7));
-        Check(account.Observe([recovered], now).Count == 1 && account.Observe([recovered], now).Count == 0,
-            "official quota recovery needs a large usage drop and a new future window, and alerts once");
+        VerifyAccountResetRecovery();
 
         var clock = now;
         var handler = new ResetHttpHandler(Feed(), Forecast());
@@ -155,6 +144,62 @@ internal static partial class Program
         main.Close();
         app.ExitApplication();
         Console.WriteLine("Reset signal checks passed.");
+    }
+
+    private static void VerifyAccountResetRecovery()
+    {
+        var now = DateTimeOffset.Parse("2026-10-13T05:00:00Z");
+        AiLimitWindow Limit(double used, DateTimeOffset reset, bool primary = true) => new()
+            { LimitId = "codex", UsedPercent = used, ResetsAt = reset,
+                WindowDurationMinutes = 10080, IsPrimary = primary };
+        var account = new AccountResetTracker();
+        var oldReset = now.AddDays(3);
+        Check(account.Observe([Limit(90, oldReset)], now.AddMinutes(-1)).Count == 0 &&
+              account.Observe([], now).Count == 0 &&
+              account.Observe([Limit(5, oldReset)], now).Count == 0,
+            "initial account data, missing data, and same-window usage corrections do not claim a reset");
+        Check(account.Observe([Limit(2, now.AddDays(7))], now).Count == 1 &&
+              account.Observe([Limit(2, now.AddDays(7))], now.AddMinutes(1)).Count == 0,
+            "a new official period alerts once even when prior usage was below 20 percent");
+
+        var delayed = new AccountResetTracker();
+        delayed.Observe([Limit(90, now.AddHours(1))], now);
+        Check(delayed.Observe([Limit(35, now.AddDays(7).AddHours(1), primary: false)], now.AddHours(3)).Count == 1,
+            "delayed detection alerts with more than 10 percent already used and a changed window slot");
+        Check(delayed.Observe([Limit(90, now.AddHours(1))], now.AddHours(4)).Count == 0 &&
+              delayed.Observe([Limit(35, now.AddDays(7).AddHours(1))], now.AddHours(5)).Count == 0,
+            "an older quota response cannot roll back the baseline and replay a reset");
+        var future = new AccountResetTracker();
+        future.Observe([Limit(80, oldReset)], now);
+        Check(future.Observe([Limit(0, now.AddDays(8))], now.AddMinutes(1)).Count == 0,
+            "a future period start cannot announce a reset before it occurs");
+
+        var directory = Path.Combine(Path.GetTempPath(), "aimaster-account-reset-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "state.json");
+        try
+        {
+            var persistent = new AccountResetTracker(path);
+            persistent.Observe([Limit(5, oldReset)], now.AddMinutes(-1));
+            persistent = new AccountResetTracker(path);
+            Check(persistent.Observe([Limit(2, now.AddDays(7))], now).Count == 1,
+                "the previous official period survives restart and catches recovery while closed");
+            persistent = new AccountResetTracker(path);
+            Check(persistent.LastRecoveryAt == now &&
+                  persistent.Observe([Limit(2, now.AddDays(7))], now.AddMinutes(1)).Count == 0,
+                "last recovery survives restart and delivered recovery is not replayed");
+            using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                var failed = false;
+                try { persistent.Observe([Limit(1, now.AddDays(8))], now.AddDays(1)); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failed = true; }
+                Check(failed && persistent.LastRecoveryAt == now,
+                    "failed persistence does not consume the next recovery in memory");
+            }
+            Check(persistent.Observe([Limit(1, now.AddDays(8))], now.AddDays(1)).Count == 1,
+                "recovery can be retried after a state write failure");
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+        Console.WriteLine("Account reset recovery checks passed.");
     }
 
     private sealed class ResetHttpHandler(string feed, string forecast) : HttpMessageHandler

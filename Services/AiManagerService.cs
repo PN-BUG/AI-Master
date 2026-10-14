@@ -80,6 +80,7 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     public AiManagerSettings Settings { get; private set; }
     public AiManagerSnapshot? LastSnapshot { get; private set; }
+    internal string AccountResetStatePath => Path.Combine(Path.GetDirectoryName(_settingsPath)!, "account-reset-state.json");
 
     public async Task<AiManagerSnapshot> RefreshAsync(CancellationToken cancellationToken = default)
     {

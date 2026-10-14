@@ -18,7 +18,11 @@
 
 ## 本地构建与当前运行副本
 
-`build.ps1` / `package-all.cmd` 生成发布目录和 ZIP，供上传或分发。构建产物不等于正在运行的用户安装。目标发布目录被进程占用时，打包脚本明确停止，而不是另建版本目录冒充安装成功。
+`build.ps1` 只生成发布目录和 ZIP，供上传或分发。目标发布目录被进程占用时，它明确停止。
+
+`package-all.cmd` 调用 `package-and-restart.ps1`，先核对运行进程的 PID、启动时间和 EXE 路径，退出该进程并确认结束，再在 `release` 内的临时目录生成独立版、轻量版及 ZIP/校验附件，最后替换发布产物。当前运行的目录由同一个事务更新器原地覆盖并重启，不清空该安装目录，也不改写快捷方式。没有运行实例时打开新生成的独立版。多个运行实例或架构不匹配时，在退出、构建和替换前报告错误。
+
+打包期间旧程序保持退出；退出失败时不开始构建。构建失败保留旧产物并重新打开旧程序。更新失败由事务引擎回滚，已替换的其他发布产物也恢复；失败的打包临时目录保留供诊断。无法恢复的事务保留备份并阻止重新启动，需按日志恢复。`-Configuration`、`-Runtime`、`-NoZip` 可传给 `package-all.cmd`。
 
 更新本机当前运行副本：
 
@@ -37,8 +41,11 @@
 ```powershell
 dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\UpdateTransaction.Tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Packaging.Tests.ps1
 ```
 
 测试覆盖路径与校验、生成的嵌入脚本、原目录覆盖、设置保留、文件锁导致的部分失败、新增文件撤回、启动退出、恢复失败备份保留，以及中断事务恢复。
+
+`Packaging.Tests.ps1` 使用模拟构建、进程和更新器验证打包入口的先后顺序、独立版/轻量版/其他目录的更新目标、无运行实例时启动，以及构建、更新和启动失败时发布产物的恢复；实际事务由 `UpdateTransaction.Tests.ps1` 验证。
 
 SHA-256 用于校验文件完整性，信任来源仍是 HTTPS GitHub Release；当前没有独立的发布签名体系。三秒启动检测仅确认进程未立即退出，不能替代应用功能或服务器连接验证。多文件更新通过逐文件替换和持久化清单实现恢复，不宣称整个目录替换具有跨文件原子性，也不保证断电后的磁盘持久化。

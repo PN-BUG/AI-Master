@@ -18,6 +18,11 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--account-reset-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyAccountResetRecovery();
+            return 0;
+        }
         if (args.Contains("--shared-usage-tests", StringComparer.OrdinalIgnoreCase))
         {
             VerifySharedUsageCounter();
@@ -31,6 +36,12 @@ internal static partial class Program
         var app = new App();
         app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--dashboard-pages", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyDashboardPages(new AiManagerWindow());
+            app.ExitApplication();
+            return 0;
+        }
         if (args.Contains("--quota-notifications", StringComparer.OrdinalIgnoreCase))
         {
             VerifyQuotaNotifications();
@@ -144,6 +155,7 @@ internal static partial class Program
         Check(ReferenceEquals(AiManagerWindow.FindAncestor<TextBlock>(inlineRun), inlineHost),
             "dashboard drag handles content-element mouse sources without crashing");
         VerifyDashboardLayout();
+        VerifyDashboardPages(main);
         VerifyDashboardCardResize(main);
         VerifyProjectUsageTemplate(main);
         VerifySharedUsageTemplate(main);
@@ -421,10 +433,41 @@ internal static partial class Program
             .Where(item => Equals(item.Style, main.FindResource("CardResizeThumb")))
             .ToList();
         var quotaCard = (Border)main.FindName("QuotaCard");
-        Check(resizeThumbs.Count == 10 && resizeThumbs.All(item => Grid.GetRow(item) == 2 && Grid.GetRowSpan(item) == 1) &&
+        Check(resizeThumbs.Count == 10 && resizeThumbs.All(item => Grid.GetRow(item) == 0 && Grid.GetRowSpan(item) == 2 &&
+                  item.HorizontalAlignment == HorizontalAlignment.Stretch && item.Height == 8) &&
               main.FindName("DailyUsageCanvas") is Canvas &&
               double.IsNaN(quotaCard.Width) && quotaCard.HorizontalAlignment == HorizontalAlignment.Stretch,
-            "dashboard cards keep fluid widths and reserve a separate row for height handles");
+            "dashboard cards keep fluid widths and expose an invisible full-width bottom resize edge");
+        var padding = new Thickness(12);
+        var size = new Size(300, 200);
+        Check(AiManagerWindow.IsCardMoveEdge(new Point(2, 70), size, padding, false) &&
+              AiManagerWindow.IsCardMoveEdge(new Point(150, 2), size, padding, false) &&
+              !AiManagerWindow.IsCardMoveEdge(new Point(150, 70), size, padding, false) &&
+              !AiManagerWindow.IsCardMoveEdge(new Point(2, 197), size, padding, false) &&
+              !AiManagerWindow.IsCardMoveEdge(new Point(-2, 70), size, padding, false) &&
+              AiManagerWindow.IsCardMoveEdge(new Point(150, 197), size, padding, true),
+            "card move edges leave content and the expanded bottom resize edge available");
+        var hints = Descendants(main).OfType<TextBlock>().Where(item => Equals(item.Tag, "CardHelp")).ToList();
+        var helpButtons = Descendants(main).OfType<Button>().Where(item => Equals(item.Content, "?")).ToList();
+        Check(hints.Count == 11 && hints.All(item => item.Visibility == Visibility.Collapsed) && helpButtons.Count == 10,
+            "card explanations are hidden from the page and available through help buttons");
+        var scopeHint = (TextBlock)main.FindName("ForecastScopeNoteText");
+        var forecastCard = (Border)main.FindName("ForecastCard");
+        var scopeHelp = Descendants(forecastCard).OfType<Button>().Where(item => Equals(item.Content, "?"))
+            .Select(item => (ToolTip)item.ToolTip).SelectMany(Descendants).OfType<TextBlock>()
+            .Single(item => ReferenceEquals(System.Windows.Data.BindingOperations.GetBinding(item, TextBlock.TextProperty)?.Source, scopeHint));
+        var previousHint = scopeHint.Text;
+        scopeHint.Text = "Updated scope";
+        Check(scopeHelp.Text == "Updated scope", "help text follows live scope updates");
+        scopeHint.Text = previousHint;
+        quotaCard.Measure(new Size(420, 200));
+        quotaCard.Arrange(new Rect(0, 0, 420, 200));
+        quotaCard.UpdateLayout();
+        var bottomHit = System.Windows.Media.VisualTreeHelper.HitTest(quotaCard,
+            new Point(quotaCard.ActualWidth / 2, quotaCard.ActualHeight - 4))?.VisualHit;
+        Check(AiManagerWindow.FindAncestor<Thumb>(bottomHit) is { } bottomThumb &&
+              Equals(bottomThumb.Style, main.FindResource("CardResizeThumb")),
+            "the invisible bottom resize edge is reachable in the arranged card");
         var normalized = AiManagerWindow.NormalizeDashboardCardSize(new AiDashboardCardSize
         {
             Width = 40,

@@ -69,7 +69,7 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release -- 
 
 输出固定在 `release/AIMaster-<runtime>-<mode>`，重复构建只清理这个经过校验的目标目录。
 
-打包与安装更新是两个步骤。要将最新源码应用到当前运行副本，使用 `.\update-running.ps1`；它以运行进程的 EXE 所在目录为准原地替换并重启。更新约定、回滚和测试见 [UPDATES.md](UPDATES.md)。发布时同时上传生成的 `.zip.sha256` 校验附件。
+`build.ps1` 只生成发布包；`package-all.cmd` 同时生成两个发布包，并原地更新、重启当前运行副本。只更新当前副本时使用 `.\update-running.ps1`。两种更新入口都以运行进程的 EXE 所在目录为准，复用事务更新器。更新约定、回滚和测试见 [UPDATES.md](UPDATES.md)。发布时同时上传生成的 `.zip.sha256` 校验附件。
 
 一键同时生成 Windows x64 完整版、轻量版及两个 ZIP：
 
@@ -77,7 +77,7 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release -- 
 .\build.ps1 -All
 ```
 
-也可以直接双击仓库根目录的 `package-all.cmd`。完成后会保留窗口供检查结果。
+也可以直接双击仓库根目录的 `package-all.cmd`。它先退出旧程序并确认进程结束，再生成两个包、更新原目录并打开新版本；失败时恢复旧产物并重新打开旧程序。没有运行实例时打开新生成的独立版。完成后会保留窗口供检查结果。
 
 ## 数据流
 
