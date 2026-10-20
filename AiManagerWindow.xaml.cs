@@ -21,6 +21,7 @@ public partial class AiManagerWindow : Window
     private readonly DispatcherTimer _timer = new();
     private readonly CancellationTokenSource _lifetime = new();
     private bool _refreshing;
+    private bool _startupFloatingWindowRestored;
     private bool _localGuardPaused;
     private bool _overrideCurrentBreach;
     private bool _alertedForCurrentBreach;
@@ -44,6 +45,7 @@ public partial class AiManagerWindow : Window
     private const double MinimumCardWidth = 280;
     private const double MinimumCardHeight = 88;
     private const double MaximumCardHeight = 1200;
+    private const int CurrentCardSizingVersion = 1;
 
     private static readonly string[] DefaultDashboardLayout =
     [
@@ -52,12 +54,14 @@ public partial class AiManagerWindow : Window
     ];
 
     private sealed class DashboardPageState(
-        Grid host, StackPanel leftColumn, StackPanel rightColumn, string description)
+        Grid host, StackPanel leftColumn, StackPanel rightColumn, string description, bool singleColumn, double leftWeight)
     {
         public Grid Host { get; } = host;
         public StackPanel LeftColumn { get; } = leftColumn;
         public StackPanel RightColumn { get; } = rightColumn;
         public string Description { get; } = description;
+        public bool SingleColumn { get; } = singleColumn;
+        public double LeftWeight { get; } = leftWeight;
         public double ScrollOffset { get; set; }
     }
 
@@ -79,6 +83,8 @@ public partial class AiManagerWindow : Window
     {
         _service = service;
         _accountResetTracker = new AccountResetTracker(service.AccountResetStatePath);
+        _resetNotificationHistory = new ResetNotificationHistory(System.IO.Path.Combine(
+            System.IO.Path.GetDirectoryName(service.AccountResetStatePath)!, "reset-notification-history.json"));
         _lastAccountRecovery = _accountResetTracker.LastRecoveryAt;
         InitializeComponent();
         ApplyTheme(_service.Settings.Theme, refreshContent: false);
@@ -94,6 +100,11 @@ public partial class AiManagerWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        if (!_startupFloatingWindowRestored)
+        {
+            _startupFloatingWindowRestored = true;
+            if (_service.Settings.ShouldRestoreFloatingWindow) AiFloatingWindow.ShowOrActivate();
+        }
         LoadPolicyControls();
         LoadSharedUsageControls();
         InitializeResetMonitoring();
@@ -395,10 +406,10 @@ public partial class AiManagerWindow : Window
     {
         var definitions = new[]
         {
-            ("quota", "主额度跑道", QuotaCard),
+            ("quota", "账户额度", QuotaCard),
             ("guard", "任务闸门", GuardCard),
             ("resetSignals", "重置信号", ResetSignalsCard),
-            ("limits", "额度窗口", LimitsCard),
+            ("limits", "其他额度窗口", LimitsCard),
             ("forecast", "消耗预测 / 本周", ForecastCard),
             ("threads", "最近任务", ThreadsCard),
             ("settings", "保护策略", SettingsCard),
@@ -413,25 +424,24 @@ public partial class AiManagerWindow : Window
             WrapDashboardCard(id, title, card);
         }
 
-        DashboardGrid.Children.Remove(ApplicationSettingsCard);
-
         DashboardGrid.RowDefinitions.Clear();
         DashboardGrid.ColumnDefinitions.Clear();
-        AddDashboardPage("quota", "查看账户剩余额度、额度窗口和重置信号。");
-        AddDashboardPage("tasks", "查看最近任务，并管理当前连接可见任务的暂停状态。");
-        AddDashboardPage("usage", "分析本机、项目和当日用量，查看本周消耗预测。");
+        AddDashboardPage("quota", "查看账户剩余额度、额度窗口和重置信号。", singleColumn: true);
+        AddDashboardPage("tasks", "查看最近任务，并管理当前连接可见任务的暂停状态。", singleColumn: true);
+        AddDashboardPage("usage", "分析本机、项目和当日用量，查看本周消耗预测。", leftWeight: 1.3);
         AddDashboardPage("shared", "配置设备同步，并比较同组设备的共享用量。", singleColumn: true);
-        AddDashboardPage("settings", "调整保护策略、浮窗字号、语言和主题，管理版本更新。");
-        _dashboardPages["settings"].RightColumn.Children.Add(ApplicationSettingsCard);
+        AddDashboardPage("settings", "调整保护策略、浮窗字号和每日用量预算。", singleColumn: true);
         ApplyDashboardLayout();
         QuotaPageButton.IsChecked = true;
     }
 
-    private void AddDashboardPage(string id, string description, bool singleColumn = false)
+    private void AddDashboardPage(string id, string description, bool singleColumn = false, double leftWeight = 1.15)
     {
         var host = new Grid { Tag = id, Visibility = Visibility.Collapsed };
-        host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
-        host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(singleColumn ? 0 : 14) });
+        host.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        host.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(leftWeight, GridUnitType.Star) });
+        host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(singleColumn ? 0 : 10) });
         host.ColumnDefinitions.Add(new ColumnDefinition
         {
             Width = singleColumn ? new GridLength(0) : new GridLength(1, GridUnitType.Star)
@@ -443,7 +453,58 @@ public partial class AiManagerWindow : Window
         host.Children.Add(left);
         host.Children.Add(right);
         DashboardGrid.Children.Add(host);
-        _dashboardPages.Add(id, new DashboardPageState(host, left, right, description));
+        var page = new DashboardPageState(host, left, right, description, singleColumn, leftWeight);
+        _dashboardPages.Add(id, page);
+        host.SizeChanged += (_, args) => ArrangeDashboardPage(page, args.NewSize.Width);
+    }
+
+    private static void ArrangeDashboardPage(DashboardPageState page, double width)
+    {
+        var minimumColumnsWidth = Math.Max(640, MinimumCardWidth * (page.LeftWeight + 1) + 10);
+        var stacked = page.SingleColumn || width < minimumColumnsWidth;
+        page.Host.ColumnDefinitions[0].Width = new GridLength(stacked ? 1 : page.LeftWeight, GridUnitType.Star);
+        page.Host.ColumnDefinitions[1].Width = new GridLength(stacked ? 0 : 10);
+        page.Host.ColumnDefinitions[2].Width = stacked ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        Grid.SetColumn(page.RightColumn, stacked ? 0 : 2);
+        Grid.SetRow(page.RightColumn, stacked ? 1 : 0);
+    }
+
+    private void SummaryGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is not Grid grid) return;
+        var quota = ReferenceEquals(grid, QuotaSummaryGrid);
+        FrameworkElement? details = quota ? QuotaSummaryDetails : GuardActions;
+        if (details is null) return;
+        var stacked = e.NewSize.Width < 640;
+        grid.ColumnDefinitions[0].Width = new GridLength(stacked || !quota ? 1 : 200,
+            stacked || !quota ? GridUnitType.Star : GridUnitType.Pixel);
+        grid.ColumnDefinitions[1].Width = stacked ? new GridLength(0)
+            : quota ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+        Grid.SetColumn(details, stacked ? 0 : 1);
+        Grid.SetRow(details, stacked ? 1 : 0);
+        details.Margin = stacked ? new Thickness(0, 12, 0, 0) : new Thickness(24, 0, 0, 0);
+    }
+
+    private void SharedLayoutGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var stacked = e.NewSize.Width < 720;
+        SharedLayoutGrid.ColumnDefinitions[1].Width = new GridLength(stacked ? 0 : 14);
+        SharedLayoutGrid.ColumnDefinitions[2].Width = stacked ? new GridLength(0) : new GridLength(1.15, GridUnitType.Star);
+        Grid.SetColumn(SharedDevicesPanel, stacked ? 0 : 2);
+        Grid.SetRow(SharedDevicesPanel, stacked ? 4 : 2);
+        Grid.SetRowSpan(SharedDevicesPanel, stacked ? 1 : 3);
+        SharedDevicesPanel.Margin = stacked ? new Thickness(0, 10, 0, 0) : new Thickness(0);
+    }
+
+    private void PolicySectionsGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var stacked = e.NewSize.Width < 720;
+        PolicySectionsGrid.ColumnDefinitions[0].Width = stacked ? new GridLength(1, GridUnitType.Star) : new GridLength(320);
+        PolicySectionsGrid.ColumnDefinitions[1].Width = new GridLength(stacked ? 0 : 14);
+        PolicySectionsGrid.ColumnDefinitions[2].Width = stacked ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        Grid.SetColumn(DailyBudgetPanel, stacked ? 0 : 2);
+        Grid.SetRow(DailyBudgetPanel, stacked ? 1 : 0);
+        DailyBudgetPanel.Margin = stacked ? new Thickness(0, 12, 0, 0) : new Thickness(0);
     }
 
     private static string GetDashboardPageId(string cardId) => cardId switch
@@ -473,6 +534,18 @@ public partial class AiManagerWindow : Window
         SharedPageButton.Content = L("共享统计", "Shared usage");
         if (_dashboardPages.TryGetValue(_activeDashboardPage, out var page))
             PageDescriptionText.Text = LocalizationService.T(page.Description);
+        var (title, eyebrow, index) = _activeDashboardPage switch
+        {
+            "tasks" => (L("任务监控", "Task monitor"), "TASKS & GUARD", "02"),
+            "usage" => (L("用量分析", "Usage insights"), "USAGE & TRENDS", "03"),
+            "shared" => (L("共享统计", "Shared workspace"), "CONNECTED DEVICES", "04"),
+            "settings" => (L("设置", "Settings"), "PREFERENCES", "05"),
+            _ => (L("额度概览", "Quota overview"), "ACCOUNT OVERVIEW", "01")
+        };
+        PageTitleText.Text = title;
+        PageBreadcrumbText.Text = title;
+        PageEyebrowText.Text = eyebrow;
+        PageIndexText.Text = index;
     }
 
     private StackPanel CreateDashboardColumn()
@@ -496,7 +569,7 @@ public partial class AiManagerWindow : Window
 
         card.Child = null;
         card.Tag = id;
-        card.Margin = new Thickness(0, 0, 0, 12);
+        card.Margin = new Thickness(0, 0, 0, 10);
         card.MinWidth = MinimumCardWidth;
         card.HorizontalAlignment = HorizontalAlignment.Stretch;
         card.ClipToBounds = true;
@@ -516,7 +589,7 @@ public partial class AiManagerWindow : Window
         {
             Tag = id,
             Background = Brushes.Transparent,
-            Margin = new Thickness(0, 0, 0, 4)
+            MinHeight = 26
         };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -526,8 +599,33 @@ public partial class AiManagerWindow : Window
         {
             Text = title,
             Style = (Style)FindResource("Label"),
+            FontSize = 14,
+            Margin = new Thickness(34, 0, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
             VerticalAlignment = VerticalAlignment.Center
         };
+        headerTitle.SetResourceReference(TextBlock.ForegroundProperty, "Ink");
+        var glyph = new TextBlock
+        {
+            FontFamily = new FontFamily("Segoe MDL2 Assets"),
+            FontSize = 13,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Text = id switch
+            {
+                "quota" => "\uE9D9", "limits" => "\uE787", "resetSignals" => "\uE777",
+                "threads" => "\uE8FD", "guard" => "\uE72E", "forecast" => "\uE9D2",
+                "localUsage" => "\uE7F4", "dailyUsage" => "\uE823", "sharedUsage" => "\uE753",
+                _ => "\uE713"
+            }
+        };
+        glyph.SetResourceReference(TextBlock.ForegroundProperty, "Signal");
+        var icon = new Border
+        {
+            Width = 24, Height = 24, CornerRadius = new CornerRadius(7),
+            HorizontalAlignment = HorizontalAlignment.Left, Child = glyph
+        };
+        icon.SetResourceReference(Border.BackgroundProperty, "InputSurface");
         var helpContent = new StackPanel { MaxWidth = 340 };
         var interactionHelp = new TextBlock { TextWrapping = TextWrapping.Wrap };
         helpContent.Children.Add(interactionHelp);
@@ -573,7 +671,7 @@ public partial class AiManagerWindow : Window
             Style = (Style)FindResource("CardResizeThumb"),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(-12, 0, -12, -12)
+            Margin = new Thickness(-14, 0, -14, -14)
         };
         resizeThumb.DragStarted += CardResize_DragStarted;
         resizeThumb.DragDelta += CardResize_DragDelta;
@@ -581,17 +679,20 @@ public partial class AiManagerWindow : Window
         resizeThumb.PreviewMouseDoubleClick += CardResize_MouseDoubleClick;
         Grid.SetRowSpan(resizeThumb, 2);
         Panel.SetZIndex(resizeThumb, 1);
+        header.Children.Add(icon);
         header.Children.Add(headerTitle);
         header.Children.Add(help);
         header.Children.Add(toggle);
         frame.Children.Add(header);
-        Grid.SetRow(body, 1);
-        frame.Children.Add(body);
+        // Let every card grow with its content. The page owns scrolling.
+        var content = new Border { Child = body, Margin = new Thickness(0, 10, 0, 0), VerticalAlignment = VerticalAlignment.Top };
+        Grid.SetRow(content, 1);
+        frame.Children.Add(content);
         frame.Children.Add(resizeThumb);
         card.Child = frame;
 
         _dashboardCards[id] = new DashboardCardState(
-            id, title, card, body, headerTitle, help, interactionHelp, toggle, resizeThumb, card.MinHeight);
+            id, title, card, content, headerTitle, help, interactionHelp, toggle, resizeThumb, card.MinHeight);
     }
 
     private static IEnumerable<TextBlock> FindCardHelp(DependencyObject root)
@@ -622,17 +723,29 @@ public partial class AiManagerWindow : Window
             if (!_dashboardCards.TryGetValue(parts[1], out var state)) continue;
             var pageId = GetDashboardPageId(state.Id);
             var page = _dashboardPages[pageId];
-            // Shared usage uses the full page; settings keeps application controls in the other column.
-            var column = parts[0] == "right" && pageId is not ("shared" or "settings")
+            var column = parts[0] == "right" && !page.SingleColumn
                 ? page.RightColumn : page.LeftColumn;
             column.Children.Add(state.Card);
         }
+
+        // The overview leads with account status, and the task guard precedes the list.
+        // Migrate old two-column preferences without losing any cards or user sizes.
+        MoveCardToStart("quota", "quota");
+        MoveCardToStart("tasks", "guard");
 
         _collapsedDashboardCards.Clear();
         foreach (var id in _service.Settings.CollapsedDashboardCards)
             if (_dashboardCards.ContainsKey(id)) _collapsedDashboardCards.Add(id);
         foreach (var state in _dashboardCards.Values)
             SetCardCollapsed(state, _collapsedDashboardCards.Contains(state.Id));
+    }
+
+    private void MoveCardToStart(string pageId, string cardId)
+    {
+        var column = _dashboardPages[pageId].LeftColumn;
+        var card = _dashboardCards[cardId].Card;
+        column.Children.Remove(card);
+        column.Children.Insert(0, card);
     }
 
     internal static AiDashboardCardSize? NormalizeDashboardCardSize(AiDashboardCardSize? size)
@@ -781,7 +894,7 @@ public partial class AiManagerWindow : Window
         if (card.Tag is not string id || !_dashboardCards.ContainsKey(id)) return;
         var page = _dashboardPages[GetDashboardPageId(id)];
         if (!ReferenceEquals(targetColumn, page.LeftColumn) && !ReferenceEquals(targetColumn, page.RightColumn)) return;
-        if ((GetDashboardPageId(id) is "shared" or "settings") && !ReferenceEquals(targetColumn, page.LeftColumn)) return;
+        if (page.SingleColumn && !ReferenceEquals(targetColumn, page.LeftColumn)) return;
         if (card.Parent is StackPanel currentColumn)
         {
             var oldIndex = currentColumn.Children.IndexOf(card);
@@ -797,8 +910,8 @@ public partial class AiManagerWindow : Window
     {
         if (sender is not FrameworkElement { Tag: string id } ||
             !_dashboardCards.TryGetValue(id, out var state) || _collapsedDashboardCards.Contains(id)) return;
-        state.Card.MinHeight = MinimumCardHeight;
-        state.Card.Height = Math.Max(MinimumCardHeight, state.Card.ActualHeight);
+        state.Card.MinHeight = Math.Max(state.ExpandedMinHeight, state.Card.ActualHeight);
+        state.Card.Height = double.NaN;
         state.Card.Width = double.NaN;
         state.Card.HorizontalAlignment = HorizontalAlignment.Stretch;
     }
@@ -807,7 +920,7 @@ public partial class AiManagerWindow : Window
     {
         if (sender is not FrameworkElement { Tag: string id } ||
             !_dashboardCards.TryGetValue(id, out var state) || _collapsedDashboardCards.Contains(id)) return;
-        state.Card.Height = Math.Clamp(state.Card.Height + e.VerticalChange, MinimumCardHeight, MaximumCardHeight);
+        state.Card.MinHeight = Math.Clamp(state.Card.MinHeight + e.VerticalChange, state.ExpandedMinHeight, MaximumCardHeight);
     }
 
     private void CardResize_DragCompleted(object sender, DragCompletedEventArgs e)
@@ -835,33 +948,31 @@ public partial class AiManagerWindow : Window
         var size = NormalizeDashboardCardSize(new AiDashboardCardSize
         {
             Width = state.Card.ActualWidth,
-            Height = state.Card.ActualHeight
+            Height = Math.Max(MinimumCardHeight, state.Card.MinHeight)
         });
         if (size is null) return;
         var settings = _service.ReloadSettings();
+        if (settings.DashboardCardSizingVersion < CurrentCardSizingVersion)
+        {
+            settings.DashboardCardSizes.Clear();
+            settings.DashboardCardSizingVersion = CurrentCardSizingVersion;
+        }
         settings.DashboardCardSizes[state.Id] = size;
         _service.SaveSettings(settings);
     }
 
     private void ApplyDashboardCardSize(DashboardCardState state)
     {
-        var size = _service.Settings.DashboardCardSizes.TryGetValue(state.Id, out var saved)
+        var size = _service.Settings.DashboardCardSizingVersion >= CurrentCardSizingVersion &&
+                   _service.Settings.DashboardCardSizes.TryGetValue(state.Id, out var saved)
             ? NormalizeDashboardCardSize(saved)
             : null;
-        if (size is null)
-        {
-            state.Card.Width = double.NaN;
-            state.Card.Height = double.NaN;
-            state.Card.MaxWidth = double.PositiveInfinity;
-            state.Card.MinHeight = state.ExpandedMinHeight;
-            state.Card.HorizontalAlignment = HorizontalAlignment.Stretch;
-            return;
-        }
-        state.Card.MinHeight = MinimumCardHeight;
-        // Width is intentionally fluid. Persisted fixed widths made cards look broken
-        // after maximizing the window or moving between displays with different DPI.
+        // Legacy heights belong to the spacious layout. Only new, deliberate
+        // resizing adds minimum height; compact cards otherwise follow their content.
         state.Card.Width = double.NaN;
-        state.Card.Height = size.Height;
+        state.Card.Height = double.NaN;
+        state.Card.MaxWidth = double.PositiveInfinity;
+        state.Card.MinHeight = Math.Max(state.ExpandedMinHeight, size?.Height ?? 0);
         state.Card.HorizontalAlignment = HorizontalAlignment.Stretch;
     }
 
@@ -888,7 +999,7 @@ public partial class AiManagerWindow : Window
         {
             ApplyDashboardCardSize(state);
         }
-        state.Card.Padding = collapsed ? new Thickness(10, 7, 9, 7) : new Thickness(12);
+        state.Card.Padding = collapsed ? new Thickness(12, 7, 12, 7) : new Thickness(14);
         state.ToggleButton.Content = collapsed ? "⌄" : "⌃";
         state.ToggleButton.ToolTip = collapsed
             ? L("展开卡片", "Expand card")
@@ -924,8 +1035,8 @@ public partial class AiManagerWindow : Window
             state.ToggleButton.ToolTip = collapsed
                 ? L("展开卡片", "Expand card")
                 : L("折叠卡片", "Collapse card");
-            state.InteractionHelp.Text = L("按住卡片上边缘或两侧拖动排序；拖动下边缘调整高度，双击下边缘恢复自适应。",
-                "Drag the top or side edges to rearrange cards. Drag the bottom edge to adjust height; double-click it to reset.");
+            state.InteractionHelp.Text = L("按住卡片上边缘或两侧拖动排序；内容自动撑高。拖动下边缘调整最小高度，双击恢复自适应。",
+                "Drag the top or side edges to rearrange cards. Cards grow with their content. Drag the bottom edge to adjust minimum height; double-click to reset.");
             System.Windows.Automation.AutomationProperties.SetName(state.HelpButton, L("卡片帮助", "Card help"));
         }
     }
@@ -984,7 +1095,9 @@ public partial class AiManagerWindow : Window
             MainResetText.Text = string.Empty;
         }
 
-        LimitItems.ItemsSource = snapshot.Limits;
+        var additionalLimits = snapshot.Limits.Where(item => !ReferenceEquals(item, main)).ToArray();
+        LimitItems.ItemsSource = additionalLimits;
+        LimitsCard.Visibility = additionalLimits.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         ThreadList.ItemsSource = snapshot.Threads;
         ResetCreditText.Text = snapshot.ResetCredits > 0
             ? (LocalizationService.IsEnglish ? $"Resets available × {snapshot.ResetCredits}" : $"可用重置 × {snapshot.ResetCredits}")

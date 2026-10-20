@@ -54,7 +54,9 @@ internal sealed class CodexResetClient : IDisposable
 
     private async Task<string> ReadDocumentAsync(string route, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"https://codex-reset.com/api/{route}");
+        // The localized response keeps the English summary alongside localized_summary.
+        // Cache both languages so switching the UI does not wait for another poll.
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"https://codex-reset.com/api/{route}?locale=zh");
         request.Headers.UserAgent.ParseAdd("AIMaster/1.3.2 (+https://github.com/PN-BUG/AI-Master)");
         using var response = await _http.SendAsync(request, cancellationToken);
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
@@ -111,7 +113,7 @@ internal sealed class CodexResetClient : IDisposable
         var summary = Text(row, "summary");
         var url = SafeSourceUrl(Text(row, "url"));
         return string.IsNullOrWhiteSpace(id) || at is null || string.IsNullOrWhiteSpace(summary) || url is null
-            ? null : new CodexResetEvent(id, kind, at.Value, summary, url);
+            ? null : new CodexResetEvent(id, kind, at.Value, summary, url, Text(row, "localized_summary"));
     }
 
     internal static string? SafeSourceUrl(string? value) =>

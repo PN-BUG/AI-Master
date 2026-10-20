@@ -29,10 +29,10 @@ internal static partial class Program
         string Feed(string state = "announced", bool stale = false, bool active = false) => JsonSerializer.Serialize(new
         {
             fetched_at = now, stale,
-            signal = new { tweet_id = "preview", summary = "Global reset later today", at = now.AddMinutes(-1), url = source, active },
+            signal = new { tweet_id = "preview", summary = "Global reset later today", localized_summary = "今天晚些时候将进行全局重置", at = now.AddMinutes(-1), url = source, active },
             events = new[] {
-                new { id = "123", group = "reset", announcement_state = state, summary = "A reset announcement", url = source, announced_at = now.AddHours(-1) },
-                new { id = "banked", group = "credits", announcement_state = "announced", summary = "Banked reset grant", url = source, announced_at = now }
+                new { id = "123", group = "reset", announcement_state = state, summary = "A reset announcement", localized_summary = "一条重置公告", url = source, announced_at = now.AddHours(-1) },
+                new { id = "banked", group = "credits", announcement_state = "announced", summary = "Banked reset grant", localized_summary = "发放备用重置", url = source, announced_at = now }
             }
         });
         string Forecast(DateTimeOffset? reset = null) => JsonSerializer.Serialize(new
@@ -47,6 +47,30 @@ internal static partial class Program
         var baseline = Parse(Feed());
         Check(!baseline.IsStale && baseline.Events.Count == 1 && baseline.Signal is null,
             "only published reset announcements count; forecast probability and banked grants do not alert");
+        var previousLanguage = LocalizationService.CurrentLanguage;
+        try
+        {
+            LocalizationService.Initialize(LocalizationService.Chinese);
+            Check(baseline.Events[0].SummaryText == "一条重置公告" &&
+                  Parse(Feed(active: true)).Signal?.SummaryText == "今天晚些时候将进行全局重置",
+                "announcement and preview bodies use the feed's Chinese translations");
+            var officialForecast = JsonSerializer.Serialize(new
+            {
+                updated_at = now, last_reset_at = now.AddHours(-1),
+                official_signal = new { tweet_id = "official", summary = "Reset coming soon",
+                    localized_summary = "即将重置", at = now, url = source }
+            });
+            Check(Parse(Feed(), officialForecast).Signal?.SummaryText == "即将重置",
+                "official forecast signals also retain their Chinese translation");
+            Check((baseline.Events[0] with { ChineseSummary = " " }).SummaryText ==
+                  "中文译文暂不可用，请查看原文。",
+                "missing translations show an honest Chinese source prompt");
+            LocalizationService.Initialize(LocalizationService.English);
+            Check(baseline.Events[0].SummaryText == "A reset announcement" &&
+                  Parse(Feed(active: true)).Signal?.SummaryText == "Global reset later today",
+                "switching to English reuses the unchanged source summaries");
+        }
+        finally { LocalizationService.Initialize(previousLanguage); }
         Check(Parse(Feed("none")).Events.Count == 0,
             "unconfirmed classifier candidates do not become reset announcements");
         Check(Parse(Feed(active: true)).Signal?.Id == "preview" &&
@@ -91,8 +115,9 @@ internal static partial class Program
         {
             var live = client.ReadAsync().GetAwaiter().GetResult();
             client.ReadAsync().GetAwaiter().GetResult();
-            Check(!live.IsStale && handler.Requests == 2 && handler.NoCredentials && handler.HasUserAgent,
-                "public polling caches both endpoints, identifies AIMaster, and sends no credentials");
+            Check(!live.IsStale && handler.Requests == 2 && handler.NoCredentials && handler.HasUserAgent &&
+                  handler.RequestsChinese,
+                "public polling caches bilingual responses, identifies AIMaster, and sends no credentials");
             clock += TimeSpan.FromMinutes(2);
             handler.Status = HttpStatusCode.TooManyRequests;
             var failed = client.ReadAsync().GetAwaiter().GetResult();
@@ -109,14 +134,15 @@ internal static partial class Program
         VerifyDashboardLayout();
         main.RenderResetSignals(Parse(Feed(active: true)));
         Check(main.FindName("ResetSignalStatusText") is TextBlock { Text: "Active reset preview / signal" } &&
-              main.FindName("ResetMonitoringCheck") is CheckBox { Content: "Monitor reset signals (every 2 minutes)" },
+              main.FindName("ResetMonitoringCheck") is CheckBox
+                  { Content: TextBlock { Text: "Monitor reset signals (every 2 minutes)" } },
             "reset monitoring card and active-signal state render in English");
         var output = args.SkipWhile(arg => arg != "--output").Skip(1).FirstOrDefault();
         var card = (Border)main.FindName("ResetSignalsCard");
-        foreach (var language in new[] { LocalizationService.English, LocalizationService.Chinese })
+        foreach (var language in new[] { LocalizationService.English, LocalizationService.Chinese,
+                     LocalizationService.English })
         {
-            LocalizationService.Initialize(language);
-            main.RenderResetSignals(Parse(Feed(active: true)));
+            LocalizationService.SetLanguage(language);
             card.Measure(new Size(430, double.PositiveInfinity));
             card.Arrange(new Rect(new Point(), card.DesiredSize));
             card.UpdateLayout();
@@ -129,6 +155,11 @@ internal static partial class Program
             Check(Descendants(row).OfType<Button>().Any(button => Equals(button.Content,
                     language == LocalizationService.English ? "View source" : "查看原文")),
                 $"{language} event template offers a localized source action");
+            var expectedSummary = language == LocalizationService.English
+                ? "Global reset later today" : "今天晚些时候将进行全局重置";
+            Check(Descendants(row).OfType<TextBlock>().Any(text => text.Text == expectedSummary &&
+                    Equals(text.ToolTip, expectedSummary)),
+                $"{language} language switch updates cached announcement bodies and tooltips");
             if (output is not null)
             {
                 Directory.CreateDirectory(output);
@@ -148,6 +179,7 @@ internal static partial class Program
 
     private static void VerifyAccountResetRecovery()
     {
+        VerifyResetNotificationCatchUp();
         var now = DateTimeOffset.Parse("2026-10-13T05:00:00Z");
         AiLimitWindow Limit(double used, DateTimeOffset reset, bool primary = true) => new()
             { LimitId = "codex", UsedPercent = used, ResetsAt = reset,
@@ -202,17 +234,71 @@ internal static partial class Program
         Console.WriteLine("Account reset recovery checks passed.");
     }
 
+    private static void VerifyResetNotificationCatchUp()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "aimaster-reset-notices-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "sent.json");
+        var zone = TimeZoneInfo.CreateCustomTimeZone("Test UTC+8", TimeSpan.FromHours(8), "Test UTC+8", "Test UTC+8");
+        var now = DateTimeOffset.Parse("2026-10-20T16:00:00+08:00");
+        var reset = now.AddHours(-2);
+        try
+        {
+            var history = new ResetNotificationHistory(path, zone);
+            Check(history.CanCatchUp(reset, now) && !history.CanCatchUp(null, now) &&
+                  !history.CanCatchUp(now.AddDays(-1), now) && !history.CanCatchUp(now.AddMinutes(1), now),
+                "opening the app can replay a known reset today, but never an unknown, old, or future reset");
+            Check(!history.TrySend(() => false, now) && !File.Exists(path) &&
+                  new ResetNotificationHistory(path, zone).CanCatchUp(reset, now),
+                "system-suppressed or unavailable notifications remain eligible after restart");
+            Check(history.TrySend(() => true, now) && !history.CanCatchUp(reset, now),
+                "a successful reset notification request consumes today's catch-up");
+            history = new ResetNotificationHistory(path, zone);
+            Check(history.WasSentToday(now.AddHours(1)) && !history.CanCatchUp(reset, now.AddHours(1)) &&
+                  !history.CanCatchUp(now.AddMinutes(30), now.AddHours(1)),
+                "reopening and restarting do not replay today's notification through either reset source");
+            var tomorrow = now.AddDays(1);
+            Check(!history.CanCatchUp(reset, tomorrow) && history.CanCatchUp(tomorrow.AddHours(-1), tomorrow),
+                "a new local day allows today's missed reset without replaying yesterday's reset");
+
+            var boundary = now.Date.AddDays(1);
+            var midnight = new DateTimeOffset(boundary, TimeSpan.FromHours(8));
+            Check(history.CanCatchUp(midnight.ToUniversalTime(), midnight.AddMinutes(5)) &&
+                  !history.CanCatchUp(midnight.AddSeconds(-1).ToUniversalTime(), midnight.AddMinutes(5)),
+                "catch-up uses the local calendar day even when source timestamps are UTC");
+            using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                var failed = false;
+                try { history.TrySend(() => true, tomorrow); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failed = true; }
+                Check(failed && !history.CanCatchUp(tomorrow.AddHours(-1), tomorrow),
+                    "a failed sent-history save does not spam the current session after a successful request");
+            }
+
+            // Existing installations have recovery observations but no sent-history file.
+            var accountPath = Path.Combine(directory, "account.json");
+            File.WriteAllText(accountPath, JsonSerializer.Serialize(new AccountResetTracker.State
+                { LastRecoveryAt = reset }));
+            Check(new ResetNotificationHistory(Path.Combine(directory, "new-history.json"), zone)
+                    .CanCatchUp(new AccountResetTracker(accountPath).LastRecoveryAt, now),
+                "legacy recovery observations can produce one catch-up without deleting the detection baseline");
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+        Console.WriteLine("Reset notification catch-up checks passed.");
+    }
+
     private sealed class ResetHttpHandler(string feed, string forecast) : HttpMessageHandler
     {
         public int Requests;
         public bool NoCredentials = true;
         public bool HasUserAgent = true;
+        public bool RequestsChinese = true;
         public HttpStatusCode Status = HttpStatusCode.OK;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref Requests);
             NoCredentials &= request.Headers.Authorization is null && !request.Headers.Contains("Cookie");
             HasUserAgent &= request.Headers.UserAgent.ToString().Contains("AIMaster/");
+            RequestsChinese &= request.RequestUri!.Query == "?locale=zh";
             var response = new HttpResponseMessage(Status)
                 { Content = new StringContent(request.RequestUri!.AbsolutePath.EndsWith("feed") ? feed : forecast) };
             if (Status == HttpStatusCode.TooManyRequests)

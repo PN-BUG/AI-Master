@@ -18,7 +18,7 @@ namespace AIMaster;
 public partial class AiFloatingWindow : Window
 {
     private static AiFloatingWindow? _instance;
-    private readonly AiManagerService _service = new();
+    private readonly AiManagerService _service;
     private readonly DispatcherTimer _timer = new();
     private readonly DispatcherTimer _dockHideTimer = new() { Interval = TimeSpan.FromMilliseconds(820) };
     private readonly CancellationTokenSource _lifetime = new();
@@ -43,9 +43,16 @@ public partial class AiFloatingWindow : Window
 
     private enum DockEdge { None, Left, Right, Top }
 
-    public AiFloatingWindow()
+    public AiFloatingWindow() : this(new AiManagerService()) { }
+
+    internal AiFloatingWindow(AiManagerService service)
     {
+        _service = service;
         InitializeComponent();
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible) SaveWindowEnabled(true);
+        };
         ApplyTheme(_service.Settings.Theme);
         _autoCollapse = _service.Settings.FloatingAutoCollapse;
         ApplyFontScale(_service.Settings.FloatingFontScale);
@@ -151,6 +158,8 @@ public partial class AiFloatingWindow : Window
         _timer.Stop();
         _dockHideTimer.Stop();
         SavePlacement();
+        // Application/update shutdown must preserve the user's choice to keep it open.
+        if (!App.Current.IsExiting) SaveWindowEnabled(false);
         LocalizationService.LanguageChanged -= LocalizationService_LanguageChanged;
         _lifetime.Cancel();
         await _service.DisposeAsync();
@@ -401,6 +410,20 @@ public partial class AiFloatingWindow : Window
             DragMove();
             DetectDockAfterDrag();
             SavePlacement();
+        }
+    }
+
+    private void SaveWindowEnabled(bool enabled)
+    {
+        try
+        {
+            var settings = _service.ReloadSettings();
+            settings.FloatingWindowEnabled = enabled;
+            _service.SaveSettings(settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Debug.WriteLine($"[AiFloatingWindow] Could not save open state: {ex.Message}");
         }
     }
 

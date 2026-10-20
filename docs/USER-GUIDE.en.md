@@ -29,13 +29,15 @@ The pages contain ten functional card types:
 9. **Shared usage** groups devices using the same sync key and shows each device's tokens, group share, top model, session count, and last sync time.
 10. **Reset signals** monitors public reset previews and announcements, with source links and separate detection of official account quota recovery.
 
-**Sync now** and **Floating monitor** remain at the top. Select **Sync now** to reconnect to Codex and refresh all data. Switching pages preserves unsaved form edits and keeps background monitoring running.
+**Sync now** and **Floating monitor** remain at the top. Language, theme, update actions, the website and About stay at the bottom of the navigation rail on every page. Select **Sync now** to reconnect to Codex and refresh all data. Switching pages preserves unsaved form edits and keeps background monitoring running.
 
 ### Card layout
 
-- Drag the top or side edges of a card to reorder it or move it between columns within its functional page. Shared usage uses one column; application controls stay in the right column of Settings.
+- The default layout is compact and follows actual content height. Old large heights no longer add blank space; new manual minimum-height adjustments are still saved.
+- Use the left navigation to switch pages. Drag a card's top or side edges to reorder it within its page. Wide windows use two columns; narrow windows stack the panels. Shared usage adapts its connection form and device panel in the same way.
 - Select the arrow in the upper-right corner to collapse or expand a card.
-- Drag the bottom edge of a card to adjust its height. Card width fills its column and follows the window size automatically.
+- Cards grow automatically to show their full content. Drag the bottom edge to adjust the minimum height; content cannot be compressed into clipping. Card width fills its column and follows the window size automatically.
+- Long content scrolls with the whole page. Cards and the task list have no separate scroll view.
 - Hover over the question mark in a card header for explanations and interaction tips. Drag areas have no visible icons.
 - Double-click the bottom edge to restore its adaptive size.
 - Card order, collapsed state, and custom height are saved automatically.
@@ -56,10 +58,10 @@ Live control is scoped to the App Server connection. Tasks running in another Co
 
 Monitoring is enabled by default and reads public data from [codex-reset.com](https://codex-reset.com/) every two minutes. Both switches save immediately. Disable notifications to keep the card updating quietly, or disable monitoring to stop public API requests. Monitoring continues in the tray when the main window is hidden.
 
-- The card shows active previews, recent announcements, check time and source fetch time. **View source** opens the original announcement.
-- The first fresh poll establishes a quiet baseline. Subsequent new events notify once; local event history prevents duplicates after restarting. Events observed while muted are not replayed when notifications are enabled again.
+- The card shows active previews, recent announcements, check time and source fetch time. Bodies, tooltips and notifications follow the app language immediately; Chinese uses the source's translations, with a source prompt when no translation is available. **View source** opens the original announcement.
+- The first fresh poll establishes the event baseline; subsequent new events notify once. On startup or reopening from the tray, a recorded account recovery or fresh confirmed reset announcement from today gets one catch-up notification if no reset notification was sent today. This uses the local calendar date and never replays yesterday's reset. Sent history persists separately across restarts. Both application switches must be enabled. A disabled Windows notification master switch does not consume the catch-up opportunity. A successful notification API request does not guarantee a displayed banner. Older versions have no sent history, so upgrading may produce one catch-up today.
 - Stale data, request failures and alert-history storage failures pause signal notifications. Forecast probabilities, unconfirmed candidates and banked-reset grants are not global resets.
-- Community reports do not confirm delivery to your account. Official quota period boundaries are checked separately: a confirmed new period triggers recovery without requiring high prior usage or current usage below 10%. Initial readings, periods that have not started, and percentage corrections alone do not trigger alerts. The baseline and last recovery time persist locally, preventing repeats after restart and allowing the next check to detect a period that changed while the app was closed.
+- Community reports do not confirm delivery to your account. Official quota period boundaries are checked separately: a confirmed new period triggers recovery without requiring high prior usage or current usage below 10%. Initial readings, periods that have not started, and percentage corrections alone do not establish recovery. The baseline and last recovery time persist locally, allowing the next check to detect a period that changed while the app was closed. Missed notifications from today follow the catch-up rule above.
 
 No Codex credentials or session data are sent to the public feed. The source is an independent community tracker, unaffiliated with OpenAI, and cannot predict unpublished reset decisions. See the [API contract](https://codex-reset.com/developers).
 

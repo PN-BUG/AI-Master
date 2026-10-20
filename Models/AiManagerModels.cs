@@ -82,6 +82,14 @@ public sealed class AiManagerSettings
     [JsonPropertyName("floatingWindowPlacement")]
     public AiFloatingWindowPlacement? FloatingWindowPlacement { get; set; }
 
+    [JsonPropertyName("floatingWindowEnabled")]
+    public bool? FloatingWindowEnabled { get; set; }
+
+    // Older versions saved placement but did not record whether the monitor was open.
+    [JsonIgnore]
+    public bool ShouldRestoreFloatingWindow =>
+        FloatingWindowEnabled ?? FloatingWindowPlacement is { IsValid: true };
+
     [JsonPropertyName("dashboardCardLayout")]
     public List<string> DashboardCardLayout { get; set; } = new();
 
@@ -91,6 +99,9 @@ public sealed class AiManagerSettings
     [JsonPropertyName("dashboardCardSizes")]
     public Dictionary<string, AiDashboardCardSize> DashboardCardSizes { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("dashboardCardSizingVersion")]
+    public int DashboardCardSizingVersion { get; set; }
 
     [JsonPropertyName("taskNameSource")]
     public string TaskNameSource { get; set; } = TaskNameSources.ConversationTitle;
@@ -280,7 +291,7 @@ public sealed class AiThreadSummary
     public string Title { get; init; } = "未命名任务";
     public string? ConversationTitle { get; init; }
     public string? LatestUserMessage { get; init; }
-    public string DisplayTitle => LocalizationService.LocalizeKnownText(Title);
+    public string DisplayTitle => LocalizationService.LocalizeKnownText(TaskTitleFormatter.Format(Title, ConversationTitle));
     public string Status { get; init; } = "notLoaded";
     public string? ModelName { get; init; }
     public string? ReasoningEffort { get; init; }

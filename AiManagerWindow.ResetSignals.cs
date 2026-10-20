@@ -14,6 +14,8 @@ public partial class AiManagerWindow
     private readonly CodexResetTracker _resetTracker = new(Path.Combine(
         Path.GetDirectoryName(AppPaths.GetSettingsFile())!, "reset-signal-state.json"));
     private readonly AccountResetTracker _accountResetTracker;
+    private readonly ResetNotificationHistory _resetNotificationHistory;
+    private bool _resetCatchUpPending;
     private Task? _resetRefreshTask;
     private CodexResetSnapshot? _resetSnapshot;
     private bool _resetControlsLoaded;
@@ -25,6 +27,7 @@ public partial class AiManagerWindow
         ResetMonitoringCheck.IsChecked = _service.Settings.ResetMonitoringEnabled;
         ResetNotificationsCheck.IsChecked = _service.Settings.ResetNotificationsEnabled;
         _resetControlsLoaded = true;
+        ReplayMissedResetNotification();
         _resetTimer.Tick += (_, _) => StartResetRefresh();
         _resetTimer.Start();
         StartResetRefresh();
@@ -48,9 +51,10 @@ public partial class AiManagerWindow
             var alerts = _resetTracker.Observe(snapshot, _service.Settings.ResetNotificationsEnabled);
             // Coalesce a batch so reconnecting does not produce a burst of tray balloons.
             if (alerts.FirstOrDefault() is { } latest)
-                App.Current.ShowResetNotification(latest.KindText,
-                    latest.Summary + L(" · 社区转述，单击打开面板查看原文；到账以账号数据为准。",
+                SendResetNotification(latest.KindText,
+                    latest.SummaryText + L(" · 社区转述，单击打开面板查看原文；到账以账号数据为准。",
                         " · Community report. Click to open the dashboard for sources; account data confirms recovery."));
+            TryReplayMissedResetNotification();
             RenderResetSignals();
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
@@ -98,8 +102,13 @@ public partial class AiManagerWindow
             ? L($"网站记录的上次重置：{at.LocalDateTime:MM-dd HH:mm}",
                 $"Last reset recorded by tracker: {at.LocalDateTime:MM-dd HH:mm}")
             : L("上次重置记录未知", "Last recorded reset unknown");
-        ResetSignalItems.ItemsSource = data?.AlertEvents.OrderByDescending(item => item.AnnouncedAt)
-            .Take(3).ToArray();
+        var announcements = data?.AlertEvents.OrderByDescending(item => item.AnnouncedAt).ToArray()
+            ?? Array.Empty<CodexResetEvent>();
+        ResetSignalItems.ItemsSource = announcements.Take(1).ToArray();
+        ResetHistoryItems.ItemsSource = announcements.Skip(1).ToArray();
+        ResetHistoryExpander.Visibility = announcements.Length > 1 ? Visibility.Visible : Visibility.Collapsed;
+        ResetHistoryExpander.Header = L($"历史公告（{Math.Max(0, announcements.Length - 1)}）",
+            $"Earlier announcements ({Math.Max(0, announcements.Length - 1)})");
         ResetCheckedText.Text = data is null ? L("每 2 分钟自动检查", "Automatically checked every 2 minutes")
             : L($"检查于 {data.CheckedAt.LocalDateTime:HH:mm:ss} · 来源抓取于 {data.FetchedAt.LocalDateTime:HH:mm:ss}",
                 $"Checked {data.CheckedAt.LocalDateTime:HH:mm:ss} · Source fetched {data.FetchedAt.LocalDateTime:HH:mm:ss}");
@@ -119,14 +128,68 @@ public partial class AiManagerWindow
             SetFooterStatus(L("账号重置记录保存失败：", "Unable to save account reset history: ") + ex.Message, warning: true);
             return;
         }
-        if (recovered.Count == 0) return;
+        if (recovered.Count == 0)
+        {
+            TryReplayMissedResetNotification();
+            return;
+        }
         _lastAccountRecovery = snapshot.CapturedAt;
         RenderResetSignals();
         if (!_service.Settings.ResetMonitoringEnabled || !_service.Settings.ResetNotificationsEnabled) return;
         var limit = recovered[0];
-        App.Current.ShowResetNotification(L("账号额度已恢复", "Account quota recovered"),
+        SendResetNotification(L("账号额度已恢复", "Account quota recovered"),
             L($"官方账号数据：{limit.DisplayName} · {limit.WindowName}，剩余 {limit.RemainingPercent:0.#}%。单击查看详情。",
                 $"Official account data: {limit.DisplayName} · {limit.WindowName}, {limit.RemainingPercent:0.#}% remaining. Click for details."));
+    }
+
+    internal void ReplayMissedResetNotification()
+    {
+        _resetCatchUpPending = true;
+        TryReplayMissedResetNotification();
+    }
+
+    private void TryReplayMissedResetNotification()
+    {
+        if (!_resetCatchUpPending || !_resetControlsLoaded || _lifetime.IsCancellationRequested ||
+            !_service.Settings.ResetMonitoringEnabled || !_service.Settings.ResetNotificationsEnabled) return;
+        var now = DateTimeOffset.Now;
+        if (_resetNotificationHistory.WasSentToday(now))
+        {
+            _resetCatchUpPending = false;
+            return;
+        }
+        if (_resetNotificationHistory.CanCatchUp(_lastAccountRecovery, now))
+        {
+            if (SendResetNotification(L("账号额度已恢复", "Account quota recovered"),
+                    L($"今日 {_lastAccountRecovery!.Value.LocalDateTime:HH:mm} 已检测到账号额度恢复。补发今日重置提醒，单击查看详情。",
+                        $"Account quota recovery was detected today at {_lastAccountRecovery!.Value.LocalDateTime:HH:mm}. Missed reset reminder. Click for details.")))
+                _resetCatchUpPending = false;
+            return;
+        }
+        // Only a fresh confirmed announcement can serve as a community catch-up reminder.
+        if (_resetSnapshot is not { IsStale: false, Error: null } snapshot) return;
+        var announcement = snapshot.Events.Where(item => item.Kind == "announcement" &&
+                _resetNotificationHistory.CanCatchUp(item.AnnouncedAt, now))
+            .OrderByDescending(item => item.AnnouncedAt).FirstOrDefault();
+        if (announcement is not null && SendResetNotification(announcement.KindText,
+                announcement.SummaryText + L(" · 补发今日提醒；社区转述，到账以账号数据为准。",
+                    " · Missed reminder for today. Community report; account data confirms recovery.")))
+            _resetCatchUpPending = false;
+    }
+
+    private bool SendResetNotification(string title, string message)
+    {
+        try
+        {
+            return _resetNotificationHistory.TrySend(
+                () => App.Current.ShowResetNotification(title, message), DateTimeOffset.Now);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetFooterStatus(L("重置通知发送记录保存失败：", "Unable to save reset notification history: ") + ex.Message,
+                warning: true);
+            return false;
+        }
     }
 
     private void ResetSource_Click(object sender, RoutedEventArgs e)

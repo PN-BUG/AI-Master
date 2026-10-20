@@ -106,6 +106,7 @@ public partial class App : WpfApplication
         if (!MainWindow.IsVisible) MainWindow.Show();
         if (MainWindow.WindowState == WindowState.Minimized) MainWindow.WindowState = WindowState.Normal;
         MainWindow.Activate();
+        if (MainWindow is AiManagerWindow manager) manager.ReplayMissedResetNotification();
     }
 
     public void NotifyRunningInBackground()
@@ -152,11 +153,24 @@ public partial class App : WpfApplication
         Shutdown();
     }
 
-    internal void ShowResetNotification(string title, string message)
+    internal bool ShowResetNotification(string title, string message)
     {
-        if (IsExiting || _trayIcon?.Visible != true) return;
+        if (IsExiting || _trayIcon?.Visible != true) return false;
+        // ShowBalloonTip returns silently when Windows notifications are disabled.
+        // Do not count that as a sent reset notification, so opening the app can retry.
+        try
+        {
+            using var settings = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\PushNotifications");
+            if (settings?.GetValue("ToastEnabled") is int enabled && enabled == 0) return false;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ResetNotifications] Cannot read Windows notification setting: {ex.Message}");
+        }
         _trayIcon.ShowBalloonTip(7000, "AIMaster · " + title,
             message.Length > 240 ? message[..237] + "…" : message, Forms.ToolTipIcon.Info);
+        return true;
     }
 
     private void LocalizationService_LanguageChanged(object? sender, EventArgs e) => UpdateTrayLanguage();

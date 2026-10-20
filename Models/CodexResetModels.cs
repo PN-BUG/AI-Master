@@ -3,9 +3,12 @@ using AIMaster.Services;
 namespace AIMaster.Models;
 
 internal sealed record CodexResetEvent(string Id, string Kind, DateTimeOffset AnnouncedAt,
-    string Summary, string Url)
+    string Summary, string Url, string? ChineseSummary = null)
 {
     public string Key => $"{Kind}:{Id}";
+    public string SummaryText => LocalizationService.IsEnglish ? Summary
+        : !string.IsNullOrWhiteSpace(ChineseSummary) ? ChineseSummary
+        : "中文译文暂不可用，请查看原文。";
     public string KindText => Kind == "signal"
         ? LocalizationService.L("重置预告 / 信号", "Reset preview / signal")
         : LocalizationService.L("全局重置公告", "Global reset announcement");

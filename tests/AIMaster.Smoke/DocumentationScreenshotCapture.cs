@@ -37,11 +37,11 @@ internal static class DocumentationScreenshotCapture
             "documentation-demo-sync-key-123456";
         Invoke(main, "RenderSnapshot", managerSnapshot);
         var mainContent = main.Content as FrameworkElement ?? main;
-        Arrange(mainContent, 1180, 2100);
+        Arrange(mainContent, 1180, 820);
         Invoke(main, "RenderRemainingForecastChart");
         Invoke(main, "RenderTodayUsageChart");
-        Arrange(mainContent, 1180, 2100);
-        SavePng(mainContent, 1180, 2100,
+        Arrange(mainContent, 1180, 820);
+        SavePng(mainContent, 1180, 820,
             Path.Combine(outputDirectory, $"dashboard-{suffix}.png"));
 
         var floating = new AiFloatingWindow();
@@ -67,7 +67,7 @@ internal static class DocumentationScreenshotCapture
         Invoke(main, "ApplyDashboardLayout");
     }
 
-    private static AiManagerSnapshot CreateManagerSnapshot(DateTimeOffset now, bool english)
+    internal static AiManagerSnapshot CreateManagerSnapshot(DateTimeOffset now, bool english)
     {
         var today = DateOnly.FromDateTime(now.LocalDateTime);
         var dailyTokens = new long[] { 410_000, 525_000, 360_000, 690_000, 745_000, 580_000, 455_000 };

@@ -27,7 +27,7 @@ internal static partial class Program
             ("TasksPageButton", "tasks", new[] { "ThreadsCard", "GuardCard" }),
             ("UsagePageButton", "usage", new[] { "LocalUsageCard", "DailyUsageCard", "ForecastCard" }),
             ("SharedPageButton", "shared", new[] { "SharedUsageCard" }),
-            ("SettingsPageButton", "settings", new[] { "SettingsCard", "ApplicationSettingsCard" })
+            ("SettingsPageButton", "settings", new[] { "SettingsCard" })
         };
         var policy = (TextBox)main.FindName("WarningPercentBox");
         policy.Text = "73";
@@ -38,6 +38,9 @@ internal static partial class Program
             Check(Equals(active.Tag, pageId) && cardNames.All(name =>
                       ReferenceEquals(AiManagerWindow.FindAncestor<Grid>(((Border)main.FindName(name)).Parent), active)),
                 $"{pageId} navigation exposes the correct cards in one dedicated page");
+            Check(new[] { "LanguageButton", "ThemeButton", "CheckUpdateButton", "ViewUpdateButton", "InstallUpdateButton", "OfficialWebsiteButton", "AboutButton" }
+                    .All(name => IsInsideApplicationControls((DependencyObject)main.FindName(name))),
+                $"{pageId} keeps application controls permanently in the navigation rail");
             Check(main.CaptureDashboardLayout().Count == 10 &&
                   main.CaptureDashboardLayout().Select(entry => entry.Split(':')[1]).Distinct().Count() == 10,
                 $"saving a layout from {pageId} retains cards on hidden pages");
@@ -51,14 +54,37 @@ internal static partial class Program
         Check(sharedHost.ColumnDefinitions[2].Width.Value == 0 &&
               ReferenceEquals(shared.Parent, sharedHost.Children[0]),
             "legacy shared-layout preferences migrate into a full-width page");
-        Check(main.CaptureDashboardLayout().Contains("right:quota") &&
+        Check(main.CaptureDashboardLayout().Contains("left:quota") &&
               main.CaptureDashboardLayout().Contains("left:settings"),
-            "legacy ordering is retained while settings reserve a separate column for app controls");
+            "legacy overview preferences migrate into the full-width main column");
+        var render = typeof(AiManagerWindow).GetMethod("RenderSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var snapshot = DocumentationScreenshotCapture.CreateManagerSnapshot(DateTimeOffset.Now, true);
+        render.Invoke(main, new object[] { snapshot });
+        var limits = (ItemsControl)main.FindName("LimitItems");
+        Check(limits.Items.Count == snapshot.Limits.Count - 1 && !limits.Items.Contains(snapshot.MainLimit),
+            "the main quota is shown once and additional model windows remain visible");
+        render.Invoke(main, new object[] { new AIMaster.Models.AiManagerSnapshot { Limits = new() { snapshot.MainLimit! } } });
+        Check(((Border)main.FindName("LimitsCard")).Visibility == Visibility.Collapsed,
+            "a single account window does not leave an empty duplicate quota card");
+        VerifyLocalTaskNameSources();
+        Check(new AIMaster.Models.AiThreadSummary
+              { Title = "<send_user_message_question_reply> [{\"questionItemId\":\"internal\"}]", ConversationTitle = "Layout review" }
+              .DisplayTitle == "Layout review" &&
+              TaskTitleFormatter.Clean("Fix <Button> text") == "Fix <Button> text" &&
+              TaskTitleFormatter.Clean("Read [guide](https://example.com/guide)") == "Read guide",
+            "task summaries hide transport replies, keep readable links, and preserve code in real requests");
         LocalizationService.SetLanguage(LocalizationService.Chinese);
         Check(((RadioButton)main.FindName("TasksPageButton")).Content is "任务监控" &&
-              ((TextBlock)main.FindName("PageDescriptionText")).Text == "调整保护策略、浮窗字号、语言和主题，管理版本更新。",
+              ((TextBlock)main.FindName("PageDescriptionText")).Text == "调整保护策略、浮窗字号和每日用量预算。",
             "page navigation and the active description switch to Chinese");
         LocalizationService.SetLanguage(LocalizationService.English);
         ((RadioButton)main.FindName("QuotaPageButton")).IsChecked = true;
+    }
+
+    private static bool IsInsideApplicationControls(DependencyObject element)
+    {
+        for (DependencyObject? current = element; current is not null; current = LogicalTreeHelper.GetParent(current))
+            if (current is FrameworkElement { Name: "ApplicationControls" }) return true;
+        return false;
     }
 }

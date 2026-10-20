@@ -367,12 +367,13 @@ internal sealed class AiManagerService : IAsyncDisposable
         return NormalizeTitle(FirstUsefulTitle(preferred, alternate, fallback) ?? "未命名任务");
     }
 
-    private static string? FirstUsefulTitle(params string?[] values) => values.FirstOrDefault(IsUsefulTitle);
+    private static string? FirstUsefulTitle(params string?[] values) =>
+        values.Select(TaskTitleFormatter.Clean).FirstOrDefault(IsUsefulTitle);
 
     private static bool IsUsefulTitle(string? value) =>
-        !string.IsNullOrWhiteSpace(value) &&
+        !string.IsNullOrWhiteSpace(TaskTitleFormatter.Clean(value)) &&
         value != "未命名任务" &&
-        !value.StartsWith("The following is the Codex agent history", StringComparison.OrdinalIgnoreCase);
+        value?.StartsWith("The following is the Codex agent history", StringComparison.OrdinalIgnoreCase) != true;
 
     private async Task<AiThreadSummary> EnrichFloatingTaskAsync(AiThreadSummary summary,
         CancellationToken cancellationToken)
@@ -1103,8 +1104,7 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     private static string NormalizeTitle(string title)
     {
-        title = title.Replace('\r', ' ').Replace('\n', ' ').Trim();
-        return title.Length > 64 ? title[..64] + "…" : title;
+        return TaskTitleFormatter.Format(title);
     }
 
     private static string? FindLatestUserMessage(JsonElement thread)
@@ -1273,11 +1273,7 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     private static string CleanUserMessage(string text)
     {
-        var title = text.Trim();
-        const string requestMarker = "## My request:";
-        var marker = title.LastIndexOf(requestMarker, StringComparison.OrdinalIgnoreCase);
-        if (marker >= 0) title = title[(marker + requestMarker.Length)..].Trim();
-        return title;
+        return TaskTitleFormatter.Clean(text);
     }
 
     private static (string? DisplayName, string? ReasoningEffort) ResolveModel(

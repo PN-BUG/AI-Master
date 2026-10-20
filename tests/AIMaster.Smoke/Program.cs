@@ -36,9 +36,26 @@ internal static partial class Program
         var app = new App();
         app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--floating-restore", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyFloatingWindowRestore(app);
+            return 0;
+        }
         if (args.Contains("--dashboard-pages", StringComparer.OrdinalIgnoreCase))
         {
             VerifyDashboardPages(new AiManagerWindow());
+            app.ExitApplication();
+            return 0;
+        }
+        if (args.Contains("--capture-pages", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyDashboardRedesign(args);
+            app.ExitApplication();
+            return 0;
+        }
+        if (args.Contains("--card-layout", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyDashboardCardContent(args);
             app.ExitApplication();
             return 0;
         }
@@ -147,8 +164,8 @@ internal static partial class Program
         Check(main.Icon != null, "main window has the AIMaster icon");
         Check(floating.Icon != null, "floating window has the AIMaster icon");
         Check(main.FindName("DashboardScrollViewer") is ScrollViewer
-              { VerticalScrollBarVisibility: ScrollBarVisibility.Hidden },
-            "dashboard scrollbar is hidden while scrolling remains available");
+              { VerticalScrollBarVisibility: ScrollBarVisibility.Auto },
+            "dashboard scrolling uses the themed scrollbar when needed");
         var inlineHost = new TextBlock();
         var inlineRun = new System.Windows.Documents.Run("Drag handle");
         inlineHost.Inlines.Add(inlineRun);
@@ -389,7 +406,7 @@ internal static partial class Program
         Check(buildScript.Contains("[switch]$All", StringComparison.Ordinal) &&
               buildScript.Contains("AIMaster-$Runtime-standalone.zip", StringComparison.Ordinal) &&
               buildScript.Contains("AIMaster-$Runtime-lightweight.zip", StringComparison.Ordinal) &&
-              commandScript.Contains("build.ps1\" -All", StringComparison.Ordinal) &&
+              commandScript.Contains("package-and-restart.ps1\"", StringComparison.Ordinal) &&
               buildScript.Contains("UTF8Encoding($true)", StringComparison.Ordinal) &&
               startHereTemplate.Contains("安装并登录 Codex", StringComparison.Ordinal),
             "one-click packager targets both release folders and both ZIP archives");
@@ -460,8 +477,16 @@ internal static partial class Program
         scopeHint.Text = "Updated scope";
         Check(scopeHelp.Text == "Updated scope", "help text follows live scope updates");
         scopeHint.Text = previousHint;
-        quotaCard.Measure(new Size(420, 200));
-        quotaCard.Arrange(new Rect(0, 0, 420, 200));
+        quotaCard.Measure(new Size(420, double.PositiveInfinity));
+        quotaCard.Arrange(new Rect(0, 0, 420, quotaCard.DesiredSize.Height));
+        quotaCard.UpdateLayout();
+        // The summary switches to a vertical arrangement after receiving its first width.
+        quotaCard.Measure(new Size(420, double.PositiveInfinity));
+        quotaCard.Arrange(new Rect(0, 0, 420, quotaCard.DesiredSize.Height));
+        quotaCard.UpdateLayout();
+        // The summary switches to a vertical arrangement after receiving its first width.
+        quotaCard.Measure(new Size(420, double.PositiveInfinity));
+        quotaCard.Arrange(new Rect(0, 0, 420, quotaCard.DesiredSize.Height));
         quotaCard.UpdateLayout();
         var bottomHit = System.Windows.Media.VisualTreeHelper.HitTest(quotaCard,
             new Point(quotaCard.ActualWidth / 2, quotaCard.ActualHeight - 4))?.VisualHit;
@@ -591,7 +616,8 @@ internal static partial class Program
         [
             "{\"type\":\"session_meta\",\"payload\":{\"id\":\"smoke-thread\",\"thread_source\":\"user\"}}",
             "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"First request\"}]}}",
-            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"# Files mentioned by the user:\\nfile.png\\n\\n## My request:\\nLatest request\"}]}}",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"# Files mentioned by the user:\\nfile.png\\n\\n## My request:\\nLatest request <image name=[Image #1] path='C:/Temp/attachment.png'></image>\"}]}}",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<send_user_message_question_reply> [{\\\"questionItemId\\\":\\\"internal\\\"}]\"}]}}",
             "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\"}}"
         ]);
         try
