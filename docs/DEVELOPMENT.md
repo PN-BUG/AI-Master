@@ -7,7 +7,7 @@
 - Windows Forms `Screen` API（多显示器工作区定位）
 - Codex App Server JSONL 协议
 
-项目不依赖 SoftwareToolkit 源码，也不包含第三方 NuGet 包。
+项目不依赖 SoftwareToolkit 源码。Windows 应用通知使用 `Microsoft.Toolkit.Uwp.Notifications` 7.1.3，目标系统为 Windows 10 1809 或更新版本。
 
 ## 目录结构
 

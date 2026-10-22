@@ -55,7 +55,7 @@ AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“�
 
 ## 使用要求
 
-- Windows 10/11。
+- Windows 10 1809 或更新版本（含 Windows 11）。
 - 已安装并登录 Codex；`codex` 命令在 PATH 中，或使用标准的 Codex Desktop 安装位置。
 - 读取额度和在线任务时，Codex App Server 需要可用。
 

@@ -19,6 +19,8 @@ public partial class AiFloatingWindow : Window
 {
     private static AiFloatingWindow? _instance;
     private readonly AiManagerService _service;
+    private readonly ResetSignalAttention _resetAttention;
+    private double _resetBannerHeight;
     private readonly DispatcherTimer _timer = new();
     private readonly DispatcherTimer _dockHideTimer = new() { Interval = TimeSpan.FromMilliseconds(820) };
     private readonly CancellationTokenSource _lifetime = new();
@@ -45,9 +47,10 @@ public partial class AiFloatingWindow : Window
 
     public AiFloatingWindow() : this(new AiManagerService()) { }
 
-    internal AiFloatingWindow(AiManagerService service)
+    internal AiFloatingWindow(AiManagerService service, ResetSignalAttention? resetAttention = null)
     {
         _service = service;
+        _resetAttention = resetAttention ?? ResetSignalAttention.Shared;
         InitializeComponent();
         IsVisibleChanged += (_, _) =>
         {
@@ -69,6 +72,8 @@ public partial class AiFloatingWindow : Window
         LocalizationService.LanguageChanged += LocalizationService_LanguageChanged;
         LocalizationService.Apply(this);
         UpdateContextMenu();
+        _resetAttention.Changed += ResetAttention_Changed;
+        RenderResetAttention();
     }
 
     public static void ShowOrActivate()
@@ -103,6 +108,7 @@ public partial class AiFloatingWindow : Window
         Resources["FloatFontQuota"] = 14d * _fontScale;
         Resources["FloatFontPercent"] = 8d * _fontScale;
         Resources["FloatFontModel"] = 9d * _fontScale;
+        RenderResetAttention();
 
         if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
     }
@@ -161,6 +167,7 @@ public partial class AiFloatingWindow : Window
         // Application/update shutdown must preserve the user's choice to keep it open.
         if (!App.Current.IsExiting) SaveWindowEnabled(false);
         LocalizationService.LanguageChanged -= LocalizationService_LanguageChanged;
+        _resetAttention.Changed -= ResetAttention_Changed;
         _lifetime.Cancel();
         await _service.DisposeAsync();
         _lifetime.Dispose();
@@ -222,7 +229,7 @@ public partial class AiFloatingWindow : Window
         if (!_hasSizedForFirstSnapshot)
         {
             _hasSizedForFirstSnapshot = true;
-            Height = BaseWindowHeight + Math.Clamp(tasks.Count - 1, 0, 2) * SecondaryTaskRowHeight;
+            Height = BaseWindowHeight + _resetBannerHeight + Math.Clamp(tasks.Count - 1, 0, 2) * SecondaryTaskRowHeight;
         }
         RefreshVisibleTaskRows(force: true);
         ApplyStatusVisual(snapshot.TaskStatus);
@@ -232,7 +239,7 @@ public partial class AiFloatingWindow : Window
     {
         if (SecondaryTasksPanel is null) return;
         var availableHeight = ActualHeight > 0 ? ActualHeight : Height;
-        var visibleTaskCount = CalculateVisibleTaskCount(availableHeight, _displayTasks.Count);
+        var visibleTaskCount = CalculateVisibleTaskCount(availableHeight - _resetBannerHeight, _displayTasks.Count);
         if (!force && visibleTaskCount == _visibleTaskCount) return;
         _visibleTaskCount = visibleTaskCount;
 
@@ -383,7 +390,7 @@ public partial class AiFloatingWindow : Window
             _ => "IdleSoft"
         };
         StatusDot.Fill = ThemeBrush(colorKey);
-        PeekSignal.Fill = ThemeBrush(colorKey);
+        PeekSignal.Fill = ThemeBrush(_resetAttention.Pending is not null ? "Warning" : colorKey);
         TaskStatusText.Foreground = ThemeBrush(colorKey);
         TaskStatusBadge.Background = ThemeBrush(badgeKey);
     }
@@ -536,7 +543,9 @@ public partial class AiFloatingWindow : Window
 
     private void ConfigurePeekHandle()
     {
-        PeekHandle.ToolTip = LocalizationService.IsEnglish ? "Hover to expand" : "悬停展开";
+        PeekHandle.ToolTip = _resetAttention.Pending is not null
+            ? _resetAttention.Title + "\n" + _resetAttention.Detail
+            : LocalizationService.IsEnglish ? "Hover to expand" : "悬停展开";
         PeekHandle.Width = _dockEdge == DockEdge.Top ? 56 : PeekSize;
         PeekHandle.Height = _dockEdge == DockEdge.Top ? PeekSize : 56;
         PeekSignal.Width = _dockEdge == DockEdge.Top ? 34 : 2;
@@ -738,11 +747,57 @@ public partial class AiFloatingWindow : Window
 
     private SolidColorBrush ThemeBrush(string key) => (SolidColorBrush)FindResource(key);
 
+    private void ResetAttention_Changed(object? sender, EventArgs e) => RenderResetAttention();
+
+    private void RenderResetAttention()
+    {
+        var visible = _resetAttention.Pending is not null;
+        ResetAttentionButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        ResetAttentionTitle.Text = "● " + _resetAttention.Title;
+        var hasTime = _resetAttention.Pending?.LocalResetTimeCompactText is { Length: > 0 };
+        ResetAttentionTime.Text = hasTime ? _resetAttention.TimeText : "";
+        ResetAttentionTime.Visibility = hasTime ? Visibility.Visible : Visibility.Collapsed;
+        ResetAttentionAction.Text = _resetAttention.DismissText;
+        ResetAttentionButton.ToolTip = _resetAttention.Detail;
+        System.Windows.Automation.AutomationProperties.SetName(ResetAttentionButton,
+            $"{_resetAttention.Title}. {_resetAttention.Detail}. {_resetAttention.DismissText}");
+        var height = visible ? (hasTime ? 64 : 44) * _fontScale : 0;
+        ResetAttentionButton.Height = height;
+        var delta = height - _resetBannerHeight;
+        _resetBannerHeight = height;
+        MinHeight = BaseWindowHeight + height;
+        if (Math.Abs(delta) > 0.1) Height = Math.Max(MinHeight, Height + delta);
+        if (IsLoaded && !_isDockCollapsed && Math.Abs(delta) > 0.1)
+        {
+            var area = GetCurrentMonitorWorkArea();
+            Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height));
+        }
+        RefreshVisibleTaskRows(force: true);
+        if (_dockEdge != DockEdge.None) ConfigurePeekHandle();
+        if (visible)
+        {
+            PeekSignal.Fill = ThemeBrush("Warning");
+            PeekHandle.ToolTip = _resetAttention.Title + "\n" + _resetAttention.Detail;
+        }
+        else if (_lastSnapshot is { } snapshot) ApplyStatusVisual(snapshot.TaskStatus);
+    }
+
+    private void DismissResetAttention_Click(object sender, RoutedEventArgs e)
+    {
+        try { _resetAttention.Dismiss(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, LocalizationService.L("重置提示隐藏失败：", "Unable to dismiss reset reminder: ") + ex.Message,
+                "AIMaster", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private async void LocalizationService_LanguageChanged(object? sender, EventArgs e)
     {
         LocalizationService.Apply(this);
         UpdateContextMenu();
         if (_dockEdge != DockEdge.None) ConfigurePeekHandle();
+        RenderResetAttention();
         if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
         if (!_isDockCollapsed) await RefreshAsync();
     }

@@ -13,6 +13,8 @@ internal sealed record CodexResetEvent(string Id, string Kind, DateTimeOffset An
         ? LocalizationService.L("重置预告 / 信号", "Reset preview / signal")
         : LocalizationService.L("全局重置公告", "Global reset announcement");
     public string TimeText => AnnouncedAt.LocalDateTime.ToString("MM-dd HH:mm");
+    public string LocalResetTimeText => ResetScheduleFormatter.Format(this);
+    public string LocalResetTimeCompactText => ResetScheduleFormatter.Format(this, compact: true);
     public string Heading => $"{KindText} · {TimeText}";
     public string SourceActionText => LocalizationService.L("查看原文", "View source");
 }

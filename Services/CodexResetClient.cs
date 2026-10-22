@@ -90,16 +90,24 @@ internal sealed class CodexResetClient : IDisposable
             if (item is not null && item.AnnouncedAt <= now + TimeSpan.FromMinutes(5)) events.Add(item);
         }
 
-        CodexResetEvent? signal = null;
+        var signals = new List<CodexResetEvent>();
         if (forecast.TryGetProperty("official_signal", out var official) && official.ValueKind == JsonValueKind.Object)
-            signal = Event(official, "signal", "tweet_id", "at") ?? Event(official, "signal", "id", "announced_at");
-        if (signal is null && feed.TryGetProperty("signal", out var headline) &&
+        {
+            var item = Event(official, "signal", "tweet_id", "at") ?? Event(official, "signal", "id", "announced_at");
+            if (item is not null) signals.Add(item);
+        }
+        if (feed.TryGetProperty("signal", out var headline) &&
             headline.ValueKind == JsonValueKind.Object && headline.TryGetProperty("active", out var active) &&
             active.ValueKind == JsonValueKind.True)
-            signal = Event(headline, "signal", "tweet_id", "at");
-        if (signal is not null && (signal.AnnouncedAt > now + TimeSpan.FromMinutes(5) ||
-            now - signal.AnnouncedAt > TimeSpan.FromHours(24) ||
-            (lastResetAt is { } resetAt && signal.AnnouncedAt <= resetAt))) signal = null;
+        {
+            if (Event(headline, "signal", "tweet_id", "at") is { } item) signals.Add(item);
+        }
+        // A forecast may still point to the parent post after the feed has its newer,
+        // more specific reply. Source priority must not hide the latest valid preview.
+        var signal = signals.Where(item => item.AnnouncedAt <= now + TimeSpan.FromMinutes(5) &&
+                now - item.AnnouncedAt <= TimeSpan.FromHours(24) &&
+                (lastResetAt is null || item.AnnouncedAt > lastResetAt))
+            .OrderByDescending(item => item.AnnouncedAt).FirstOrDefault();
 
         return new CodexResetSnapshot(events.DistinctBy(item => item.Key)
             .OrderByDescending(item => item.AnnouncedAt).Take(20).ToList(), signal,

@@ -16,6 +16,11 @@ public partial class App : WpfApplication
     private Forms.ToolStripMenuItem? _showFloatingMenuItem;
     private Forms.ToolStripMenuItem? _exitMenuItem;
     private bool _backgroundNoticeShown;
+    private TrayNotificationQueue? _trayNotifications;
+    private NotificationCenterService? _notificationCenter;
+    private Exception? _notificationCenterStartupError;
+    private readonly System.Windows.Threading.DispatcherTimer _trayNotificationTimer = new()
+        { Interval = TimeSpan.FromSeconds(2) };
 
     public static new App Current => (App)WpfApplication.Current;
     public bool IsExiting { get; private set; }
@@ -56,6 +61,18 @@ public partial class App : WpfApplication
 
         base.OnStartup(e);
         InitializeTrayIcon();
+        try
+        {
+            _notificationCenter = new NotificationCenterService(new WindowsNotificationCenter(
+                action => Dispatcher.BeginInvoke(action, System.Windows.Threading.DispatcherPriority.ApplicationIdle),
+                ShowMainWindow));
+            _notificationCenter.Failed += ReportNotificationFailure;
+        }
+        catch (Exception ex)
+        {
+            _notificationCenterStartupError = ex;
+            Dispatcher.BeginInvoke(() => ReportNotificationFailure(ex), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        }
     }
 
     internal void InitializeTrayIcon()
@@ -95,7 +112,27 @@ public partial class App : WpfApplication
             if (args.Button == Forms.MouseButtons.Left) Dispatcher.Invoke(ShowMainWindow);
         };
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowMainWindow);
-        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(ShowMainWindow);
+        _trayNotifications = new TrayNotificationQueue(notification =>
+        {
+            if (IsExiting || _trayIcon?.Visible != true) return false;
+            _trayIcon.ShowBalloonTip(notification.Duration, notification.Title, notification.Message, notification.Icon);
+            return true;
+        });
+        _trayIcon.BalloonTipShown += (_, _) => _trayNotifications.ConfirmShown();
+        _trayIcon.BalloonTipClosed += (_, _) => _trayNotifications.Close();
+        _trayIcon.BalloonTipClicked += (_, _) =>
+        {
+            _trayNotifications.ConfirmShown();
+            _trayNotifications.Close();
+            Dispatcher.Invoke(ShowMainWindow);
+        };
+        _trayNotificationTimer.Tick += (_, _) =>
+        {
+            _trayNotifications.Tick();
+            try { _notificationCenter?.Tick(); }
+            catch (Exception ex) { ReportNotificationFailure(ex); }
+        };
+        _trayNotificationTimer.Start();
         LocalizationService.LanguageChanged += LocalizationService_LanguageChanged;
         UpdateTrayLanguage();
     }
@@ -113,11 +150,10 @@ public partial class App : WpfApplication
     {
         if (_backgroundNoticeShown || _trayIcon is null) return;
         _backgroundNoticeShown = true;
-        _trayIcon.BalloonTipTitle = "AIMaster";
-        _trayIcon.BalloonTipText = LocalizationService.L(
+        var message = LocalizationService.L(
             "AIMaster 正在后台运行，单击托盘图标可重新打开。",
             "AIMaster is running in the background. Click the tray icon to reopen it.");
-        _trayIcon.ShowBalloonTip(2500);
+        _trayNotifications?.Enqueue(new("AIMaster", message, Forms.ToolTipIcon.Info, 2500));
     }
 
     internal void ShowQuotaNotification(QuotaNotification notification, double threshold)
@@ -130,18 +166,18 @@ public partial class App : WpfApplication
         var message = LocalizationService.L(
             $"{limit.DisplayName} · {limit.WindowName} 已用 {limit.UsedPercent:0.#}%（提醒线 {threshold:0.#}%）。{limit.ResetText}。单击查看详情。",
             $"{limit.DisplayName} · {limit.WindowName}: {limit.UsedPercent:0.#}% used (threshold {threshold:0.#}%). {limit.ResetText}. Click for details.");
-        _trayIcon.ShowBalloonTip(5000, title, message, Forms.ToolTipIcon.Warning);
+        _trayNotifications?.Enqueue(new(title, message, Forms.ToolTipIcon.Warning, 5000));
     }
 
     internal void ShowDailyQuotaNotification(double used, double limit)
     {
         if (IsExiting || _trayIcon?.Visible != true) return;
-        _trayIcon.ShowBalloonTip(5000,
+        _trayNotifications?.Enqueue(new(
             LocalizationService.L("AIMaster · 每日限额预警", "AIMaster · Daily usage warning"),
             LocalizationService.L(
                 $"今日账号消耗约 {used:0.##}% 周总额度，达到每日预警线 {limit:0.#}%。按账号 Token 比例估算，含所有设备，次日重新计数。单击查看详情。",
                 $"Today's account usage is about {used:0.##}% of total weekly quota, reaching the daily warning of {limit:0.#}%. Estimated from account token shares across all devices; resets next local day. Click for details."),
-            Forms.ToolTipIcon.Warning);
+            Forms.ToolTipIcon.Warning, 5000));
     }
 
     public void ExitApplication()
@@ -153,24 +189,18 @@ public partial class App : WpfApplication
         Shutdown();
     }
 
-    internal bool ShowResetNotification(string title, string message)
+    internal bool ShowResetNotification(string title, string message, string eventKey, Action retained)
     {
-        if (IsExiting || _trayIcon?.Visible != true) return false;
-        // ShowBalloonTip returns silently when Windows notifications are disabled.
-        // Do not count that as a sent reset notification, so opening the app can retry.
-        try
-        {
-            using var settings = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\PushNotifications");
-            if (settings?.GetValue("ToastEnabled") is int enabled && enabled == 0) return false;
-        }
-        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
-        {
-            System.Diagnostics.Debug.WriteLine($"[ResetNotifications] Cannot read Windows notification setting: {ex.Message}");
-        }
-        _trayIcon.ShowBalloonTip(7000, "AIMaster · " + title,
-            message.Length > 240 ? message[..237] + "…" : message, Forms.ToolTipIcon.Info);
-        return true;
+        if (IsExiting) return false;
+        if (_notificationCenterStartupError is not null)
+            throw new InvalidOperationException("Windows notification registration failed.", _notificationCenterStartupError);
+        return _notificationCenter?.SendReset(title, message, eventKey, retained) == true;
+    }
+
+    private void ReportNotificationFailure(Exception error)
+    {
+        System.Diagnostics.Debug.WriteLine($"[NotificationCenter] {error}");
+        if (MainWindow is AiManagerWindow manager) manager.ReportResetNotificationError(error);
     }
 
     private void LocalizationService_LanguageChanged(object? sender, EventArgs e) => UpdateTrayLanguage();
@@ -203,6 +233,8 @@ public partial class App : WpfApplication
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
+        _trayNotificationTimer.Stop();
+        _notificationCenter?.Dispose();
         LocalizationService.LanguageChanged -= LocalizationService_LanguageChanged;
         if (_trayIcon is not null)
         {

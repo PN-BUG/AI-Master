@@ -18,6 +18,7 @@ namespace AIMaster;
 public partial class AiManagerWindow : Window
 {
     private readonly AiManagerService _service;
+    private readonly ResetSignalAttention _resetAttention;
     private readonly DispatcherTimer _timer = new();
     private readonly CancellationTokenSource _lifetime = new();
     private bool _refreshing;
@@ -79,9 +80,10 @@ public partial class AiManagerWindow : Window
 
     public AiManagerWindow() : this(new AiManagerService()) { }
 
-    internal AiManagerWindow(AiManagerService service)
+    internal AiManagerWindow(AiManagerService service, ResetSignalAttention? resetAttention = null)
     {
         _service = service;
+        _resetAttention = resetAttention ?? ResetSignalAttention.Shared;
         _accountResetTracker = new AccountResetTracker(service.AccountResetStatePath);
         _resetNotificationHistory = new ResetNotificationHistory(System.IO.Path.Combine(
             System.IO.Path.GetDirectoryName(service.AccountResetStatePath)!, "reset-notification-history.json"));
@@ -96,6 +98,9 @@ public partial class AiManagerWindow : Window
         UpdateLanguageButton();
         UpdateThemeButton();
         UpdateDashboardPageLanguage();
+        _resetAttention.Changed += ResetAttention_Changed;
+        _resetAttention.SetEnabled(_service.Settings.ResetMonitoringEnabled);
+        RenderResetAttention();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -118,6 +123,7 @@ public partial class AiManagerWindow : Window
     {
         _timer.Stop();
         _resetTimer.Stop();
+        _resetAttention.Changed -= ResetAttention_Changed;
         LocalizationService.LanguageChanged -= LocalizationService_LanguageChanged;
         _lifetime.Cancel();
         if (_resetRefreshTask is not null)

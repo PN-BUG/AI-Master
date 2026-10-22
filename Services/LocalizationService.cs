@@ -83,6 +83,7 @@ public static class LocalizationService
         ["完整用量数据不足，暂不能推荐；可手动填写。"] = "Not enough complete usage data to recommend a limit; enter one manually.",
         ["按账号本周期 Token 比例与周额度占用估算，包含所有设备；非官方每日额度账单。"] = "Estimated from account token shares and weekly usage for this cycle, across all devices; not an official daily quota bill.",
         ["重置信号"] = "RESET SIGNALS",
+        ["● 最新重置信号"] = "● LATEST RESET",
         ["账户额度"] = "Account quota", ["其他额度窗口"] = "Other quota windows",
         ["历史公告"] = "Earlier announcements", ["监测设置"] = "Monitoring settings",
         ["自动监测重置信号（每 2 分钟）"] = "Monitor reset signals (every 2 minutes)",

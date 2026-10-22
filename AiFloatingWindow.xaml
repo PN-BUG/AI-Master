@@ -93,6 +93,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="17"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="1"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
@@ -113,7 +114,26 @@
                     </StackPanel>
                 </Grid>
 
-                <StackPanel x:Name="TaskRowsPanel" Grid.Row="1" Margin="0,0,2,1">
+                <Button x:Name="ResetAttentionButton" Grid.Row="1" Visibility="Collapsed" Cursor="Hand"
+                        Click="DismissResetAttention_Click" Background="{DynamicResource WarningSoft}"
+                        BorderBrush="{DynamicResource Warning}" Foreground="{DynamicResource WarningText}">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1" CornerRadius="5" Padding="5,2">
+                                <ContentPresenter VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                    <StackPanel>
+                        <TextBlock x:Name="ResetAttentionTitle" FontSize="{DynamicResource FloatFontModel}"
+                                   FontWeight="Bold" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="ResetAttentionTime" FontSize="{DynamicResource FloatFontSmall}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        <TextBlock x:Name="ResetAttentionAction" FontSize="{DynamicResource FloatFontSmall}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Button>
+
+                <StackPanel x:Name="TaskRowsPanel" Grid.Row="2" Margin="0,0,2,1">
                     <Grid x:Name="PrimaryTaskRow" Height="27"
                           MouseLeftButtonDown="TaskRow_MouseLeftButtonDown">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -129,9 +149,9 @@
                     <StackPanel x:Name="SecondaryTasksPanel"/>
                 </StackPanel>
 
-                <Border Grid.Row="2" Background="{DynamicResource Line}"/>
+                <Border Grid.Row="3" Background="{DynamicResource Line}"/>
 
-                <Grid Grid.Row="3" Margin="0,3,2,0">
+                <Grid Grid.Row="4" Margin="0,3,2,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <StackPanel>
                         <TextBlock Text="剩余额度" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>

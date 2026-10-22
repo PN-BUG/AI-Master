@@ -50,7 +50,7 @@ Updates replace files in the running executable's directory and restart from tha
 
 ## Requirements
 
-- Windows 10 or Windows 11.
+- Windows 10 version 1809 or later (including Windows 11).
 - Codex installed and signed in. The `codex` command should be on `PATH`, or Codex Desktop should use its standard installation location.
 - Codex App Server available for live quota and online task data.
 

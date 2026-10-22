@@ -36,6 +36,12 @@ internal static partial class Program
         var app = new App();
         app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--reset-attention", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyResetAttention(args);
+            app.ExitApplication();
+            return 0;
+        }
         if (args.Contains("--floating-restore", StringComparer.OrdinalIgnoreCase))
         {
             VerifyFloatingWindowRestore(app);

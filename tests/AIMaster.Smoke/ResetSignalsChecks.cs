@@ -236,23 +236,30 @@ internal static partial class Program
 
     private static void VerifyResetNotificationCatchUp()
     {
+        VerifyNotificationCenter();
+        VerifyTrayNotificationReceipts();
         var directory = Path.Combine(Path.GetTempPath(), "aimaster-reset-notices-" + Guid.NewGuid().ToString("N"));
         var path = Path.Combine(directory, "sent.json");
         var zone = TimeZoneInfo.CreateCustomTimeZone("Test UTC+8", TimeSpan.FromHours(8), "Test UTC+8", "Test UTC+8");
         var now = DateTimeOffset.Parse("2026-10-20T16:00:00+08:00");
         var reset = now.AddHours(-2);
+        var clock = now;
         try
         {
-            var history = new ResetNotificationHistory(path, zone);
+            var history = new ResetNotificationHistory(path, zone, () => clock);
             Check(history.CanCatchUp(reset, now) && !history.CanCatchUp(null, now) &&
                   !history.CanCatchUp(now.AddDays(-1), now) && !history.CanCatchUp(now.AddMinutes(1), now),
                 "opening the app can replay a known reset today, but never an unknown, old, or future reset");
-            Check(!history.TrySend(() => false, now) && !File.Exists(path) &&
+            Check(!history.TrySend(_ => false, now, "signal:test") && !File.Exists(path) &&
                   new ResetNotificationHistory(path, zone).CanCatchUp(reset, now),
                 "system-suppressed or unavailable notifications remain eligible after restart");
-            Check(history.TrySend(() => true, now) && !history.CanCatchUp(reset, now),
-                "a successful reset notification request consumes today's catch-up");
-            history = new ResetNotificationHistory(path, zone);
+            Action? confirm = null;
+            Check(history.TrySend(receipt => { confirm = receipt; return true; }, now, "signal:test") &&
+                  history.CanCatchUp(reset, now) && new ResetNotificationHistory(path, zone).CanCatchUp(reset, now),
+                "an accepted request without Notification Center retention remains retryable after restart");
+            confirm!();
+            Check(!history.CanCatchUp(reset, now), "Notification Center retention consumes today's catch-up");
+            history = new ResetNotificationHistory(path, zone, () => clock);
             Check(history.WasSentToday(now.AddHours(1)) && !history.CanCatchUp(reset, now.AddHours(1)) &&
                   !history.CanCatchUp(now.AddMinutes(30), now.AddHours(1)),
                 "reopening and restarting do not replay today's notification through either reset source");
@@ -268,10 +275,11 @@ internal static partial class Program
             using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
                 var failed = false;
-                try { history.TrySend(() => true, tomorrow); }
+                clock = tomorrow;
+                try { history.TrySend(receipt => { receipt(); return true; }, tomorrow, "announcement:test"); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failed = true; }
                 Check(failed && !history.CanCatchUp(tomorrow.AddHours(-1), tomorrow),
-                    "a failed sent-history save does not spam the current session after a successful request");
+                    "a failed retention-history save retains the confirmed receipt in memory");
             }
 
             // Existing installations have recovery observations but no sent-history file.
@@ -281,9 +289,51 @@ internal static partial class Program
             Check(new ResetNotificationHistory(Path.Combine(directory, "new-history.json"), zone)
                     .CanCatchUp(new AccountResetTracker(accountPath).LastRecoveryAt, now),
                 "legacy recovery observations can produce one catch-up without deleting the detection baseline");
+            var legacyPath = Path.Combine(directory, "legacy-sent.json");
+            File.WriteAllText(legacyPath, JsonSerializer.Serialize(new
+                { LastSentAt = now, LastShownAt = now, LastRetainedAt = now }));
+            var legacy = new ResetNotificationHistory(legacyPath, zone);
+            var preview = new CodexResetEvent("2113162413008884099", "signal", reset,
+                "Reset preview", "https://x.com/thsottiaux/status/2113162413008884099");
+            var snapshot = new CodexResetSnapshot([], preview, now.AddDays(-2), now, now, false);
+            Check(legacy.CanCatchUp(reset, now) && legacy.FindCatchUp(snapshot, now)?.Key == preview.Key,
+                "legacy balloon and unregistered toast receipts do not prevent today's registered Notification Center catch-up");
+            Check(legacy.FindCatchUp(snapshot with { IsStale = true }, now) is null &&
+                  legacy.FindCatchUp(snapshot with { Error = "offline" }, now) is null &&
+                  legacy.FindCatchUp(snapshot with { Signal = preview with { AnnouncedAt = now.AddDays(-1) } }, now) is null,
+                "preview catch-up excludes stale, failed, and previous-day data");
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
         Console.WriteLine("Reset notification catch-up checks passed.");
+    }
+
+    private static void VerifyTrayNotificationReceipts()
+    {
+        var now = DateTimeOffset.Parse("2026-10-22T15:00:00+08:00");
+        var displayed = new System.Collections.Generic.List<string>();
+        var receipts = 0;
+        var queue = new TrayNotificationQueue(item => { displayed.Add(item.Title); return true; }, () => now);
+        var reset = new TrayNotification("reset", "Preview", System.Windows.Forms.ToolTipIcon.Info, 7000,
+            "signal:test", () => receipts++);
+        queue.Enqueue(new("quota", "Quota warning", System.Windows.Forms.ToolTipIcon.Warning, 5000));
+        queue.Enqueue(reset);
+        queue.Enqueue(reset);
+        queue.ConfirmShown();
+        Check(receipts == 0 && displayed.SequenceEqual(new[] { "quota" }),
+            "a quota balloon receipt cannot confirm a queued reset and repeated opens do not duplicate pending resets");
+        queue.Close();
+        queue.ConfirmShown();
+        queue.ConfirmShown();
+        Check(receipts == 1 && displayed.SequenceEqual(new[] { "quota", "reset" }),
+            "only the active reset's native display event confirms it, once");
+        queue.Close();
+        queue.Enqueue(reset with { Key = "signal:unconfirmed" });
+        now = now.AddMinutes(3);
+        queue.Tick();
+        queue.ConfirmShown();
+        Check(receipts == 1, "expiry without a display event never records delivery");
+        Check(queue.Enqueue(reset with { Key = "signal:unconfirmed" }) && displayed.Count == 4,
+            "an expired unconfirmed reset can be requested again on reopening");
     }
 
     private sealed class ResetHttpHandler(string feed, string forecast) : HttpMessageHandler
