@@ -10,19 +10,22 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>AIMaster</AssemblyName>
     <RootNamespace>AIMaster</RootNamespace>
-    <Version>1.3.6</Version>
+    <Version>1.3.7</Version>
     <ApplicationIcon>Resources\AIMaster.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile Condition="'$(SelfContained)' == 'true'">true</EnableCompressionInSingleFile>
+    <!-- Keep assemblies file-backed instead of retaining decompressed copies in private memory. -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <DebugSymbols Condition="'$(Configuration)' == 'Release'">false</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Resident monitoring favors a smaller heap after large rollout scan bursts. -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
     <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
     <ApplicationDefinition Include="App.xaml" />
     <Resource Include="Resources\AIMaster.ico" />

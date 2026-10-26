@@ -293,6 +293,8 @@ public sealed class AiThreadSummary
     public string? LatestUserMessage { get; init; }
     public string DisplayTitle => LocalizationService.LocalizeKnownText(TaskTitleFormatter.Format(Title, ConversationTitle));
     public string Status { get; init; } = "notLoaded";
+    // The desktop observation is temporary; retain the source status for disconnect/revision recovery.
+    internal string? StatusBeforeDesktopObservation { get; init; }
     public string? ModelName { get; init; }
     public string? ReasoningEffort { get; init; }
     public string? RolloutPath { get; init; }
@@ -333,6 +335,8 @@ public sealed record AiRemainingForecastPoint(
 
 public sealed class AiFloatingSnapshot
 {
+    public string? QuotaError { get; init; }
+    public DateTimeOffset? QuotaCapturedAt { get; init; }
     public List<AiThreadSummary> Tasks { get; init; } = new();
     public string TaskName { get; init; } = "暂无最近任务";
     public string TaskStatus { get; init; } = "notLoaded";

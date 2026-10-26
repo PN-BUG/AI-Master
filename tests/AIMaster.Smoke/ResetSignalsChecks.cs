@@ -118,21 +118,42 @@ internal static partial class Program
             Check(!live.IsStale && handler.Requests == 2 && handler.NoCredentials && handler.HasUserAgent &&
                   handler.RequestsChinese,
                 "public polling caches bilingual responses, identifies AIMaster, and sends no credentials");
+            client.ReadAsync(forceRefresh: true).GetAwaiter().GetResult();
+            Check(handler.Requests == 4, "manual refresh fetches new data inside the automatic polling interval");
             clock += TimeSpan.FromMinutes(2);
             handler.Status = HttpStatusCode.TooManyRequests;
             var failed = client.ReadAsync().GetAwaiter().GetResult();
             clock += TimeSpan.FromMinutes(3);
-            client.ReadAsync().GetAwaiter().GetResult();
-            Check(failed.IsStale && failed.Events.Count == 1 && handler.Requests == 4,
-                "429 preserves the last display, suppresses alerts, and respects Retry-After");
+            client.ReadAsync(forceRefresh: true).GetAwaiter().GetResult();
+            Check(failed.IsStale && failed.Events.Count == 1 && handler.Requests == 6,
+                "429 preserves the last display, suppresses alerts, and even manual refresh respects Retry-After");
+            clock += TimeSpan.FromMinutes(7);
+            handler.Status = HttpStatusCode.OK;
+            client.ReadAsync(forceRefresh: true).GetAwaiter().GetResult();
+            Check(handler.Requests == 8, "manual refresh can fetch again after Retry-After expires");
         }
+
+        VerifyResetHttpRecovery(Feed(), Forecast(), now);
 
         var app = new App();
         app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
         var main = new AiManagerWindow();
         VerifyDashboardLayout();
-        main.RenderResetSignals(Parse(Feed(active: true)));
+        main.RenderResetSignals(baseline);
+        Check(main.FindName("ResetSignalStatusText") is TextBlock { Text: "No active reset preview" } &&
+              main.FindName("ResetSignalItems") is ItemsControl { Items.Count: 0, Visibility: Visibility.Collapsed } &&
+              main.FindName("ResetHistoryItems") is ItemsControl { Items.Count: 1 } &&
+              main.FindName("ResetHistoryExpander") is Expander
+                  { Visibility: Visibility.Visible, IsExpanded: false, Header: "Past announcements (1)" },
+            "without an active preview, even a single previous announcement stays in collapsed history");
+        var activeSnapshot = Parse(Feed(active: true));
+        main.RenderResetSignals(activeSnapshot with { Events = [baseline.Events[0] with { AnnouncedAt = now }] });
+        Check(main.FindName("ResetSignalItems") is ItemsControl activeItems &&
+              activeItems.Items.Cast<CodexResetEvent>().Single().Kind == "signal" &&
+              main.FindName("ResetHistoryItems") is ItemsControl { Items.Count: 1 },
+            "an active preview keeps the main slot even when an announcement has a newer publication time");
+        main.RenderResetSignals(activeSnapshot);
         Check(main.FindName("ResetSignalStatusText") is TextBlock { Text: "Active reset preview / signal" } &&
               main.FindName("ResetMonitoringCheck") is CheckBox
                   { Content: TextBlock { Text: "Monitor reset signals (every 2 minutes)" } },
@@ -146,6 +167,10 @@ internal static partial class Program
             card.Measure(new Size(430, double.PositiveInfinity));
             card.Arrange(new Rect(new Point(), card.DesiredSize));
             card.UpdateLayout();
+            var refresh = Descendants(card).OfType<Button>().Single(button => button.Name == "ResetRefreshButton");
+            Check(Equals(refresh.Content, language == LocalizationService.English ? "↻ Refresh" : "↻ 刷新") &&
+                  refresh.ActualWidth + refresh.Margin.Left + refresh.Margin.Right + 0.1 >= refresh.DesiredSize.Width,
+                $"{language} reset refresh action is localized and fits in the card header");
             var items = (ItemsControl)main.FindName("ResetSignalItems");
             var row = (FrameworkElement)items.ItemTemplate.LoadContent();
             row.DataContext = ((CodexResetEvent[])items.ItemsSource)[0];
@@ -163,13 +188,24 @@ internal static partial class Program
             if (output is not null)
             {
                 Directory.CreateDirectory(output);
-                var image = new RenderTargetBitmap((int)Math.Ceiling(card.ActualWidth),
-                    (int)Math.Ceiling(card.ActualHeight), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
-                image.Render(card);
-                var encoder = new PngBitmapEncoder();
-                encoder.Frames.Add(BitmapFrame.Create(image));
-                using var stream = File.Create(Path.Combine(output, $"reset-card-{language}.png"));
-                encoder.Save(stream);
+                CaptureCard($"reset-card-{language}");
+                main.RenderResetSignals(baseline);
+                CaptureCard($"reset-card-history-only-{language}");
+                main.RenderResetSignals(activeSnapshot);
+
+                void CaptureCard(string name)
+                {
+                    card.Measure(new Size(430, double.PositiveInfinity));
+                    card.Arrange(new Rect(new Point(), card.DesiredSize));
+                    card.UpdateLayout();
+                    var image = new RenderTargetBitmap((int)Math.Ceiling(card.ActualWidth),
+                        (int)Math.Ceiling(card.ActualHeight), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                    image.Render(card);
+                    var encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(image));
+                    using var stream = File.Create(Path.Combine(output, name + ".png"));
+                    encoder.Save(stream);
+                }
             }
         }
         main.Close();
@@ -336,24 +372,140 @@ internal static partial class Program
             "an expired unconfirmed reset can be requested again on reopening");
     }
 
+    private static void VerifyResetHttpRecovery(string feed, string forecast, DateTimeOffset now)
+    {
+        foreach (var failure in new[] { "transport", "eof", "timeout", "408", "500", "502", "503" })
+        {
+            var handler = new ResetHttpHandler(feed, forecast)
+            {
+                Response = (route, attempt, _) =>
+                {
+                    if (route != "feed" || attempt != 1) return Task.FromResult<HttpResponseMessage?>(null);
+                    return failure switch
+                    {
+                        "transport" => throw new HttpRequestException("Connection interrupted"),
+                        "eof" => throw new IOException("Unexpected EOF"),
+                        "timeout" => throw new TaskCanceledException("Request timed out"),
+                        _ => Task.FromResult<HttpResponseMessage?>(new HttpResponseMessage((HttpStatusCode)int.Parse(failure)))
+                    };
+                }
+            };
+            using var client = new CodexResetClient(new HttpClient(handler), () => now);
+            var recovered = client.ReadAsync().GetAwaiter().GetResult();
+            Check(!recovered.IsStale && recovered.Error is null && recovered.Events.Single().Id == "123" &&
+                  handler.FeedRequests == 2 && handler.ForecastRequests == 1,
+                $"a transient reset {failure} failure recovers within the poll without marking good data stale");
+        }
+
+        foreach (var status in new[] { HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden, HttpStatusCode.TooManyRequests })
+        {
+            var handler = new ResetHttpHandler(feed, forecast) { Status = status };
+            using var client = new CodexResetClient(new HttpClient(handler), () => now);
+            var failed = client.ReadAsync().GetAwaiter().GetResult();
+            Check(failed.IsStale && failed.Error is not null && handler.Requests == 2,
+                $"reset HTTP {(int)status} does not trigger immediate retries");
+        }
+
+        var clock = now;
+        var persistent = new ResetHttpHandler(feed, forecast);
+        using (var client = new CodexResetClient(new HttpClient(persistent), () => clock))
+        {
+            var first = client.ReadAsync().GetAwaiter().GetResult();
+            persistent.Response = (route, _, _) => route == "feed"
+                ? throw new HttpRequestException("Still offline")
+                : Task.FromResult<HttpResponseMessage?>(null);
+            clock += TimeSpan.FromMinutes(2);
+            var stale = client.ReadAsync().GetAwaiter().GetResult();
+            Check(stale.IsStale && stale.Error is not null && stale.Events.SequenceEqual(first.Events) &&
+                  stale.FetchedAt == first.FetchedAt && persistent.FeedRequests == 4 && persistent.ForecastRequests == 2,
+                "exhausted reset retries stop after three attempts and preserve the last successful display");
+            persistent.Response = null;
+            var restored = client.ReadAsync(forceRefresh: true).GetAwaiter().GetResult();
+            Check(!restored.IsStale && restored.Error is null && restored.Events.Count == 1,
+                "the next successful manual refresh clears the reset connection failure");
+        }
+
+        clock = now;
+        var busy = new ResetHttpHandler(feed, forecast)
+        {
+            Response = (_, _, _) =>
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMinutes(5));
+                return Task.FromResult<HttpResponseMessage?>(response);
+            }
+        };
+        using (var client = new CodexResetClient(new HttpClient(busy), () => clock))
+        {
+            var failed = client.ReadAsync().GetAwaiter().GetResult();
+            clock += TimeSpan.FromMinutes(3);
+            client.ReadAsync(forceRefresh: true).GetAwaiter().GetResult();
+            Check(failed.IsStale && busy.Requests == 2,
+                "a service Retry-After pauses immediate retries and manual refresh until the server permits requests");
+        }
+
+        var concurrentCooldown = new ResetHttpHandler(feed, forecast)
+        {
+            Response = async (route, _, token) =>
+            {
+                if (route == "feed") throw new HttpRequestException("Connection interrupted");
+                await Task.Delay(50, token);
+                var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+                response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMinutes(5));
+                return response;
+            }
+        };
+        using (var client = new CodexResetClient(new HttpClient(concurrentCooldown), () => now))
+        {
+            var failed = client.ReadAsync().GetAwaiter().GetResult();
+            Check(failed.IsStale && concurrentCooldown.Requests == 2,
+                "a Retry-After arriving from the other reset endpoint also stops retries already in backoff");
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        var canceled = new ResetHttpHandler(feed, forecast)
+        {
+            Response = (route, _, _) =>
+            {
+                if (route != "feed") return Task.FromResult<HttpResponseMessage?>(null);
+                cancellation.CancelAfter(TimeSpan.FromMilliseconds(50));
+                throw new HttpRequestException("Transient disconnect before cancellation");
+            }
+        };
+        using (var client = new CodexResetClient(new HttpClient(canceled), () => now))
+        {
+            var propagated = false;
+            try { client.ReadAsync(cancellation.Token).GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { propagated = true; }
+            Check(propagated && canceled.FeedRequests == 1,
+                "canceling during reset retry backoff aborts promptly and propagates cancellation to the caller");
+        }
+    }
+
     private sealed class ResetHttpHandler(string feed, string forecast) : HttpMessageHandler
     {
         public int Requests;
+        public int FeedRequests;
+        public int ForecastRequests;
         public bool NoCredentials = true;
         public bool HasUserAgent = true;
         public bool RequestsChinese = true;
         public HttpStatusCode Status = HttpStatusCode.OK;
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public Func<string, int, CancellationToken, Task<HttpResponseMessage?>>? Response;
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref Requests);
             NoCredentials &= request.Headers.Authorization is null && !request.Headers.Contains("Cookie");
             HasUserAgent &= request.Headers.UserAgent.ToString().Contains("AIMaster/");
             RequestsChinese &= request.RequestUri!.Query == "?locale=zh";
+            var route = request.RequestUri!.AbsolutePath.EndsWith("feed") ? "feed" : "forecast";
+            var attempt = route == "feed" ? Interlocked.Increment(ref FeedRequests) : Interlocked.Increment(ref ForecastRequests);
+            if (Response is not null && await Response(route, attempt, cancellationToken) is { } scripted) return scripted;
             var response = new HttpResponseMessage(Status)
-                { Content = new StringContent(request.RequestUri!.AbsolutePath.EndsWith("feed") ? feed : forecast) };
+                { Content = new StringContent(route == "feed" ? feed : forecast) };
             if (Status == HttpStatusCode.TooManyRequests)
                 response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMinutes(10));
-            return Task.FromResult(response);
+            return response;
         }
     }
 }

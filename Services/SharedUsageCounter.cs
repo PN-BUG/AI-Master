@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Json;
 using AIMaster.Models;
 
@@ -19,7 +20,15 @@ internal sealed class SharedUsageCounter
 {
     internal sealed class State
     {
-        public int FormatVersion { get; set; } = 2;
+        private int _formatVersion = 2;
+        public int FormatVersion
+        {
+            get => _formatVersion;
+            set { _formatVersion = value; HasExplicitFormatVersion = true; }
+        }
+        // Internal properties are not JSON members. Track presence during the same streamed
+        // deserialize that loads the ledger, while retaining version 2 for newly created state.
+        internal bool HasExplicitFormatVersion { get; private set; }
         public DateTimeOffset? LegacyObservedThrough { get; set; }
         public Dictionary<string, SharedUsageSample> Samples { get; set; } = new();
         // Version 1 used a single daily baseline. Kept only to migrate existing local state.
@@ -45,10 +54,9 @@ internal sealed class SharedUsageCounter
         // A damaged state must not silently resurrect cleared usage or lose saved totals.
         if (File.Exists(path))
         {
-            var json = File.ReadAllText(path);
-            _state = JsonSerializer.Deserialize<State>(json) ?? throw new JsonException("Invalid shared usage counter state");
-            using var document = JsonDocument.Parse(json);
-            if (!document.RootElement.TryGetProperty(nameof(State.FormatVersion), out _))
+            using var stream = File.OpenRead(path);
+            _state = JsonSerializer.Deserialize<State>(stream) ?? throw new JsonException("Invalid shared usage counter state");
+            if (!_state.HasExplicitFormatVersion)
             {
                 _state.FormatVersion = 1;
                 _state.LegacyObservedThrough = File.GetLastWriteTimeUtc(path);
@@ -58,16 +66,118 @@ internal sealed class SharedUsageCounter
         if (_state.Samples is null || _state.Baseline is null || _state.PreviousLimits is null ||
             _state.ModeBaselines is null || _state.ModeUndoBaselines is null)
             throw new JsonException("Invalid shared usage counter state");
+        CompactLoadedStrings(_state);
+    }
+
+    private static void CompactLoadedStrings(State state)
+    {
+        // JSON repeats the session/model on every event and serializes clear offsets as
+        // separate dictionaries. Reuse their equal ordinal strings after loading; keep
+        // this set local so it cannot retain deleted history or grow with later refreshes.
+        var strings = new HashSet<string>(state.Samples.Count, StringComparer.Ordinal);
+        foreach (var key in state.Samples.Keys) strings.Add(key);
+        foreach (var (key, sample) in state.Samples)
+        {
+            if (sample is null) continue;
+            var session = CanonicalString(sample.SessionId, strings);
+            var model = sample.Model is { } value ? CanonicalString(value, strings) : null;
+            if (!ReferenceEquals(session, sample.SessionId) || !ReferenceEquals(model, sample.Model))
+                // Updating an existing dictionary value leaves its keys, comparer and
+                // enumeration order intact on the supported .NET 8 runtime.
+                state.Samples[key] = sample with { SessionId = session, Model = model };
+        }
+        CompactBaselineKeys(state.Baseline, strings);
+        if (state.UndoBaseline is { } undo) CompactBaselineKeys(undo, strings);
+        foreach (var baseline in state.ModeBaselines.Values) CompactBaselineKeys(baseline, strings);
+        foreach (var baseline in state.ModeUndoBaselines.Values) CompactBaselineKeys(baseline, strings);
+    }
+
+    private static string CanonicalString(string value, HashSet<string> strings)
+    {
+        // Preserve a malformed null value for the existing validation/usage behavior.
+        if (value is null) return value!;
+        if (strings.TryGetValue(value, out var canonical)) return canonical;
+        strings.Add(value);
+        return value;
+    }
+
+    private static void CompactBaselineKeys(Dictionary<string, long> baseline, HashSet<string> strings)
+    {
+        if (baseline is null || baseline.Count == 0) return;
+        var entries = ArrayPool<KeyValuePair<string, long>>.Shared.Rent(baseline.Count);
+        var count = 0;
+        var changed = false;
+        try
+        {
+            foreach (var (key, tokens) in baseline)
+            {
+                var canonical = CanonicalString(key, strings);
+                entries[count++] = new(canonical, tokens);
+                changed |= !ReferenceEquals(key, canonical);
+            }
+            if (!changed) return;
+            // Refill the same dictionary to retain its comparer and allocated storage.
+            // Copying in enumeration order also preserves the persisted property order.
+            baseline.Clear();
+            for (var index = 0; index < count; index++)
+                baseline.Add(entries[index].Key, entries[index].Value);
+        }
+        finally
+        {
+            // The shared scratch array must never keep ledger strings alive.
+            ArrayPool<KeyValuePair<string, long>>.Shared.Return(entries, clearArray: true);
+        }
     }
 
     public AiLocalUsageSummary Update(IEnumerable<SharedUsageSample> samples, string mode,
         DateTimeOffset now, IEnumerable<AiLimitWindow>? limits = null,
         SharedUsageCounterAction action = SharedUsageCounterAction.None)
     {
-        // Work on a copy so a failed atomic save cannot apply a clear only in memory.
-        var next = JsonSerializer.Deserialize<State>(JsonSerializer.Serialize(_state))!;
         mode = SharedUsageResetModes.Normalize(mode);
-        var incoming = samples.Where(item => item.Tokens > 0).GroupBy(item => item.Key)
+        // Materialize an input only once, but postpone grouping and copying the saved ledger
+        // until an observation can actually change it. Normal scans often supply no delta.
+        var incoming = new List<SharedUsageSample>(samples.TryGetNonEnumeratedCount(out var count) ? count : 0);
+        var changed = _state.FormatVersion < 2;
+        foreach (var sample in samples)
+        {
+            if (sample.Tokens <= 0) continue;
+            incoming.Add(sample);
+            if (!_state.Samples.TryGetValue(sample.Key, out var old) || sample.Tokens > old.Tokens)
+                changed = true;
+        }
+        Dictionary<string, AiLimitWindow>? incomingLimits = null;
+        foreach (var limit in limits ?? [])
+        {
+            if (!limit.LimitId.Equals("codex", StringComparison.OrdinalIgnoreCase) ||
+                limit.WindowDurationMinutes is not (>= 6 * 24 * 60 and <= 8 * 24 * 60) ||
+                limit.ResetsAt is null || !double.IsFinite(limit.UsedPercent) ||
+                limit.UsedPercent is not (>= 0 and <= 100)) continue;
+            var key = $"{limit.LimitId}:{limit.WindowDurationMinutes}:{limit.IsPrimary}";
+            (incomingLimits ??= new())[key] = limit;
+        }
+        if (incomingLimits is not null)
+            foreach (var (key, limit) in incomingLimits)
+                if (!_state.PreviousLimits.TryGetValue(key, out var old) || !SameLimit(old, limit)) changed = true;
+        if (!changed && !ActionChangesState(_state, mode, now, action))
+            return Summarize(mode, now);
+
+        // Copy every mutable ledger dictionary so a failed save cannot change live state.
+        // Samples and limit windows are immutable and can be shared without a JSON roundtrip.
+        var next = new State
+        {
+            FormatVersion = _state.FormatVersion,
+            LegacyObservedThrough = _state.LegacyObservedThrough,
+            Samples = new(_state.Samples, _state.Samples.Comparer),
+            Baseline = new(_state.Baseline, _state.Baseline.Comparer),
+            UndoBaseline = _state.UndoBaseline is { } undoBaseline
+                ? new(undoBaseline, undoBaseline.Comparer) : null,
+            ModeBaselines = _state.ModeBaselines.ToDictionary(item => item.Key,
+                item => new Dictionary<string, long>(item.Value, item.Value.Comparer), _state.ModeBaselines.Comparer),
+            ModeUndoBaselines = _state.ModeUndoBaselines.ToDictionary(item => item.Key,
+                item => new Dictionary<string, long>(item.Value, item.Value.Comparer), _state.ModeUndoBaselines.Comparer),
+            PreviousLimits = new(_state.PreviousLimits, _state.PreviousLimits.Comparer)
+        };
+        incoming = incoming.GroupBy(item => item.Key)
             .Select(group => group.MaxBy(item => item.Tokens)!).ToList();
         if (next.FormatVersion < 2) MigrateDailyState(next, incoming, _legacyMode);
         ReconcileDailyResiduals(next, incoming);
@@ -78,15 +188,8 @@ internal sealed class SharedUsageCounter
                 next.Samples[sample.Key] = sample;
         }
 
-        foreach (var limit in (limits ?? []).Where(item =>
-                     item.LimitId.Equals("codex", StringComparison.OrdinalIgnoreCase) &&
-                     item.WindowDurationMinutes is >= 6 * 24 * 60 and <= 8 * 24 * 60 &&
-                     item.ResetsAt is not null && double.IsFinite(item.UsedPercent) &&
-                     item.UsedPercent is >= 0 and <= 100))
-        {
-            var key = $"{limit.LimitId}:{limit.WindowDurationMinutes}:{limit.IsPrimary}";
-            next.PreviousLimits[key] = limit;
-        }
+        if (incomingLimits is not null)
+            foreach (var (key, limit) in incomingLimits) next.PreviousLimits[key] = limit;
 
         var baseline = next.ModeBaselines.GetValueOrDefault(mode) ?? new();
         if (action == SharedUsageCounterAction.Clear)
@@ -102,10 +205,36 @@ internal sealed class SharedUsageCounter
 
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var temporary = _path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(next));
+        using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            JsonSerializer.Serialize(stream, next);
         File.Move(temporary, _path, overwrite: true);
         _state = next;
         return Summarize(mode, now);
+    }
+
+    private static bool SameLimit(AiLimitWindow left, AiLimitWindow right) =>
+        left.LimitId == right.LimitId && left.Name == right.Name && left.UsedPercent == right.UsedPercent &&
+        left.ResetsAt == right.ResetsAt && left.WindowDurationMinutes == right.WindowDurationMinutes &&
+        left.IsPrimary == right.IsPrimary;
+
+    private static bool ActionChangesState(State state, string mode, DateTimeOffset now,
+        SharedUsageCounterAction action)
+    {
+        if (action == SharedUsageCounterAction.Restore) return state.ModeUndoBaselines.ContainsKey(mode);
+        if (action != SharedUsageCounterAction.Clear) return false;
+        if (!state.ModeBaselines.TryGetValue(mode, out var baseline) ||
+            !state.ModeUndoBaselines.TryGetValue(mode, out var undo) || baseline.Count != undo.Count)
+            return true;
+        foreach (var (key, tokens) in baseline)
+            if (!undo.TryGetValue(key, out var previous) || previous != tokens) return true;
+        var count = 0;
+        foreach (var (key, sample) in state.Samples)
+        {
+            if (sample.OccurredAt > now) continue;
+            count++;
+            if (!baseline.TryGetValue(key, out var cleared) || cleared != sample.Tokens) return true;
+        }
+        return count != baseline.Count;
     }
 
     private static void MigrateDailyState(State state, List<SharedUsageSample> incoming, string mode)
@@ -205,15 +334,50 @@ internal sealed class SharedUsageCounter
         string? error = mode == SharedUsageResetModes.AccountReset && start is null
             ? LocalizationService.L("无法确定上次重置时间，请先刷新官方周额度数据", "Last reset time is unknown; refresh official weekly quota data first")
             : null;
-        var baseline = _state.ModeBaselines.GetValueOrDefault(mode) ?? new();
-        if (mode == SharedUsageResetModes.AccountReset && start is { } boundary && boundary.LocalDateTime.TimeOfDay != TimeSpan.Zero &&
-            _state.Samples.Values.Any(item => item.Timestamp is null && item.Date == DateOnly.FromDateTime(boundary.LocalDateTime) &&
-                item.Tokens > baseline.GetValueOrDefault(item.Key)))
-            error = LocalizationService.L("重置当天存在缺少时间戳的记录，无法准确区分重置前后用量", "Some reset-day records have no timestamp; usage before and after the reset cannot be separated accurately");
-        var counted = _state.Samples.Values
-            .Where(item => item.OccurredAt <= now && (start is null || item.OccurredAt >= start))
-            .Select(item => new { Sample = item, Tokens = Math.Max(0, item.Tokens - baseline.GetValueOrDefault(item.Key)) })
-            .Where(item => item.Tokens > 0).ToList();
+        var baseline = _state.ModeBaselines.GetValueOrDefault(mode);
+        DateOnly? ambiguousDate = mode == SharedUsageResetModes.AccountReset && start is { } boundary &&
+            boundary.LocalDateTime.TimeOfDay != TimeSpan.Zero ? DateOnly.FromDateTime(boundary.LocalDateTime) : null;
+        HashSet<string>? sessions = null;
+        Dictionary<string, (long Tokens, int Order)>? modelTotals = null;
+        // An ambiguous record can appear last. Defer overflow validation until the complete
+        // scan confirms that totals are usable, matching the error-first summary behavior.
+        Int128 totalTokens = 0;
+        if (error is null)
+        {
+            foreach (var (key, sample) in _state.Samples)
+            {
+                var cleared = baseline?.GetValueOrDefault(key) ?? 0;
+                if (ambiguousDate is { } date && sample.Timestamp is null && sample.Date == date && sample.Tokens > cleared)
+                {
+                    error = LocalizationService.L("重置当天存在缺少时间戳的记录，无法准确区分重置前后用量", "Some reset-day records have no timestamp; usage before and after the reset cannot be separated accurately");
+                    break;
+                }
+                var occurredAt = sample.OccurredAt;
+                if (occurredAt > now || start is { } from && occurredAt < from) continue;
+                var tokens = Math.Max(0, sample.Tokens - cleared);
+                if (tokens == 0) continue;
+                totalTokens += tokens;
+                (sessions ??= new()).Add(sample.SessionId);
+                if (string.IsNullOrWhiteSpace(sample.Model)) continue;
+                modelTotals ??= new();
+                modelTotals[sample.Model] = modelTotals.TryGetValue(sample.Model, out var previous)
+                    ? (unchecked(previous.Tokens + tokens), previous.Order) : (tokens, modelTotals.Count);
+            }
+        }
+        var usableTotal = error is null ? checked((long)totalTokens) : 0;
+        string? mostUsedModel = null;
+        if (error is null && modelTotals is not null)
+        {
+            var mostTokens = -1L;
+            var firstOrder = int.MaxValue;
+            foreach (var (model, usage) in modelTotals)
+            {
+                if (usage.Tokens < mostTokens || usage.Tokens == mostTokens && usage.Order >= firstOrder) continue;
+                mostTokens = usage.Tokens;
+                firstOrder = usage.Order;
+                mostUsedModel = model;
+            }
+        }
         return new AiLocalUsageSummary
         {
             // Keep the existing server's common weekly transport period for group membership.
@@ -222,11 +386,9 @@ internal sealed class SharedUsageCounter
             PeriodEnd = sunday,
             CountedFrom = start,
             Error = error,
-            TotalTokens = error is null ? counted.Sum(item => item.Tokens) : 0,
-            SessionCount = error is null ? counted.Select(item => item.Sample.SessionId).Distinct().Count() : 0,
-            MostUsedModel = (error is null ? counted : []).Where(item => !string.IsNullOrWhiteSpace(item.Sample.Model))
-                .GroupBy(item => item.Sample.Model).OrderByDescending(group => group.Sum(item => item.Tokens))
-                .Select(group => group.Key).FirstOrDefault()
+            TotalTokens = usableTotal,
+            SessionCount = error is null ? sessions?.Count ?? 0 : 0,
+            MostUsedModel = mostUsedModel
         };
     }
 }

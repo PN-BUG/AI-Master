@@ -40,6 +40,26 @@ dotnet run --project .\AIMaster.csproj
 dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release
 ```
 
+内存定向回归使用 `--memory-tests`，覆盖大记录、分段追加、截断重写、未变化文件的扫描分配，
+以及共享账本更新的分配和保存失败时的状态隔离。
+需要测量真实日志时，可显式传入 `--memory-profile --sessions-root <sessions目录>`；它只读日志，
+输出扫描分配、行缓冲容量和进程内存指标，不输出对话内容。对比应使用相同日志和构建配置；
+短时重放结果不能代替长期运行观测。
+
+常驻进程启用 `System.GC.ConserveMemory=5`，让启动日志扫描后产生的大对象碎片更积极地回收。
+这个进程级配置可能增加回收频率和停顿时间；调整时同时检查内存、CPU 和任务刷新延迟。
+配置说明见 [.NET GC 文档](https://learn.microsoft.com/dotnet/core/runtime-config/garbage-collector#conserve-memory)。
+
+生产主窗口、悬浮窗及文件监视器共用一个 `AiManagerRuntime`，由应用退出统一释放；窗口设置仍由各自服务维护。
+日志采用流式字段投影，只保留统计、任务元数据、输入请求和可读用户文本，跳过图片、工具输出及无关字段。
+超长用户文本保留前后各 16384 个字符，并识别最后一个 `## My request:`；截断处显示省略号。
+被动监控不请求完整 turn 历史；显式暂停操作仍可查询当前 turn 标识。
+
+每类详细解析游标最多保留 128 个，使用中的游标不会淘汰；闲置 15 分钟及已删除文件会定期清理。
+近期统计另存紧凑的日期、小时、项目、模型汇总，按文件长度、修改时间和统计窗口失效，防止有限缓存导致旧文件反复重读。
+共享计数只提交变化文件的观测，保存成功后才提交文件指纹；账本无变化时不复制或重写，但继续按当前时间计算统计和执行网络同步。
+完整定向回归使用 `--memory-v2-tests`。
+
 重新生成 README 和用户手册使用的中英文匿名演示截图：
 
 ```powershell
@@ -69,6 +89,8 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release -- 
 
 输出固定在 `release/AIMaster-<runtime>-<mode>`，重复构建只清理这个经过校验的目标目录。
 
+单文件版默认关闭程序集压缩，避免启动后将压缩的 .NET/WPF 程序集解压并长期留在进程私有内存中。EXE 会变大，分发 ZIP 仍会压缩文件；独立版仍携带运行时。
+
 `build.ps1` 只生成发布包；`package-all.cmd` 同时生成两个发布包，并原地更新、重启当前运行副本。只更新当前副本时使用 `.\update-running.ps1`。两种更新入口都以运行进程的 EXE 所在目录为准，复用事务更新器。更新约定、回滚和测试见 [UPDATES.md](UPDATES.md)。发布时同时上传生成的 `.zip.sha256` 校验附件。
 
 一键同时生成 Windows x64 完整版、轻量版及两个 ZIP：
@@ -84,14 +106,28 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release -- 
 ```text
 WPF 窗口
   -> AiManagerService
-      -> CodexAppServerClient -> codex app-server（额度、模型、在线任务）
-      -> 本地 JSONL 扫描       -> %USERPROFILE%\.codex\sessions（任务降级数据）
+      -> AiManagerRuntime（应用级连接及解析缓存）
+          -> CodexAppServerClient -> codex app-server（额度、模型、在线任务）
+          -> CodexDesktopIpcClient -> 已有 codex-ipc 桌面只读跟随（真实待审批请求）
+          -> 本地 JSONL 流式投影 -> %USERPROFILE%\.codex\sessions（统计、任务元数据及有限的用户输入）
       -> SharedUsageClient     -> https://www.woliux.com/api/v1/aimaster/sync（可选设备周汇总）
   -> AiManagerSnapshot / AiFloatingSnapshot
   -> 主面板与悬浮窗渲染
 ```
 
 App Server 请求使用独立超时；任务、模型或历史用量等可选请求失败时，不应阻止本地任务降级和已有额度信息显示。
+
+桌面审批来源使用 Windows `codex-ipc` 的内部跟随协议：初始化版本 0、所有者发现/跟随版本 1、状态流版本 11。只发送初始化、所有者发现和自身跟随状态；拒绝处理请求，不注册所有者、不启动轮次、不回答审批。当前实现依据 Codex Desktop 26.1013.4894.0 的本机协议核实，不能视为公开稳定 API。
+
+`CodexDesktopTaskState` 只保留最多 32 个候选任务的修订号、请求数组位置及编号/类型、运行状态；桌面快照可能包含完整对话，但对应 JSON 在同步解析后立即释放，不保存命令或工具正文。只有 `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/permissions/requestApproval` 算作确凿审批；自动审查条目、脚本内容和选项文字不作为证据。以 `item/tool/requestUserInput` 表达且缺少用途区分字段的连接器确认保留输入类别。生命周期参考[官方审批协议](https://learn.chatgpt.com/docs/app-server#approvals)。
+
+跟随者校验本机来源、发现的所有者和协议版本，按快照修订号应用 Immer 补丁；缺补丁会清除观测并重新请求快照。所有者或管道断开时恢复源执行状态。App 的文件监视器收到状态变化后排队本地刷新，两窗继续使用同一任务 feed；桌面的粗粒度运行标记不能清除本地已知的未答异步问题。
+
+定向离线回归：`--desktop-ipc-tests`、`--desktop-approval-state-tests`、`--desktop-approval-integration-tests`。这些检查也包含在默认 smoke 中。显式只读诊断可用 `--desktop-ipc-probe --thread-id <GUID> --seconds 5`，只输出结构和状态元数据；连接成功不代表已经验证真实人工审批。`--approval-tasks --output <目录>` 另外生成中英文、明暗主题及两种字号的匿名渲染截图。
+
+后台监视、主面板、悬浮窗共用一个生产运行时，窗口设置仍由各自服务持有。被动任务查询不下载完整对话轮次；日志投影跳过图片和工具正文，显示文本保留有界的前后片段及最后一段用户请求。详细解析游标每类最多保留 128 个，空闲或删除文件会释放缓存；近期统计按文件保留紧凑的日期、小时、项目和模型汇总，避免游标淘汰后反复重放未变化的日志。共享统计账本仅在数据、有效额度或清空/恢复状态变化时复制和保存。
+
+服务器任务名和预览也限制为最多 32,768 个 UTF-16 字符，超长文本显示省略号；预览保留最后的实际请求，截断避免拆开代理对。账本加载后使用一次性的本地集合合并相同的会话、模型及基线键字符串，不使用全局字符串驻留，不改写历史数据或撤销状态。
 
 重置信号由 `CodexResetClient` 读取 `https://codex-reset.com/api/feed` 和 `/api/forecast`，使用独立的两分钟计时器，不依赖 App Server 连接。只读取公开数据并发送标识项目的 User-Agent，不携带 Codex 登录信息。遵守 `Retry-After`；数据过期或请求失败时保留上次显示并停止信号通知。`CodexResetTracker` 将已见事件原子保存到设置目录的 `reset-signal-state.json`，首次成功读取静默建立基线。`AccountResetTracker` 单独比较官方额度快照，公共公告不得直接改动额度。
 

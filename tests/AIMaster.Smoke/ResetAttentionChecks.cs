@@ -79,6 +79,10 @@ internal static partial class Program
             main.RenderResetSignals(Snapshot(preview));
             Check(sideButton.Visibility == Visibility.Visible && floatButton.Visibility == Visibility.Visible,
                 "a new signal is visible in both windows");
+            Check(floating.FindName("ResetAttentionSourceButton") is Button
+                  { Visibility: Visibility.Visible, Tag: "https://codex-reset.com/" } sourceButton &&
+                  Equals(sourceButton.Content, language == LocalizationService.Chinese ? "查看原文" : "View source"),
+                "floating reset previews offer their own localized source action");
             Check(((TextBlock)main.FindName("ResetAttentionDetail")).Text == attention.TimeText &&
                   ((TextBlock)floating.FindName("ResetAttentionTime")).Text == attention.TimeText &&
                   attention.Detail.Contains("UTC"), "both reminder surfaces show the converted local deadline");
@@ -89,11 +93,17 @@ internal static partial class Program
             main.RenderResetSignals(Snapshot(preview));
             Check(sideButton.Visibility == Visibility.Collapsed, "polling does not restore an acknowledged signal");
             main.RenderResetSignals(Snapshot(announced));
+            Check(floating.FindName("ResetAttentionSourceButton") is Button
+                  { Visibility: Visibility.Visible, Tag: "https://codex-reset.com/" },
+                "the floating source action also follows confirmed announcements");
             CaptureState("announced");
             floatButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Check(sideButton.Visibility == Visibility.Collapsed && floatButton.Visibility == Visibility.Collapsed,
                 "floating click also hides both reminders");
             attention.ObserveRecovery(now.AddSeconds(-20), now);
+            Check(floating.FindName("ResetAttentionSourceButton") is Button
+                  { Visibility: Visibility.Collapsed, Tag: null },
+                "account recovery clears the previous external source action");
             Check(((TextBlock)main.FindName("ResetAttentionTitle")).Text.Contains(
                 LocalizationService.IsEnglish ? "recovered" : "已恢复"), "official recovery has its own title");
 
@@ -175,7 +185,7 @@ internal static partial class Program
         var posted = DateTimeOffset.Parse("2026-10-22T06:55:54Z");
         var item = new CodexResetEvent("time", "signal", posted,
             "Lands tomorrow before 10am PST.", "https://codex-reset.com/");
-        var china = TimeZoneInfo.CreateCustomTimeZone("test-China", TimeSpan.FromHours(8), "test-China", "test-China");
+        var china = TimeZoneInfo.FindSystemTimeZoneById("China Standard Time");
         Check(ResetScheduleFormatter.TryGetTime(item.Summary, posted, out var at, out var before) && before &&
               TimeZoneInfo.ConvertTime(at, china) == DateTimeOffset.Parse("2026-10-23T02:00:00+08:00"),
             "tomorrow uses the source calendar day and literal PST converts across midnight to UTC+8");
@@ -198,7 +208,8 @@ internal static partial class Program
         {
             LocalizationService.Initialize(language);
             var text = ResetScheduleFormatter.Format(item, localZone: china);
-            Check(text.Contains("10-23 02:00") && text.Contains("UTC+08:00") &&
+            Check(text.Contains(LocalizationService.IsEnglish ? "10-23 02:00" : "10月23日 02:00之前") && text.Contains("UTC+08:00") &&
+                  (LocalizationService.IsEnglish || text.Contains("北京时间") && text.Contains("这是预告时间")) &&
                   text.Contains(LocalizationService.IsEnglish ? "before" : "前"),
                 "converted deadline labels are localized and include the destination UTC offset");
             Check(ResetScheduleFormatter.Format(item with { Kind = "announcement" }, localZone: china) == "",
@@ -234,7 +245,7 @@ internal static partial class Program
             if (expected == "reply")
                 Check(ResetScheduleFormatter.Format(snapshot.Signal!, localZone:
                     TimeZoneInfo.CreateCustomTimeZone("test-China", TimeSpan.FromHours(8), "test-China", "test-China"))
-                    .Contains("10-23 02:00"),
+                    .Contains(LocalizationService.IsEnglish ? "10-23 02:00" : "10月23日 02:00之前"),
                     "the newer reply retains its converted local deadline when a forecast parent exists");
         }
     }

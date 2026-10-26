@@ -683,6 +683,42 @@
                                         <ControlTemplate.Triggers>
                                             <Trigger Property="IsSelected" Value="True"><Setter TargetName="TaskSurface" Property="BorderBrush" Value="{DynamicResource Signal}"/></Trigger>
                                             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TaskSurface" Property="Background" Value="{DynamicResource PanelRaised}"/></Trigger>
+                                            <DataTrigger Binding="{Binding Status}" Value="waitingOnApproval">
+                                                <Setter TargetName="TaskSurface" Property="Background" Value="{DynamicResource WarningSoft}"/>
+                                                <Setter TargetName="TaskSurface" Property="BorderBrush" Value="{DynamicResource WarningBorder}"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding Status}" Value="waitingOnUserInput">
+                                                <Setter TargetName="TaskSurface" Property="Background" Value="{DynamicResource WarningSoft}"/>
+                                                <Setter TargetName="TaskSurface" Property="BorderBrush" Value="{DynamicResource WarningBorder}"/>
+                                            </DataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Status}" Value="waitingOnApproval"/>
+                                                    <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter TargetName="TaskSurface" Property="BorderBrush" Value="{DynamicResource Warning}"/>
+                                            </MultiDataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Status}" Value="waitingOnApproval"/>
+                                                    <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource Self}}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter TargetName="TaskSurface" Property="BorderBrush" Value="{DynamicResource Warning}"/>
+                                            </MultiDataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Status}" Value="waitingOnUserInput"/>
+                                                    <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter TargetName="TaskSurface" Property="BorderBrush" Value="{DynamicResource Warning}"/>
+                                            </MultiDataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Status}" Value="waitingOnUserInput"/>
+                                                    <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource Self}}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter TargetName="TaskSurface" Property="BorderBrush" Value="{DynamicResource Warning}"/>
+                                            </MultiDataTrigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate></Setter.Value></Setter>
                                 </Style>
@@ -693,10 +729,22 @@
                                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <TextBlock Grid.ColumnSpan="2" Text="{Binding DisplayTitle}" Foreground="{DynamicResource Ink}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="44" LineHeight="22" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                                        <StackPanel Grid.Row="1" Orientation="Horizontal"><Ellipse Width="5" Height="5" Fill="{DynamicResource Signal}" Margin="0,0,7,0" VerticalAlignment="Center"/>
-                                            <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource Signal}" FontSize="11" Margin="0,0,12,0"/></StackPanel>
+                                        <StackPanel Grid.Row="1" Orientation="Horizontal"><Ellipse x:Name="TaskStatusDot" Width="5" Height="5" Fill="{DynamicResource Signal}" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                                            <TextBlock x:Name="TaskStatusLabel" Text="{Binding StatusText}" Foreground="{DynamicResource Signal}" FontSize="11" Margin="0,0,12,0"/></StackPanel>
                                         <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding UpdatedText}" Foreground="{DynamicResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
                                     </Grid>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding Status}" Value="waitingOnApproval">
+                                            <Setter TargetName="TaskStatusDot" Property="Fill" Value="{DynamicResource WarningText}"/>
+                                            <Setter TargetName="TaskStatusLabel" Property="Foreground" Value="{DynamicResource WarningText}"/>
+                                            <Setter TargetName="TaskStatusLabel" Property="FontWeight" Value="Bold"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Status}" Value="waitingOnUserInput">
+                                            <Setter TargetName="TaskStatusDot" Property="Fill" Value="{DynamicResource WarningText}"/>
+                                            <Setter TargetName="TaskStatusLabel" Property="Foreground" Value="{DynamicResource WarningText}"/>
+                                            <Setter TargetName="TaskStatusLabel" Property="FontWeight" Value="Bold"/>
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>

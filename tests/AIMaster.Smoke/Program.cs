@@ -18,6 +18,78 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (TryRunConnectionClientServer(args)) return 0;
+        if (args.Contains("--desktop-ipc-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyDesktopIpcProbe(args);
+            return 0;
+        }
+        if (args.Contains("--desktop-approval-integration-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyDesktopApprovalIntegrationChecks();
+            return 0;
+        }
+        if (args.Contains("--desktop-approval-state-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyDesktopApprovalStateChecks();
+            return 0;
+        }
+        if (args.Contains("--desktop-ipc-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyDesktopIpcChecks();
+            return 0;
+        }
+        if (args.Contains("--memory-v2-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyRolloutProjectionChecks();
+            VerifySharedRuntimeChecks();
+            VerifyIncrementalSharedUsageChecks();
+            VerifyMonitoringMemoryChecks();
+            VerifyMemoryUsageChecks();
+            VerifySharedUsageMemoryChecks();
+            return 0;
+        }
+        if (args.Contains("--monitoring-memory-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyMonitoringMemoryChecks();
+            return 0;
+        }
+        if (args.Contains("--incremental-ledger-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyIncrementalSharedUsageChecks();
+            return 0;
+        }
+        if (args.Contains("--shared-runtime-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifySharedRuntimeChecks();
+            return 0;
+        }
+        if (args.Contains("--rollout-projection-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyRolloutProjectionChecks();
+            return 0;
+        }
+        if (args.Contains("--memory-profile", StringComparer.OrdinalIgnoreCase))
+        {
+            ProfileLocalMemoryUsage(args);
+            return 0;
+        }
+        if (args.Contains("--memory-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyMemoryUsageChecks();
+            VerifySharedUsageMemoryChecks();
+            return 0;
+        }
+        if (args.Contains("--connection-refresh-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyConnectionRefreshChecks();
+            return 0;
+        }
+        if (args.Contains("--connection-client-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyConnectionClientChecks();
+            return 0;
+        }
         if (args.Contains("--account-reset-tests", StringComparer.OrdinalIgnoreCase))
         {
             VerifyAccountResetRecovery();
@@ -26,6 +98,7 @@ internal static partial class Program
         if (args.Contains("--shared-usage-tests", StringComparer.OrdinalIgnoreCase))
         {
             VerifySharedUsageCounter();
+            VerifySharedUsageMemoryChecks();
             return 0;
         }
         if (args.Contains("--reset-tests", StringComparer.OrdinalIgnoreCase))
@@ -33,9 +106,48 @@ internal static partial class Program
             VerifyResetSignals(args);
             return 0;
         }
-        var app = new App();
-        app.InitializeComponent();
+        App app = args.Contains("--task-live-tests", StringComparer.OrdinalIgnoreCase)
+            ? new SharedUsageTestApp() : new App();
+        if (args.Contains("--task-live-tests", StringComparer.OrdinalIgnoreCase))
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        else app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--task-live-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyRolloutActivityIndex();
+            VerifyTaskMonitorTraceAsync().GetAwaiter().GetResult();
+            VerifyTaskFileChangeMonitor();
+            VerifyTaskFeedFreshness();
+            VerifyImmediateTaskMonitoring();
+            app.ExitApplication();
+            return 0;
+        }
+        if (args.Contains("--recorded-input-replay", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyRecordedInputReplay(args);
+            app.ExitApplication();
+            return 0;
+        }
+        if (args.Contains("--task-consistency-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyTaskConsistency();
+            VerifyTaskFeedWindows();
+            app.ExitApplication();
+            return 0;
+        }
+        if (args.Contains("--rollout-input-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyRolloutInputStates();
+            app.ExitApplication();
+            return 0;
+        }
+        if (args.Contains("--approval-tasks", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyApprovalTasks();
+            VerifyApprovalTaskVisuals(args);
+            app.ExitApplication();
+            return 0;
+        }
         if (args.Contains("--reset-attention", StringComparer.OrdinalIgnoreCase))
         {
             VerifyResetAttention(args);
@@ -231,12 +343,25 @@ internal static partial class Program
                   new Rect(0, 0, 1920, 1080), 180, 98) is null,
             "floating placement survives settings serialization and stays visible when monitors change");
         VerifyTaskOrdering();
+        VerifyApprovalTasks();
+        VerifyDesktopIpcChecks();
+        VerifyDesktopApprovalStateChecks();
+        VerifyDesktopApprovalIntegrationChecks();
+        VerifyRolloutInputStates();
+        VerifyTaskConsistency();
+        VerifyTaskFeedWindows();
         Check(Math.Abs(FloatingFontScales.Normalize(9) - 1.5) < 0.001,
             "floating font scale is clamped to its supported range");
         VerifyWeeklyRemainingForecast();
         VerifyLocalForecast();
         VerifyLocalProjectUsage();
+        VerifyMemoryUsageChecks();
+        VerifySharedUsageMemoryChecks();
         VerifyProjectWeeklyQuotaShare();
+        VerifyRolloutProjectionChecks();
+        VerifySharedRuntimeChecks();
+        VerifyIncrementalSharedUsageChecks();
+        VerifyMonitoringMemoryChecks();
         Check(TaskNameSources.Normalize(TaskNameSources.LatestUserMessage) == TaskNameSources.LatestUserMessage,
             "latest sent message is a supported task-name source");
         VerifyLocalTaskNameSources();

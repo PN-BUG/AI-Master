@@ -83,6 +83,9 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="AttentionTaskHoverRow" TargetType="Grid" BasedOn="{StaticResource TaskHoverRow}">
+            <Setter Property="Background" Value="{DynamicResource WarningSoft}"/>
+        </Style>
     </Window.Resources>
 
     <Grid Background="Transparent">
@@ -114,13 +117,17 @@
                     </StackPanel>
                 </Grid>
 
-                <Button x:Name="ResetAttentionButton" Grid.Row="1" Visibility="Collapsed" Cursor="Hand"
+                <Border x:Name="ResetAttentionPanel" Grid.Row="1" Visibility="Collapsed"
+                        Background="{DynamicResource WarningSoft}" BorderBrush="{DynamicResource Warning}"
+                        BorderThickness="1" CornerRadius="5">
+                <StackPanel>
+                <Button x:Name="ResetAttentionButton" Visibility="Collapsed" Cursor="Hand"
                         Click="DismissResetAttention_Click" Background="{DynamicResource WarningSoft}"
                         BorderBrush="{DynamicResource Warning}" Foreground="{DynamicResource WarningText}">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
                             <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                    BorderThickness="1" CornerRadius="5" Padding="5,2">
+                                    BorderThickness="0" CornerRadius="5" Padding="5,2">
                                 <ContentPresenter VerticalAlignment="Center"/>
                             </Border>
                         </ControlTemplate>
@@ -132,13 +139,34 @@
                         <TextBlock x:Name="ResetAttentionAction" FontSize="{DynamicResource FloatFontSmall}" Margin="0,2,0,0"/>
                     </StackPanel>
                 </Button>
+                <Button x:Name="ResetAttentionSourceButton" Content="查看原文" Visibility="Collapsed"
+                        Click="ResetAttentionSource_Click" Cursor="Hand" Margin="5,0,5,4" Padding="4,1"
+                        FontSize="{DynamicResource FloatFontSmall}" Foreground="{DynamicResource WarningText}"
+                        Background="Transparent" BorderBrush="{DynamicResource Warning}">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="SourceSurface" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                    CornerRadius="3" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="SourceSurface" Property="Background" Value="{DynamicResource ButtonHover}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+                </StackPanel>
+                </Border>
 
                 <StackPanel x:Name="TaskRowsPanel" Grid.Row="2" Margin="0,0,2,1">
                     <Grid x:Name="PrimaryTaskRow" Height="27"
                           MouseLeftButtonDown="TaskRow_MouseLeftButtonDown">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Border x:Name="TaskStatusBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                Background="{DynamicResource SignalSoft}" CornerRadius="5" Padding="4,1">
+                                Background="{DynamicResource SignalSoft}" BorderBrush="Transparent" BorderThickness="1" CornerRadius="5" Padding="4,1">
                             <TextBlock x:Name="TaskStatusText" Text="正在连接" Foreground="{DynamicResource FloatSignal}"
                                        FontSize="{DynamicResource FloatFontSmall}" FontWeight="SemiBold"/>
                         </Border>

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
@@ -14,6 +15,7 @@ internal sealed class CodexResetClient : IDisposable
     private readonly Func<DateTimeOffset> _clock;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DateTimeOffset _nextPoll;
+    private DateTimeOffset _retryAfter;
     private CodexResetSnapshot? _last;
 
     public CodexResetClient(HttpClient? http = null, Func<DateTimeOffset>? clock = null)
@@ -22,17 +24,18 @@ internal sealed class CodexResetClient : IDisposable
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
     }
 
-    public async Task<CodexResetSnapshot> ReadAsync(CancellationToken cancellationToken = default)
+    public async Task<CodexResetSnapshot> ReadAsync(CancellationToken cancellationToken = default,
+        bool forceRefresh = false)
     {
         await _gate.WaitAsync(cancellationToken);
         try
         {
             var now = _clock();
-            if (now < _nextPoll && _last is not null) return _last;
+            if (_last is not null && (now < _retryAfter || (!forceRefresh && now < _nextPoll))) return _last;
             _nextPoll = now + PollInterval;
             try
             {
-                // Two distinct endpoints, each requested no more than once per two minutes.
+                // Automatic polls are cached for two minutes; manual refresh still respects Retry-After.
                 var feedTask = ReadDocumentAsync("feed", cancellationToken);
                 var forecastTask = ReadDocumentAsync("forecast", cancellationToken);
                 var payloads = await Task.WhenAll(feedTask, forecastTask);
@@ -41,7 +44,7 @@ internal sealed class CodexResetClient : IDisposable
                 _last = Parse(feed.RootElement, forecast.RootElement, now);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException)
+            catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or OperationCanceledException)
             {
                 _last = _last is null
                     ? new CodexResetSnapshot([], null, null, now, now, true, ex.Message)
@@ -54,20 +57,48 @@ internal sealed class CodexResetClient : IDisposable
 
     private async Task<string> ReadDocumentAsync(string route, CancellationToken cancellationToken)
     {
-        // The localized response keeps the English summary alongside localized_summary.
-        // Cache both languages so switching the UI does not wait for another poll.
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"https://codex-reset.com/api/{route}?locale=zh");
-        request.Headers.UserAgent.ParseAdd("AIMaster/1.3.2 (+https://github.com/PN-BUG/AI-Master)");
-        using var response = await _http.SendAsync(request, cancellationToken);
-        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        for (var attempt = 0; ; attempt++)
         {
-            var retry = response.Headers.RetryAfter;
-            var retryAt = retry?.Date ?? (_clock() + (retry?.Delta ?? PollInterval));
-            lock (_gate) { if (retryAt > _nextPoll) _nextPoll = retryAt; }
+            try
+            {
+                // The localized response keeps the English summary alongside localized_summary.
+                // Cache both languages so switching the UI does not wait for another poll.
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"https://codex-reset.com/api/{route}?locale=zh");
+                request.Headers.UserAgent.ParseAdd("AIMaster/1.3.2 (+https://github.com/PN-BUG/AI-Master)");
+                using var response = await _http.SendAsync(request, cancellationToken);
+                if (!response.IsSuccessStatusCode &&
+                    (response.StatusCode == HttpStatusCode.TooManyRequests || response.Headers.RetryAfter is not null))
+                {
+                    var retry = response.Headers.RetryAfter;
+                    var retryAt = retry?.Date ?? (_clock() + (retry?.Delta ?? PollInterval));
+                    lock (_gate) { if (retryAt > _retryAfter) _retryAfter = retryAt; }
+                }
+                response.EnsureSuccessStatusCode();
+                return await response.Content.ReadAsStringAsync(cancellationToken);
+            }
+            catch (Exception ex) when (attempt < 2 && !cancellationToken.IsCancellationRequested &&
+                                       IsTransient(ex) && !IsServerCoolingDown())
+            {
+                // A short disconnect should not invalidate the card; give each public GET
+                // two bounded retries, while leaving authentication and server cooldowns alone.
+                await Task.Delay(TimeSpan.FromMilliseconds(300 * (attempt + 1)), cancellationToken);
+                if (IsServerCoolingDown()) throw;
+            }
         }
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStringAsync(cancellationToken);
     }
+
+    private bool IsServerCoolingDown()
+    {
+        lock (_gate) { return _clock() < _retryAfter; }
+    }
+
+    private static bool IsTransient(Exception exception) => exception switch
+    {
+        HttpRequestException { StatusCode: { } status } =>
+            status == HttpStatusCode.RequestTimeout || (int)status is >= 500 and <= 599,
+        HttpRequestException or IOException or OperationCanceledException => true,
+        _ => false
+    };
 
     internal static CodexResetSnapshot Parse(JsonElement feed, JsonElement forecast, DateTimeOffset now)
     {

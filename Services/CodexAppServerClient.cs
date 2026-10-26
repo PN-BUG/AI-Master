@@ -11,67 +11,121 @@ namespace AIMaster.Services;
 /// </summary>
 internal sealed class CodexAppServerClient : IAsyncDisposable
 {
-    private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pending = new();
+    private sealed record PendingRequest(long ConnectionId, TaskCompletionSource<JsonElement> Completion);
+
+    private sealed class AppServerRequestException(string message, long? code) : InvalidOperationException(message)
+    {
+        public long? Code { get; } = code;
+    }
+
+    private readonly ConcurrentDictionary<long, PendingRequest> _pending = new();
+    private readonly SemaphoreSlim _connectLock = new(1, 1);
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private Process? _process;
     private StreamWriter? _input;
     private Task? _readerTask;
     private long _requestId;
+    private long _connectionId;
+    private long _initializedConnectionId = -1;
+    private int _disposed;
 
-    public bool IsConnected => _process is { HasExited: false } && _input != null;
+    public bool IsConnected => Volatile.Read(ref _initializedConnectionId) == Volatile.Read(ref _connectionId) &&
+                               IsTransportAvailable;
 
-    public async Task ConnectAsync(CancellationToken cancellationToken = default)
+    private bool IsTransportAvailable
     {
-        if (IsConnected) return;
+        get
+        {
+            try
+            {
+                return !_lifetime.IsCancellationRequested && _process is { HasExited: false } &&
+                       _input?.BaseStream.CanWrite == true && _readerTask is { IsCompleted: false };
+            }
+            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { return false; }
+        }
+    }
 
-        var executable = ResolveCodexExecutable();
-        if (executable == null)
-            throw new FileNotFoundException(
-                "未找到 Codex CLI。已检查 CODEX_EXECUTABLE、OpenAI Codex 桌面安装目录、PATH、npm 和常用用户安装目录。");
-        var isCommandShim = Path.GetExtension(executable).Equals(".cmd", StringComparison.OrdinalIgnoreCase);
-        var info = new ProcessStartInfo
-        {
-            FileName = isCommandShim ? Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe" : executable,
-            Arguments = isCommandShim
-                ? $"/d /s /c \"\"{executable}\" app-server --listen stdio://\""
-                : "app-server --listen stdio://",
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        _process = Process.Start(info) ?? throw new InvalidOperationException("无法启动 codex app-server。");
-        _process.ErrorDataReceived += (_, args) =>
-        {
-            if (!string.IsNullOrWhiteSpace(args.Data)) Debug.WriteLine($"[CodexAppServer] {args.Data}");
-        };
-        _process.BeginErrorReadLine();
-        _input = _process.StandardInput;
-        _readerTask = ReadLoopAsync(_process.StandardOutput, _lifetime.Token);
+    public async Task ConnectAsync(CancellationToken cancellationToken = default) =>
+        await GetConnectedTransportAsync(cancellationToken);
+
+    private async Task<(long ConnectionId, StreamWriter Input)> GetConnectedTransportAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        await _connectLock.WaitAsync(linked.Token);
         try
         {
-            await RequestAsync("initialize", new JsonObject
+            if (IsConnected) return (Volatile.Read(ref _connectionId), _input!);
+            CloseTransport();
+            linked.Token.ThrowIfCancellationRequested();
+            var executable = ResolveCodexExecutable();
+            if (executable == null)
+                throw new FileNotFoundException(
+                    "未找到 Codex CLI。已检查 CODEX_EXECUTABLE、OpenAI Codex 桌面安装目录、PATH、npm 和常用用户安装目录。");
+            var isCommandShim = Path.GetExtension(executable).Equals(".cmd", StringComparison.OrdinalIgnoreCase);
+            var info = new ProcessStartInfo
             {
-                ["clientInfo"] = new JsonObject
+                FileName = isCommandShim ? Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe" : executable,
+                Arguments = isCommandShim
+                    ? $"/d /s /c \"\"{executable}\" app-server --listen stdio://\""
+                    : "app-server --listen stdio://",
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            _process = Process.Start(info) ?? throw new InvalidOperationException("无法启动 codex app-server。");
+            _process.ErrorDataReceived += (_, args) =>
+            {
+                if (!string.IsNullOrWhiteSpace(args.Data)) Debug.WriteLine("[CodexAppServer] Server diagnostic received.");
+            };
+            _process.BeginErrorReadLine();
+            _input = _process.StandardInput;
+            var connectionId = Volatile.Read(ref _connectionId);
+            _readerTask = ReadLoopAsync(_process.StandardOutput, connectionId, _lifetime.Token);
+            try
+            {
+                await SendRequestAsync("initialize", new JsonObject
                 {
-                    ["name"] = "software_toolkit_ai_manager",
-                    ["title"] = "AIMaster",
-                    ["version"] = "1.0.0"
-                }
-            }, cancellationToken, TimeSpan.FromSeconds(60));
-            await NotifyAsync("initialized", new JsonObject(), cancellationToken);
+                    ["clientInfo"] = new JsonObject
+                    {
+                        ["name"] = "software_toolkit_ai_manager",
+                        ["title"] = "AIMaster",
+                        ["version"] = "1.0.0"
+                    }
+                }, connectionId, _input, linked.Token, TimeSpan.FromSeconds(60), requireInitialized: false);
+                await WriteAsync(new JsonObject { ["method"] = "initialized", ["params"] = new JsonObject() },
+                    connectionId, _input, linked.Token, requireInitialized: false);
+                if (!IsTransportAvailable) throw new IOException("Codex App Server 连接已关闭。");
+                Volatile.Write(ref _initializedConnectionId, connectionId);
+                return (connectionId, _input);
+            }
+            catch
+            {
+                CloseTransport();
+                throw;
+            }
         }
-        catch
+        finally { _connectLock.Release(); }
+    }
+
+    private void CloseTransport()
+    {
+        var connectionId = Interlocked.Increment(ref _connectionId) - 1;
+        Interlocked.Exchange(ref _initializedConnectionId, -1);
+        var input = _input;
+        var process = _process;
+        _input = null;
+        _process = null;
+        _readerTask = null;
+        FailPendingRequests(connectionId, new IOException("Codex App Server 连接已关闭。"));
+        try { input?.Close(); } catch { }
+        if (process != null)
         {
-            try { _input.Close(); } catch { }
-            if (_process is { HasExited: false })
-                try { _process.Kill(entireProcessTree: true); } catch { }
-            _process.Dispose();
-            _process = null;
-            _input = null;
-            throw;
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+            process.Dispose();
         }
     }
 
@@ -137,25 +191,74 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     private static bool IsRunnableFile(string? path) =>
         !string.IsNullOrWhiteSpace(path) && File.Exists(Environment.ExpandEnvironmentVariables(path));
 
-    public Task<JsonElement> RequestAsync(string method, JsonNode? parameters = null,
+    public async Task<JsonElement> RequestAsync(string method, JsonNode? parameters = null,
         CancellationToken cancellationToken = default, TimeSpan? timeout = null)
     {
-        if (_input == null) throw new InvalidOperationException("Codex App Server 尚未连接。");
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        var requestTimeout = timeout ?? TimeSpan.FromSeconds(30);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
+        deadline.CancelAfter(requestTimeout);
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    var (connectionId, input) = await GetConnectedTransportAsync(deadline.Token);
+                    return await SendRequestAsync(method, parameters?.DeepClone(), connectionId, input,
+                        deadline.Token, requestTimeout);
+                }
+                catch (Exception ex) when (attempt == 0 && method == "account/rateLimits/read" &&
+                                           !deadline.IsCancellationRequested && IsTransientReadFailure(ex))
+                {
+                    // Only this read is safe to repeat. Keep the same total deadline and
+                    // leave authentication, throttling, and all write operations to callers.
+                    await Task.Delay(TimeSpan.FromMilliseconds(400), deadline.Token);
+                }
+            }
+        }
+        catch (OperationCanceledException ex) when (!linked.IsCancellationRequested && deadline.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Codex App Server 请求 {method} 超时（{requestTimeout.TotalSeconds:0} 秒）。", ex);
+        }
+    }
+
+    private static bool IsTransientReadFailure(Exception exception)
+    {
+        if (exception is IOException or ObjectDisposedException) return true;
+        if (exception is not AppServerRequestException request) return false;
+        if (request.Code is 401 or 403 or 429 or -32600 or -32601 or -32602) return false;
+        var message = request.Message;
+        if (new[] { "401", "403", "429", "unauthorized", "forbidden", "authentication", "unauthenticated",
+                    "not logged in", "login required", "too many requests", "rate limit exceeded", "rate limited",
+                    "rate_limit" }.Any(value => message.Contains(value, StringComparison.OrdinalIgnoreCase)))
+            return false;
+        return new[] { "error sending request for url", "connection reset", "connection closed", "connection refused",
+                       "connection aborted", "temporarily unavailable", "timed out", "http 502", "http 503", "http 504" }
+            .Any(value => message.Contains(value, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private Task<JsonElement> SendRequestAsync(string method, JsonNode? parameters, long connectionId,
+        StreamWriter input, CancellationToken cancellationToken, TimeSpan timeout, bool requireInitialized = true)
+    {
         var id = Interlocked.Increment(ref _requestId);
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[id] = completion;
-        return SendRequestAsync(id, method, parameters, completion, cancellationToken,
-            timeout ?? TimeSpan.FromSeconds(30));
+        _pending[id] = new PendingRequest(connectionId, completion);
+        return SendRequestAsync(id, method, parameters, connectionId, input, completion, cancellationToken, timeout,
+            requireInitialized);
     }
 
     private async Task<JsonElement> SendRequestAsync(long id, string method, JsonNode? parameters,
-        TaskCompletionSource<JsonElement> completion, CancellationToken cancellationToken, TimeSpan timeout)
+        long connectionId, StreamWriter input, TaskCompletionSource<JsonElement> completion,
+        CancellationToken cancellationToken, TimeSpan timeout, bool requireInitialized)
     {
         var message = new JsonObject { ["method"] = method, ["id"] = id };
         if (parameters != null) message["params"] = parameters;
         try
         {
-            await WriteAsync(message, cancellationToken);
+            await WriteAsync(message, connectionId, input, cancellationToken, requireInitialized);
             try
             {
                 return await completion.Task.WaitAsync(timeout, cancellationToken);
@@ -172,17 +275,22 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    private Task NotifyAsync(string method, JsonNode parameters, CancellationToken cancellationToken) =>
-        WriteAsync(new JsonObject { ["method"] = method, ["params"] = parameters }, cancellationToken);
-
-    private async Task WriteAsync(JsonNode message, CancellationToken cancellationToken)
+    private async Task WriteAsync(JsonNode message, long connectionId, StreamWriter input,
+        CancellationToken cancellationToken, bool requireInitialized)
     {
-        if (_input == null) throw new InvalidOperationException("Codex App Server 输入流不可用。");
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            await _input.WriteLineAsync(message.ToJsonString()).WaitAsync(cancellationToken);
-            await _input.FlushAsync().WaitAsync(cancellationToken);
+            if (connectionId != Volatile.Read(ref _connectionId) || !input.BaseStream.CanWrite ||
+                (requireInitialized && connectionId != Volatile.Read(ref _initializedConnectionId)))
+                throw new IOException("Codex App Server 输入流不可用。");
+            await input.WriteLineAsync(message.ToJsonString().AsMemory(), cancellationToken);
+            await input.FlushAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            InvalidateConnection(connectionId, new IOException("Codex App Server 输入流已关闭。", ex));
+            throw;
         }
         finally
         {
@@ -190,7 +298,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    private async Task ReadLoopAsync(StreamReader reader, CancellationToken cancellationToken)
+    private async Task ReadLoopAsync(StreamReader reader, long connectionId, CancellationToken cancellationToken)
     {
         try
         {
@@ -201,7 +309,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 var messages = ExtractJsonMessages(line);
                 if (messages.Count == 0)
                 {
-                    Debug.WriteLine($"[CodexAppServer] Ignored non-JSON stdout: {line[..Math.Min(line.Length, 160)]}");
+                    Debug.WriteLine("[CodexAppServer] Ignored non-JSON stdout.");
                     continue;
                 }
                 foreach (var json in messages)
@@ -209,13 +317,13 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                     try
                     {
                         using var document = JsonDocument.Parse(json);
-                        HandleMessage(document.RootElement);
+                        HandleMessage(document.RootElement, connectionId);
                     }
-                    catch (JsonException ex)
+                    catch (JsonException)
                     {
                         // App-server occasionally writes an adjacent diagnostic on stdout.
                         // A malformed fragment must not tear down the whole JSONL connection.
-                        Debug.WriteLine($"[CodexAppServer] Ignored malformed stdout fragment: {ex.Message}");
+                        Debug.WriteLine("[CodexAppServer] Ignored malformed stdout fragment.");
                     }
                 }
             }
@@ -223,26 +331,39 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            foreach (var item in _pending.Values) item.TrySetException(ex);
+            InvalidateConnection(connectionId, new IOException("Codex App Server 连接读取失败。", ex));
         }
         finally
         {
-            if (!_lifetime.IsCancellationRequested)
-                foreach (var item in _pending.Values)
-                    item.TrySetException(new IOException("Codex App Server 连接已关闭。"));
+            InvalidateConnection(connectionId, new IOException("Codex App Server 连接已关闭。"));
         }
     }
 
-    private void HandleMessage(JsonElement root)
+    private void InvalidateConnection(long connectionId, Exception exception)
+    {
+        Interlocked.CompareExchange(ref _initializedConnectionId, -1, connectionId);
+        FailPendingRequests(connectionId, exception);
+    }
+
+    private void FailPendingRequests(long connectionId, Exception exception)
+    {
+        foreach (var item in _pending.Values)
+            if (item.ConnectionId == connectionId) item.Completion.TrySetException(exception);
+    }
+
+    private void HandleMessage(JsonElement root, long connectionId)
     {
         if (!TryReadResponseId(root, out var id)) return;
-        if (!_pending.TryGetValue(id, out var completion)) return;
+        if (!_pending.TryGetValue(id, out var pending) || pending.ConnectionId != connectionId) return;
+        var completion = pending.Completion;
         if (root.TryGetProperty("error", out var error))
         {
             var message = error.TryGetProperty("message", out var text) && text.ValueKind == JsonValueKind.String
                 ? text.GetString()
                 : error.GetRawText();
-            completion.TrySetException(new InvalidOperationException(message ?? "Codex App Server 请求失败。"));
+            var code = error.TryGetProperty("code", out var codeValue) && JsonProtocolValue.TryGetInt64(codeValue, out var number)
+                ? number : (long?)null;
+            completion.TrySetException(new AppServerRequestException(message ?? "Codex App Server 请求失败。", code));
         }
         else if (root.TryGetProperty("result", out var result))
         {
@@ -302,18 +423,21 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _lifetime.Cancel();
-        try { _input?.Close(); } catch { }
-        if (_process is { HasExited: false })
+        await _connectLock.WaitAsync();
+        try
         {
-            try { _process.Kill(entireProcessTree: true); } catch { }
+            var readerTask = _readerTask;
+            CloseTransport();
+            if (readerTask != null)
+            {
+                try { await readerTask.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
+            }
         }
-        if (_readerTask != null)
-        {
-            try { await _readerTask.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
-        }
-        _process?.Dispose();
-        _writeLock.Dispose();
+        finally { _connectLock.Release(); }
+        // In-flight callers may still be releasing either gate after lifetime cancellation.
+        // SemaphoreSlim has no unmanaged resources unless its wait handle was requested.
         _lifetime.Dispose();
     }
 }

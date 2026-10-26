@@ -26,6 +26,7 @@ public partial class AiFloatingWindow : Window
     private readonly CancellationTokenSource _lifetime = new();
     private bool _refreshing;
     private AiFloatingSnapshot? _lastSnapshot;
+    private AiTaskSnapshot? _taskSnapshot;
     private DockEdge _dockEdge;
     private bool _isDockCollapsed;
     private double _expandedLeft;
@@ -45,7 +46,7 @@ public partial class AiFloatingWindow : Window
 
     private enum DockEdge { None, Left, Right, Top }
 
-    public AiFloatingWindow() : this(new AiManagerService()) { }
+    public AiFloatingWindow() : this(new AiManagerService(runtime: AiManagerRuntime.Shared)) { }
 
     internal AiFloatingWindow(AiManagerService service, ResetSignalAttention? resetAttention = null)
     {
@@ -74,6 +75,8 @@ public partial class AiFloatingWindow : Window
         UpdateContextMenu();
         _resetAttention.Changed += ResetAttention_Changed;
         RenderResetAttention();
+        AiTaskSnapshotFeed.Changed += TaskSnapshot_Changed;
+        if (AiTaskSnapshotFeed.Latest is { } latestTasks) TaskSnapshot_Changed(latestTasks);
     }
 
     public static void ShowOrActivate()
@@ -161,6 +164,7 @@ public partial class AiFloatingWindow : Window
 
     private async void Window_Closed(object? sender, EventArgs e)
     {
+        AiTaskSnapshotFeed.Changed -= TaskSnapshot_Changed;
         _timer.Stop();
         _dockHideTimer.Stop();
         SavePlacement();
@@ -174,13 +178,13 @@ public partial class AiFloatingWindow : Window
         if (ReferenceEquals(_instance, this)) _instance = null;
     }
 
-    private async Task RefreshAsync()
+    private async Task RefreshAsync(bool forceRefresh = false)
     {
         if (_refreshing) return;
         _refreshing = true;
         try
         {
-            var snapshot = await _service.RefreshFloatingAsync(_lifetime.Token);
+            var snapshot = await _service.RefreshFloatingAsync(_lifetime.Token, forceRefresh);
             RenderSnapshot(snapshot);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
@@ -196,24 +200,38 @@ public partial class AiFloatingWindow : Window
 
     private void RenderSnapshot(AiFloatingSnapshot snapshot)
     {
+        if (_taskSnapshot is not null && AiTaskSnapshotFeed.Latest is { } shared)
+            snapshot = AiTaskSnapshotFeed.ApplyToFloating(snapshot, shared.Tasks);
         _lastSnapshot = snapshot;
         var taskName = LocalizationService.LocalizeKnownText(snapshot.TaskName);
         TaskNameText.Text = taskName;
         TaskNameText.ToolTip = taskName;
         TaskStatusText.Text = LocalizedStatus(snapshot.TaskStatus);
         RemainingQuotaText.Text = snapshot.RemainingPercent?.ToString("0.#", CultureInfo.InvariantCulture) ?? "--";
+        var quotaWindow = LocalizationService.LocalizeKnownText(snapshot.QuotaWindow);
         RemainingQuotaText.ToolTip = snapshot.ResetsAt is { } reset
             ? LocalizationService.IsEnglish
-                ? $"{snapshot.QuotaWindow}\nResets {reset.LocalDateTime.ToString("MMM d HH:mm", CultureInfo.InvariantCulture)}"
-                : $"{snapshot.QuotaWindow}\n{reset.LocalDateTime:M月d日 HH:mm} 重置"
-            : snapshot.QuotaWindow;
+                ? $"{quotaWindow}\nResets {reset.LocalDateTime.ToString("MMM d HH:mm", CultureInfo.InvariantCulture)}"
+                : $"{quotaWindow}\n{reset.LocalDateTime:M月d日 HH:mm} 重置"
+            : quotaWindow;
+        if (snapshot.QuotaError is not null)
+        {
+            RemainingQuotaText.ToolTip += LocalizationService.L("\n额度同步暂不可用，将自动重试。", "\nQuota sync unavailable; retrying automatically.") +
+                (snapshot.QuotaCapturedAt is { } quotaAt
+                    ? LocalizationService.L($"\n缓存额度采集于 {quotaAt.LocalDateTime:HH:mm:ss}", $"\nCached quota from {quotaAt.LocalDateTime:HH:mm:ss}")
+                    : string.Empty);
+            RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "WarningText");
+        }
+        else RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "FloatInk");
         var modelName = LocalizationService.LocalizeKnownText(snapshot.ModelName);
         ModelText.Text = modelName;
         ModelText.ToolTip = modelName;
         ReasoningText.Text = string.IsNullOrWhiteSpace(snapshot.ReasoningEffort)
             ? "--"
             : snapshot.ReasoningEffort.ToUpperInvariant();
-        SyncAgeText.Text = snapshot.CapturedAt.LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        SyncAgeText.Text = snapshot.QuotaError is null
+            ? snapshot.CapturedAt.LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
+            : LocalizationService.L("额度待同步", "QUOTA RETRY");
         var tasks = snapshot.Tasks.Count > 0
             ? snapshot.Tasks
             : new List<AiThreadSummary>
@@ -235,6 +253,20 @@ public partial class AiFloatingWindow : Window
         ApplyStatusVisual(snapshot.TaskStatus);
     }
 
+    private void TaskSnapshot_Changed(AiTaskSnapshot snapshot)
+    {
+        if (_lifetime.IsCancellationRequested || Dispatcher.HasShutdownStarted) return;
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.InvokeAsync(() => TaskSnapshot_Changed(snapshot));
+            return;
+        }
+        if (_lifetime.IsCancellationRequested || snapshot.Revision <= (_taskSnapshot?.Revision ?? 0)) return;
+        _taskSnapshot = snapshot;
+        RenderSnapshot(AiTaskSnapshotFeed.ApplyToFloating(_lastSnapshot ?? new AiFloatingSnapshot(), snapshot.Tasks));
+        foreach (var task in snapshot.Tasks.Take(8)) TaskMonitorTrace.Record("ui", task.Id, task.Status, snapshot.Revision, "floating");
+    }
+
     private void RefreshVisibleTaskRows(bool force = false)
     {
         if (SecondaryTasksPanel is null) return;
@@ -246,11 +278,13 @@ public partial class AiFloatingWindow : Window
         SecondaryTasksPanel.Children.Clear();
         foreach (var task in _displayTasks.Skip(1).Take(Math.Max(0, visibleTaskCount - 1)))
         {
-            var color = ThemeBrush(StatusBrushKey(task.Status));
+            var waitingForUser = task.Status is "waitingOnApproval" or "waitingOnUserInput";
+            var color = ThemeBrush(waitingForUser ? "WarningText" : StatusBrushKey(task.Status));
             var hasLink = BuildTaskUri(task.Id) is not null;
             var row = new Grid { Height = 18, Tag = task.Id,
-                Style = hasLink ? (Style)FindResource("TaskHoverRow") : null,
+                Style = hasLink ? (Style)FindResource(waitingForUser ? "AttentionTaskHoverRow" : "TaskHoverRow") : null,
                 Cursor = hasLink ? Cursors.Hand : Cursors.Arrow };
+            if (waitingForUser && !hasLink) row.SetResourceReference(Panel.BackgroundProperty, "WarningSoft");
             row.MouseLeftButtonDown += TaskRow_MouseLeftButtonDown;
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -258,14 +292,16 @@ public partial class AiFloatingWindow : Window
             var dot = new Ellipse { Width = 4, Height = 4, Fill = color, VerticalAlignment = VerticalAlignment.Center };
             var title = new TextBlock
             {
-                Text = task.DisplayTitle, Foreground = ThemeBrush("FloatingSecondaryInk"), FontSize = 8.5 * _fontScale,
+                Text = task.DisplayTitle, Foreground = ThemeBrush(waitingForUser ? "WarningText" : "FloatingSecondaryInk"), FontSize = 8.5 * _fontScale,
+                FontWeight = waitingForUser ? FontWeights.SemiBold : FontWeights.Normal,
                 TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(5, 0, 5, 0)
             };
             Grid.SetColumn(title, 1);
             var status = new TextBlock
             {
-                Text = LocalizedStatus(task.Status), Foreground = color, FontSize = 6.5 * _fontScale,
+                Text = LocalizedStatus(task.Status), Foreground = color, FontSize = (waitingForUser ? 7.5 : 6.5) * _fontScale,
+                FontWeight = waitingForUser ? FontWeights.Bold : FontWeights.Normal,
                 VerticalAlignment = VerticalAlignment.Center
             };
             Grid.SetColumn(status, 2);
@@ -380,7 +416,8 @@ public partial class AiFloatingWindow : Window
 
     private void ApplyStatusVisual(string status)
     {
-        var colorKey = StatusBrushKey(status);
+        var waitingForUser = status is "waitingOnApproval" or "waitingOnUserInput";
+        var colorKey = waitingForUser ? "WarningText" : StatusBrushKey(status);
         var badgeKey = status switch
         {
             "active" or "inProgress" => "SignalSoft",
@@ -392,7 +429,13 @@ public partial class AiFloatingWindow : Window
         StatusDot.Fill = ThemeBrush(colorKey);
         PeekSignal.Fill = ThemeBrush(_resetAttention.Pending is not null ? "Warning" : colorKey);
         TaskStatusText.Foreground = ThemeBrush(colorKey);
+        TaskStatusText.FontWeight = waitingForUser ? FontWeights.Bold : FontWeights.SemiBold;
         TaskStatusBadge.Background = ThemeBrush(badgeKey);
+        TaskStatusBadge.BorderBrush = waitingForUser ? ThemeBrush("WarningBorder") : Brushes.Transparent;
+        TaskNameText.Foreground = ThemeBrush(waitingForUser ? "WarningText" : "FloatInk");
+        TaskNameText.FontWeight = waitingForUser ? FontWeights.Bold : FontWeights.SemiBold;
+        Shell.Background = ThemeBrush(waitingForUser ? "WarningSoft" : "FloatingShell");
+        Shell.BorderBrush = ThemeBrush(waitingForUser ? "WarningBorder" : "Line");
     }
 
     private static string StatusBrushKey(string status) => status switch
@@ -672,7 +715,7 @@ public partial class AiFloatingWindow : Window
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
-    private async void RefreshNow_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
+    private async void RefreshNow_Click(object sender, RoutedEventArgs e) => await RefreshAsync(forceRefresh: true);
 
     private void CollapseToggle_Click(object sender, RoutedEventArgs e)
     {
@@ -752,6 +795,7 @@ public partial class AiFloatingWindow : Window
     private void RenderResetAttention()
     {
         var visible = _resetAttention.Pending is not null;
+        ResetAttentionPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         ResetAttentionButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         ResetAttentionTitle.Text = "● " + _resetAttention.Title;
         var hasTime = _resetAttention.Pending?.LocalResetTimeCompactText is { Length: > 0 };
@@ -759,10 +803,17 @@ public partial class AiFloatingWindow : Window
         ResetAttentionTime.Visibility = hasTime ? Visibility.Visible : Visibility.Collapsed;
         ResetAttentionAction.Text = _resetAttention.DismissText;
         ResetAttentionButton.ToolTip = _resetAttention.Detail;
+        var sourceUrl = CodexResetClient.SafeSourceUrl(_resetAttention.Pending?.Url);
+        ResetAttentionSourceButton.Visibility = sourceUrl is null ? Visibility.Collapsed : Visibility.Visible;
+        ResetAttentionSourceButton.Tag = sourceUrl;
+        ResetAttentionSourceButton.ToolTip = sourceUrl;
+        ResetAttentionSourceButton.Content = LocalizationService.L("查看原文", "View source");
+        ResetAttentionSourceButton.Height = 20 * _fontScale;
         System.Windows.Automation.AutomationProperties.SetName(ResetAttentionButton,
             $"{_resetAttention.Title}. {_resetAttention.Detail}. {_resetAttention.DismissText}");
-        var height = visible ? (hasTime ? 64 : 44) * _fontScale : 0;
-        ResetAttentionButton.Height = height;
+        ResetAttentionButton.Height = visible ? (hasTime ? 64 : 44) * _fontScale : 0;
+        var height = visible ? ResetAttentionButton.Height + (sourceUrl is null ? 0 : 24 * _fontScale) + 2 : 0;
+        ResetAttentionPanel.Height = height;
         var delta = height - _resetBannerHeight;
         _resetBannerHeight = height;
         MinHeight = BaseWindowHeight + height;
@@ -782,6 +833,19 @@ public partial class AiFloatingWindow : Window
         else if (_lastSnapshot is { } snapshot) ApplyStatusVisual(snapshot.TaskStatus);
     }
 
+    private void ResetAttentionSource_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        var url = CodexResetClient.SafeSourceUrl(_resetAttention.Pending?.Url);
+        if (url is null) return;
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, LocalizationService.L("无法打开链接：", "Unable to open link: ") + ex.Message,
+                "AIMaster", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private void DismissResetAttention_Click(object sender, RoutedEventArgs e)
     {
         try { _resetAttention.Dismiss(); }
@@ -799,7 +863,7 @@ public partial class AiFloatingWindow : Window
         if (_dockEdge != DockEdge.None) ConfigurePeekHandle();
         RenderResetAttention();
         if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
-        if (!_isDockCollapsed) await RefreshAsync();
+        if (IsLoaded && !_isDockCollapsed) await RefreshAsync();
     }
 
     private static string LocalizedStatus(string status) => LocalizationService.FormatTaskStatus(status);

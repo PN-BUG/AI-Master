@@ -15,10 +15,11 @@ public partial class App : WpfApplication
     private Forms.ToolStripMenuItem? _showMainMenuItem;
     private Forms.ToolStripMenuItem? _showFloatingMenuItem;
     private Forms.ToolStripMenuItem? _exitMenuItem;
-    private bool _backgroundNoticeShown;
     private TrayNotificationQueue? _trayNotifications;
     private NotificationCenterService? _notificationCenter;
     private Exception? _notificationCenterStartupError;
+    private TaskFileChangeMonitor? _taskFileMonitor;
+    private AiManagerService? _taskMonitorService;
     private readonly System.Windows.Threading.DispatcherTimer _trayNotificationTimer = new()
         { Interval = TimeSpan.FromSeconds(2) };
 
@@ -60,6 +61,7 @@ public partial class App : WpfApplication
         }
 
         base.OnStartup(e);
+        StartTaskMonitoring();
         InitializeTrayIcon();
         try
         {
@@ -146,16 +148,6 @@ public partial class App : WpfApplication
         if (MainWindow is AiManagerWindow manager) manager.ReplayMissedResetNotification();
     }
 
-    public void NotifyRunningInBackground()
-    {
-        if (_backgroundNoticeShown || _trayIcon is null) return;
-        _backgroundNoticeShown = true;
-        var message = LocalizationService.L(
-            "AIMaster 正在后台运行，单击托盘图标可重新打开。",
-            "AIMaster is running in the background. Click the tray icon to reopen it.");
-        _trayNotifications?.Enqueue(new("AIMaster", message, Forms.ToolTipIcon.Info, 2500));
-    }
-
     internal void ShowQuotaNotification(QuotaNotification notification, double threshold)
     {
         if (IsExiting || _trayIcon?.Visible != true) return;
@@ -184,6 +176,7 @@ public partial class App : WpfApplication
     {
         if (IsExiting) return;
         IsExiting = true;
+        StopTaskMonitoring();
         if (_trayIcon is not null) _trayIcon.Visible = false;
         foreach (Window window in Windows.Cast<Window>().ToList()) window.Close();
         Shutdown();
@@ -233,6 +226,7 @@ public partial class App : WpfApplication
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
+        StopTaskMonitoring();
         _trayNotificationTimer.Stop();
         _notificationCenter?.Dispose();
         LocalizationService.LanguageChanged -= LocalizationService_LanguageChanged;
@@ -243,7 +237,45 @@ public partial class App : WpfApplication
             _trayIcon.Dispose();
         }
         _trayIconImage?.Dispose();
+        // The runtime outlives individual windows. Dispose it only after their
+        // shutdown and the local monitor stop, away from the WPF sync context.
+        Task.Run(async () => await AiManagerRuntime.DisposeSharedAsync().ConfigureAwait(false))
+            .GetAwaiter().GetResult();
         _instanceMutex?.Dispose();
         base.OnExit(e);
+    }
+
+    private void StartTaskMonitoring()
+    {
+        TaskMonitorTrace.Start(Path.GetDirectoryName(AppPaths.GetSettingsFile())!);
+        var configuredHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        var codexHome = string.IsNullOrWhiteSpace(configuredHome)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex")
+            : configuredHome;
+        var sessionsRoot = Path.Combine(codexHome, "sessions");
+        var service = _taskMonitorService = new AiManagerService(runtime: AiManagerRuntime.Shared);
+        _taskFileMonitor = new TaskFileChangeMonitor(sessionsRoot, cancellationToken =>
+        {
+            service.RefreshLocalTaskSnapshot(sessionsRoot, cancellationToken);
+            return Task.CompletedTask;
+        });
+        AiManagerRuntime.Shared.DesktopStateChanged += DesktopStateChanged;
+        AiManagerRuntime.Shared.StartDesktopMonitoring();
+        _taskFileMonitor.Start();
+    }
+
+    private void DesktopStateChanged() => _taskFileMonitor?.RequestRefresh();
+
+    private void StopTaskMonitoring()
+    {
+        if (_taskMonitorService is not null)
+            AiManagerRuntime.Shared.DesktopStateChanged -= DesktopStateChanged;
+        var monitor = _taskFileMonitor;
+        _taskFileMonitor = null;
+        monitor?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        var service = _taskMonitorService;
+        _taskMonitorService = null;
+        service?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        TaskMonitorTrace.StopAsync().GetAwaiter().GetResult();
     }
 }

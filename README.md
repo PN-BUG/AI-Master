@@ -78,6 +78,8 @@ AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“�
 
 AIMaster 启动本机的 `codex app-server --listen stdio://` 并使用 Codex 自己维护的登录状态。工具不会读取、复制或保存登录令牌。
 
+本机 Codex 桌面任务的实时审批状态通过已有的本地 `codex-ipc` 管道只读跟随。命令执行、文件变更和权限请求存在实际待处理审批时显示“等待批准”，答复后立即清除。解析后仅保留请求编号、类型、运行状态与修订号，不持久化收到的对话、命令或审批内容。该内部协议不兼容或连接中断时回退到本地执行记录，不推测审批状态。
+
 共享统计默认关闭。启用后仅向 `https://www.woliux.com/api/v1/aimaster/sync` 上传设备周汇总，不上传 Codex 凭证、任务内容、项目名称或路径；同步密钥使用 Windows DPAPI 加密后保存在本机。
 
 当 App Server 暂时不可用时，任务列表会从 `%USERPROFILE%\.codex\sessions` 中的本地会话记录降级读取。设置保存在 `%LOCALAPPDATA%\AIMaster\settings.json`。第一次启动会自动迁移旧版 `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` 设置。

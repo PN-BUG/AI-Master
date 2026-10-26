@@ -17,6 +17,8 @@ public partial class AiManagerWindow
     private readonly ResetNotificationHistory _resetNotificationHistory;
     private bool _resetCatchUpPending;
     private Task? _resetRefreshTask;
+    private Button? _resetRefreshButton;
+    private bool _resetRefreshing;
     private CodexResetSnapshot? _resetSnapshot;
     private bool _resetControlsLoaded;
     private DateTimeOffset? _lastAccountRecovery;
@@ -34,18 +36,34 @@ public partial class AiManagerWindow
         StartResetRefresh();
     }
 
-    private void StartResetRefresh()
+    private void StartResetRefresh(bool forceRefresh = false)
     {
         if (_lifetime.IsCancellationRequested || _resetRefreshTask is { IsCompleted: false }) return;
-        _resetRefreshTask = RefreshResetSignalsAsync();
+        _resetRefreshTask = RefreshResetSignalsAsync(forceRefresh);
     }
 
-    private async Task RefreshResetSignalsAsync()
+    private void ResetRefresh_Click(object sender, RoutedEventArgs e) => StartResetRefresh(forceRefresh: true);
+
+    private void UpdateResetRefreshButton()
+    {
+        if (_resetRefreshButton is null) return;
+        _resetRefreshButton.Content = _resetRefreshing ? L("↻ 刷新中…", "↻ Refreshing…") : L("↻ 刷新", "↻ Refresh");
+        _resetRefreshButton.IsEnabled = !_resetRefreshing && _service.Settings.ResetMonitoringEnabled;
+        _resetRefreshButton.ToolTip = _service.Settings.ResetMonitoringEnabled
+            ? L("立即刷新重置信号", "Refresh reset signals now")
+            : L("请先开启重置信号监测", "Enable reset monitoring first");
+        System.Windows.Automation.AutomationProperties.SetName(_resetRefreshButton,
+            L("刷新重置信号", "Refresh reset signals"));
+    }
+
+    private async Task RefreshResetSignalsAsync(bool forceRefresh = false)
     {
         if (!_service.Settings.ResetMonitoringEnabled) { RenderResetSignals(); return; }
+        _resetRefreshing = true;
+        UpdateResetRefreshButton();
         try
         {
-            var snapshot = await _resetClient.ReadAsync(_lifetime.Token);
+            var snapshot = await _resetClient.ReadAsync(_lifetime.Token, forceRefresh);
             if (!_service.Settings.ResetMonitoringEnabled || _lifetime.IsCancellationRequested) return;
             _resetSnapshot = snapshot;
             _resetStateError = null;
@@ -63,6 +81,11 @@ public partial class AiManagerWindow
         {
             _resetStateError = ex.Message;
             RenderResetSignals();
+        }
+        finally
+        {
+            _resetRefreshing = false;
+            UpdateResetRefreshButton();
         }
     }
 
@@ -88,6 +111,7 @@ public partial class AiManagerWindow
     internal void RenderResetSignals(CodexResetSnapshot? snapshot = null)
     {
         if (snapshot is not null) _resetSnapshot = snapshot;
+        UpdateResetRefreshButton();
         var enabled = _service.Settings.ResetMonitoringEnabled;
         var data = _resetSnapshot;
         _resetAttention.SetEnabled(enabled);
@@ -117,13 +141,15 @@ public partial class AiManagerWindow
             ? L($"网站记录的上次重置：{at.LocalDateTime:MM-dd HH:mm}",
                 $"Last reset recorded by tracker: {at.LocalDateTime:MM-dd HH:mm}")
             : L("上次重置记录未知", "Last recorded reset unknown");
-        var announcements = data?.AlertEvents.OrderByDescending(item => item.AnnouncedAt).ToArray()
+        // Announcements describe past resets; only an active preview belongs in the main slot.
+        var announcements = data?.Events.OrderByDescending(item => item.AnnouncedAt).ToArray()
             ?? Array.Empty<CodexResetEvent>();
-        ResetSignalItems.ItemsSource = announcements.Take(1).ToArray();
-        ResetHistoryItems.ItemsSource = announcements.Skip(1).ToArray();
-        ResetHistoryExpander.Visibility = announcements.Length > 1 ? Visibility.Visible : Visibility.Collapsed;
-        ResetHistoryExpander.Header = L($"历史公告（{Math.Max(0, announcements.Length - 1)}）",
-            $"Earlier announcements ({Math.Max(0, announcements.Length - 1)})");
+        ResetSignalItems.ItemsSource = data?.Signal is { } signal ? new[] { signal } : Array.Empty<CodexResetEvent>();
+        ResetSignalItems.Visibility = data?.Signal is null ? Visibility.Collapsed : Visibility.Visible;
+        ResetHistoryItems.ItemsSource = announcements;
+        ResetHistoryExpander.Visibility = announcements.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ResetHistoryExpander.Header = L($"历史公告（{announcements.Length}）",
+            $"Past announcements ({announcements.Length})");
         ResetCheckedText.Text = data is null ? L("每 2 分钟自动检查", "Automatically checked every 2 minutes")
             : L($"检查于 {data.CheckedAt.LocalDateTime:HH:mm:ss} · 来源抓取于 {data.FetchedAt.LocalDateTime:HH:mm:ss}",
                 $"Checked {data.CheckedAt.LocalDateTime:HH:mm:ss} · Source fetched {data.FetchedAt.LocalDateTime:HH:mm:ss}");
@@ -146,6 +172,7 @@ public partial class AiManagerWindow
 
     private void ObserveAccountRecovery(AiManagerSnapshot snapshot)
     {
+        if (_service.LastQuotaError is not null || snapshot.Limits.Count == 0) return;
         IReadOnlyList<AiLimitWindow> recovered;
         try { recovered = _accountResetTracker.Observe(snapshot.Limits, snapshot.CapturedAt); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

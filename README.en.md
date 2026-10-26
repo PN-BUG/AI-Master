@@ -72,6 +72,8 @@ Open it with **Floating monitor** in the main window:
 
 AIMaster starts the local `codex app-server --listen stdio://` process and uses the sign-in state maintained by Codex. It does not read, copy, or store login tokens.
 
+Live approval status for local Codex desktop tasks is observed through the existing local `codex-ipc` pipe as a read-only follower. Actual pending command, file-change, and permission requests show “Awaiting approval” until answered. Only request IDs/types, runtime status, and revisions are retained after parsing; received conversation, command, and approval contents are not persisted. An incompatible internal protocol or disconnected pipe falls back to local execution records without inferring approvals.
+
 Shared usage is disabled by default. When enabled, only weekly device aggregates are sent to `https://www.woliux.com/api/v1/aimaster/sync`; Codex credentials, task content, project names, and paths are excluded. The sync key is encrypted locally with Windows DPAPI.
 
 When App Server data is unavailable, AIMaster falls back to local session records under `%USERPROFILE%\.codex\sessions` for the task list. Settings are stored in `%LOCALAPPDATA%\AIMaster\settings.json`. Existing `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` settings are migrated on first launch.

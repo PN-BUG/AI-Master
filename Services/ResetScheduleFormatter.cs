@@ -15,13 +15,16 @@ internal static class ResetScheduleFormatter
     public static string Format(CodexResetEvent item, bool compact = false, TimeZoneInfo? localZone = null)
     {
         if (item.Kind != "signal" || !TryGetTime(item.Summary, item.AnnouncedAt, out var at, out var before)) return "";
-        var local = TimeZoneInfo.ConvertTime(at, localZone ?? TimeZoneInfo.Local);
+        var zone = localZone ?? TimeZoneInfo.Local;
+        var local = TimeZoneInfo.ConvertTime(at, zone);
         var time = local.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var chineseTime = local.ToString("M月d日 HH:mm", CultureInfo.InvariantCulture);
+        var chineseZone = zone.Id is "China Standard Time" or "Asia/Shanghai" ? "北京时间" : "当地时间";
         if (compact)
-            return LocalizationService.L($"{time}{(before ? " 前" : "")} · 当地",
+            return LocalizationService.L($"{chineseTime}{(before ? "之前" : "")}\n{chineseZone} · 预计重置",
                 $"{(before ? "Before " : "")}{time} · local");
         var offset = local.ToString("zzz", CultureInfo.InvariantCulture);
-        return LocalizationService.L($"预告重置时间：{time}{(before ? " 前" : "")}（当地时间 UTC{offset}）",
+        return LocalizationService.L($"预计在 {chineseTime}{(before ? "之前" : "")}重置（{chineseZone}，UTC{offset}）\n这是预告时间，实际到账以账号额度为准。",
             $"Expected reset: {(before ? "before " : "")}{time} (local UTC{offset})");
     }
 

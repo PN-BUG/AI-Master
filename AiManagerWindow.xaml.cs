@@ -78,7 +78,9 @@ public partial class AiManagerWindow : Window
         Thumb ResizeThumb,
         double ExpandedMinHeight);
 
-    public AiManagerWindow() : this(new AiManagerService()) { }
+    public AiManagerWindow() : this(new AiManagerService(runtime: AiManagerRuntime.Shared)) { }
+
+    private AiTaskSnapshot? _taskSnapshot;
 
     internal AiManagerWindow(AiManagerService service, ResetSignalAttention? resetAttention = null)
     {
@@ -101,6 +103,8 @@ public partial class AiManagerWindow : Window
         _resetAttention.Changed += ResetAttention_Changed;
         _resetAttention.SetEnabled(_service.Settings.ResetMonitoringEnabled);
         RenderResetAttention();
+        AiTaskSnapshotFeed.Changed += TaskSnapshot_Changed;
+        if (AiTaskSnapshotFeed.Latest is { } latestTasks) TaskSnapshot_Changed(latestTasks);
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -121,6 +125,7 @@ public partial class AiManagerWindow : Window
 
     private async void Window_Closed(object? sender, EventArgs e)
     {
+        AiTaskSnapshotFeed.Changed -= TaskSnapshot_Changed;
         _timer.Stop();
         _resetTimer.Stop();
         _resetAttention.Changed -= ResetAttention_Changed;
@@ -138,7 +143,6 @@ public partial class AiManagerWindow : Window
         if (App.Current.IsExiting) return;
         e.Cancel = true;
         Hide();
-        App.Current.NotifyRunningInBackground();
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
@@ -687,6 +691,25 @@ public partial class AiManagerWindow : Window
         Panel.SetZIndex(resizeThumb, 1);
         header.Children.Add(icon);
         header.Children.Add(headerTitle);
+        if (id == "resetSignals")
+        {
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            _resetRefreshButton = new Button
+            {
+                Name = "ResetRefreshButton",
+                Style = (Style)FindResource("ActionButton"),
+                Height = 26,
+                Padding = new Thickness(9, 0, 9, 0),
+                FontSize = 11,
+                Margin = new Thickness(8, 0, 0, 0)
+            };
+            _resetRefreshButton.Click += ResetRefresh_Click;
+            Grid.SetColumn(_resetRefreshButton, 1);
+            Grid.SetColumn(help, 2);
+            Grid.SetColumn(toggle, 3);
+            header.Children.Add(_resetRefreshButton);
+            UpdateResetRefreshButton();
+        }
         header.Children.Add(help);
         header.Children.Add(toggle);
         frame.Children.Add(header);
@@ -1069,9 +1092,10 @@ public partial class AiManagerWindow : Window
         catch (Exception ex)
         {
             var message = BuildConnectionError(ex);
-            SyncStatusText.Text = L("连接失败", "Connection failed");
+            SyncStatusText.Text = L("额度同步暂不可用", "Quota sync unavailable");
             SyncStatusText.ToolTip = message;
             SetFooterStatus(message, warning: true);
+            RenderQuotaSyncState(_service.LastSnapshot, ex);
         }
         finally
         {
@@ -1104,7 +1128,9 @@ public partial class AiManagerWindow : Window
         var additionalLimits = snapshot.Limits.Where(item => !ReferenceEquals(item, main)).ToArray();
         LimitItems.ItemsSource = additionalLimits;
         LimitsCard.Visibility = additionalLimits.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        ThreadList.ItemsSource = snapshot.Threads;
+        ThreadList.ItemsSource = _taskSnapshot is not null && AiTaskSnapshotFeed.Latest is { } shared
+            ? shared.Tasks.Take(12).ToList()
+            : snapshot.Threads;
         ResetCreditText.Text = snapshot.ResetCredits > 0
             ? (LocalizationService.IsEnglish ? $"Resets available × {snapshot.ResetCredits}" : $"可用重置 × {snapshot.ResetCredits}")
             : L("无可用重置", "No resets available");
@@ -1121,6 +1147,41 @@ public partial class AiManagerWindow : Window
             ? (LocalizationService.IsEnglish ? $"Lifetime {FormatTokens(lifetime)} tokens · From Codex App Server" : $"累计 {FormatTokens(lifetime)} tokens · 数据来自 Codex App Server")
             : L("数据来自 Codex App Server；认证由 Codex 管理。", "Data comes from Codex App Server; authentication is managed by Codex."));
         LocalizationService.Apply(this);
+        RenderQuotaSyncState(snapshot);
+    }
+
+    private void RenderQuotaSyncState(AiManagerSnapshot? snapshot, Exception? error = null)
+    {
+        if (_service.LastQuotaError is null && error is null)
+        {
+            QuotaStateBadge.ToolTip = null;
+            return;
+        }
+        var message = BuildConnectionError(error ?? new InvalidOperationException(_service.LastQuotaError));
+        QuotaStateText.Text = snapshot?.MainLimit is not null ? L("缓存额度", "Cached quota") : L("待同步", "Pending sync");
+        QuotaStateText.Foreground = ThemeBrush("WarningText");
+        QuotaStateBadge.Background = ThemeBrush("WarningSoft");
+        QuotaStateBadge.ToolTip = message;
+        SyncStatusText.Text = L("额度同步暂不可用", "Quota sync unavailable");
+        SyncStatusText.ToolTip = message;
+        LastSyncText.Text = snapshot is not null
+            ? L($"缓存 {snapshot.CapturedAt.LocalDateTime:HH:mm:ss}", $"CACHED {snapshot.CapturedAt.LocalDateTime:HH:mm:ss}")
+            : L("等待首次同步", "Waiting for first sync");
+        SetFooterStatus(message, warning: true);
+    }
+
+    private void TaskSnapshot_Changed(AiTaskSnapshot snapshot)
+    {
+        if (_lifetime.IsCancellationRequested || Dispatcher.HasShutdownStarted) return;
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.InvokeAsync(() => TaskSnapshot_Changed(snapshot));
+            return;
+        }
+        if (_lifetime.IsCancellationRequested || snapshot.Revision <= (_taskSnapshot?.Revision ?? 0)) return;
+        _taskSnapshot = snapshot;
+        ThreadList.ItemsSource = snapshot.Tasks.Take(12).ToList();
+        foreach (var task in snapshot.Tasks.Take(12)) TaskMonitorTrace.Record("ui", task.Id, task.Status, snapshot.Revision, "main");
     }
 
     private void ForecastScope_Click(object sender, RoutedEventArgs e)
@@ -1157,6 +1218,7 @@ public partial class AiManagerWindow : Window
 
     private void ApplyQuotaNotification(AiManagerSnapshot snapshot)
     {
+        if (_service.LastQuotaError is not null || snapshot.Limits.Count == 0) return;
         var settings = _service.Settings;
         RenderDailyQuota(snapshot, notify: true);
         if (_quotaNotifications.Evaluate(snapshot.Limits, settings) is { } notification)
@@ -1166,6 +1228,7 @@ public partial class AiManagerWindow : Window
 
     private async Task ApplyGuardAsync(AiManagerSnapshot snapshot)
     {
+        if (_service.LastQuotaError is not null || snapshot.Limits.Count == 0) return;
         var highest = snapshot.Limits.Count == 0 ? 0 : snapshot.Limits.Max(item => item.UsedPercent);
         var overPause = highest >= _service.Settings.PausePercent;
         if (!overPause)
@@ -1297,6 +1360,7 @@ public partial class AiManagerWindow : Window
             ApplyQuotaVisual(snapshot.MainLimit?.UsedPercent ?? 0);
             ApplyQuotaNotification(snapshot);
             await ApplyGuardAsync(snapshot);
+            RenderQuotaSyncState(snapshot);
         }
     }
 
@@ -1802,6 +1866,15 @@ public partial class AiManagerWindow : Window
         Win32Exception { NativeErrorCode: 2 } => L("未找到 Codex CLI。可以安装 Codex，或通过 CODEX_EXECUTABLE 指定 codex.exe 的完整路径。", "Codex CLI was not found. Install Codex or set CODEX_EXECUTABLE to the full path of codex.exe."),
         Win32Exception => LocalizationService.IsEnglish ? $"Unable to start Codex CLI: {ex.Message}" : $"无法启动 Codex CLI：{ex.Message}",
         TimeoutException => LocalizationService.IsEnglish ? $"Codex App Server timed out: {ex.Message} Try Sync now again shortly." : $"Codex App Server 响应超时：{ex.Message} 请稍后点击“立即同步”重试。",
+        _ when ex.Message.Contains("401", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) =>
+            L("Codex 登录状态已失效，请重新登录后同步。", "Codex authentication expired. Sign in again, then sync."),
+        _ when ex.Message.Contains("429", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("too many requests", StringComparison.OrdinalIgnoreCase) =>
+            L("Codex 额度接口正在限流，请稍后再同步。", "The Codex quota endpoint is rate limited. Try syncing later."),
+        _ when ex.Message.Contains("failed to fetch codex rate limits", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("wham/usage", StringComparison.OrdinalIgnoreCase) =>
+            L("Codex 额度接口暂时不可达，将自动重试。本地任务仍可查看。", "The Codex quota endpoint is temporarily unavailable; retrying automatically. Local tasks remain available."),
         _ when ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase) ||
                ex.Message.Contains("login", StringComparison.OrdinalIgnoreCase) =>
             L("Codex 尚未登录。请先在 Codex CLI 或桌面应用完成登录，再点击“立即同步”。", "Codex is not signed in. Sign in using the CLI or desktop app, then select Sync now."),

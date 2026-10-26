@@ -28,14 +28,22 @@ internal static partial class Program
         VerifySharedUsageTemplate(main);
         var now = DateTimeOffset.Parse("2026-10-15T06:13:00Z");
         var summary = string.Join(" ", Enumerable.Repeat("Long announcement text must remain fully visible without a nested scrollbar.", 8));
-        main.RenderResetSignals(new CodexResetSnapshot(
+        var resetSnapshot = new CodexResetSnapshot(
             Enumerable.Range(0, 3).Select(index => new CodexResetEvent(index.ToString(), "announcement", now.AddHours(-index),
                 summary, "https://codex-reset.com/", string.Concat(Enumerable.Repeat("完整公告自动换行撑高卡片，不需要在卡片内部滚动。", 8)))).ToArray(),
-            null, now, now, now, false));
+            null, now, now, now, false);
+        main.RenderResetSignals(resetSnapshot);
         var history = (Expander)main.FindName("ResetHistoryExpander");
-        Check(((ItemsControl)main.FindName("ResetSignalItems")).Items.Count == 1 &&
-              ((ItemsControl)main.FindName("ResetHistoryItems")).Items.Count == 2 && !history.IsExpanded,
-            "the newest announcement is visible and earlier announcements remain available on demand");
+        var previews = (ItemsControl)main.FindName("ResetSignalItems");
+        var announcements = (ItemsControl)main.FindName("ResetHistoryItems");
+        Check(previews.Items.Count == 0 && previews.Visibility == Visibility.Collapsed &&
+              announcements.Items.Count == 3 && !history.IsExpanded,
+            "past announcements stay in collapsed history when no active preview exists");
+        var preview = new CodexResetEvent("preview", "signal", now, summary, "https://codex-reset.com/");
+        main.RenderResetSignals(resetSnapshot with { Signal = preview });
+        Check(previews.Items.Count == 1 && previews.Visibility == Visibility.Visible &&
+              announcements.Items.Count == 3 && !history.IsExpanded,
+            "an active preview is visible without displacing announcements from history");
         history.IsExpanded = true;
 
         foreach (var language in new[] { LocalizationService.English, LocalizationService.Chinese })

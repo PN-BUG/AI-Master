@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
@@ -8,11 +9,20 @@ namespace AIMaster.Services;
 
 internal sealed class AiManagerService : IAsyncDisposable
 {
-    private readonly CodexAppServerClient _client = new();
+    private const int TaskCandidateLimit = 32;
+    private const int LocalTaskScanLimit = 64;
+    private static readonly SemaphoreSlim TaskRefreshGate = new(1, 1);
+    private readonly AiManagerRuntime _runtime;
+    private readonly bool _ownsRuntime;
+    private readonly CodexAppServerClient _client;
     private readonly SharedUsageClient _sharedUsageClient;
     private readonly SemaphoreSlim _sharedUsageGate = new(1, 1);
     private SharedUsageCounter? _sharedUsageCounter;
     private string? _sharedUsageCounterDevice;
+    private readonly Dictionary<string, SharedFileStamp> _sharedUsageFileVersions = new(StringComparer.OrdinalIgnoreCase);
+    private sealed record SharedFileStamp(long Length, DateTime LastWriteUtc);
+    private sealed record SharedUsageScan(List<SharedUsageSample> Samples,
+        Dictionary<string, SharedFileStamp> Versions, HashSet<string> Seen);
     public bool CanRestoreSharedUsage
     {
         get
@@ -24,19 +34,29 @@ internal sealed class AiManagerService : IAsyncDisposable
     private readonly string _settingsPath;
     private readonly string? _sharedUsageSourceHome;
     private readonly Func<CancellationToken, Task<IReadOnlyList<AiLimitWindow>>>? _sharedUsageLimitsReader;
-    private readonly ConcurrentDictionary<string, RolloutCursor> _rolloutCursors =
-        new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, LocalUsageCursor> _localUsageCursors =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, RolloutCursor> _rolloutCursors;
+    private readonly ConcurrentDictionary<string, LocalUsageCursor> _localUsageCursors;
+    private readonly Dictionary<string, string> _monitoredTaskStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly RolloutActivityIndex _rolloutActivityIndex;
     private List<AiLimitWindow> _floatingLimits = new();
     private DateTimeOffset _floatingLimitsAt;
+    private DateTimeOffset _floatingLimitsAttemptAt;
+    private DateTimeOffset _nextConnectAttemptAt;
     private JsonElement? _floatingModelsRoot;
     private DateTimeOffset _floatingModelsAt;
+    private DateTimeOffset _floatingModelsAttemptAt;
 
-    private sealed class RolloutCursor
+    internal abstract class CachedCursor
     {
         public readonly object Sync = new();
-        public readonly MemoryStream PendingLine = new();
+        public int ActiveReaders;
+        public long LastAccessTimestamp;
+        public readonly RolloutRecordProjector PendingLine = new();
+    }
+
+    internal sealed class RolloutCursor : CachedCursor
+    {
+        public readonly RolloutInputTracker InputTracker = new();
         public long Offset;
         public string? Status;
         public string? ThreadId;
@@ -45,12 +65,11 @@ internal sealed class AiManagerService : IAsyncDisposable
         public string? ModelName;
         public string? ReasoningEffort;
         public string? ThreadSource;
+        public DateTimeOffset? LatestRecordAt;
     }
 
-    private sealed class LocalUsageCursor
+    internal sealed class LocalUsageCursor : CachedCursor
     {
-        public readonly object Sync = new();
-        public readonly MemoryStream PendingLine = new();
         public readonly List<LocalUsageRecord> Records = new();
         public long Offset;
         public string? ProjectPath;
@@ -58,7 +77,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         public bool HasTokenUsageRecords;
     }
 
-    private sealed record LocalUsageRecord(
+    internal sealed record LocalUsageRecord(
         DateOnly Date,
         int Hour,
         string ProjectPath,
@@ -67,10 +86,20 @@ internal sealed class AiManagerService : IAsyncDisposable
         bool IsLegacy = false,
         DateTimeOffset? Timestamp = null);
 
+    internal sealed record LocalSummaryEntry(long Length, DateTime LastWriteUtc,
+        DateOnly Start, DateOnly End, LocalUsageRecord[] Records);
+
     public AiManagerService(string? settingsPath = null, string? sharedUsageSourceHome = null,
         SharedUsageClient? sharedUsageClient = null,
-        Func<CancellationToken, Task<IReadOnlyList<AiLimitWindow>>>? sharedUsageLimitsReader = null)
+        Func<CancellationToken, Task<IReadOnlyList<AiLimitWindow>>>? sharedUsageLimitsReader = null,
+        AiManagerRuntime? runtime = null)
     {
+        _runtime = runtime ?? new AiManagerRuntime();
+        _ownsRuntime = runtime is null;
+        _client = _runtime.Client;
+        _rolloutCursors = _runtime.RolloutCursors;
+        _localUsageCursors = _runtime.LocalUsageCursors;
+        _rolloutActivityIndex = _runtime.ActivityIndex;
         _sharedUsageClient = sharedUsageClient ?? new SharedUsageClient();
         _settingsPath = settingsPath ?? AppPaths.GetSettingsFile();
         _sharedUsageSourceHome = sharedUsageSourceHome;
@@ -80,28 +109,39 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     public AiManagerSettings Settings { get; private set; }
     public AiManagerSnapshot? LastSnapshot { get; private set; }
+    public string? LastQuotaError { get; private set; }
     internal string AccountResetStatePath => Path.Combine(Path.GetDirectoryName(_settingsPath)!, "account-reset-state.json");
 
     public async Task<AiManagerSnapshot> RefreshAsync(CancellationToken cancellationToken = default)
     {
-        await _client.ConnectAsync(cancellationToken);
+        try { await _client.ConnectAsync(cancellationToken); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LastQuotaError = ex.Message;
+            // A disconnected remote process must not stop persisted local tasks from updating.
+            await RefreshTaskSummariesAsync(appServerAvailable: false, cancellationToken);
+            throw;
+        }
         // These requests are independent. Starting them together removes a full optional-request
         // round trip from first paint while the local JSONL work stays off the UI thread.
         var rateTask = _client.RequestAsync("account/rateLimits/read",
             cancellationToken: cancellationToken, timeout: TimeSpan.FromSeconds(45));
         var usageTask = TryRequestAsync("account/usage/read", null, TimeSpan.FromSeconds(12), cancellationToken);
-        var threadsTask = TryRequestAsync("thread/list", BuildThreadListParameters(), TimeSpan.FromSeconds(12), cancellationToken);
-        var localDataTask = Task.Run(() =>
-        {
-            var tasks = DiscoverLocalTasks(48, 12, cancellationToken);
-            var usage = DiscoverLocalUsage(cancellationToken);
-            return (Tasks: tasks, Usage: usage);
-        }, cancellationToken);
+        var tasksTask = RefreshTaskSummariesAsync(appServerAvailable: true, cancellationToken);
+        var localUsageTask = Task.Run(() => DiscoverLocalUsage(cancellationToken), cancellationToken);
 
-        var rate = await rateTask;
+        // Publish task state independently of the slower quota requests, including when a
+        // quota request later fails. Both windows receive this same canonical task list.
+        var tasks = await tasksTask;
+        JsonElement rate;
+        try { rate = await rateTask; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LastQuotaError = ex.Message;
+            throw;
+        }
         var usage = await usageTask;
-        var threads = await threadsTask;
-        var localData = await localDataTask;
+        var localUsage = await localUsageTask;
         var limits = ParseLimits(rate);
         AiSharedUsageSummary sharedUsage;
         try { sharedUsage = await SyncSharedUsageAsync(cancellationToken, limits: limits); }
@@ -111,40 +151,35 @@ internal sealed class AiManagerService : IAsyncDisposable
                 Error = LocalizationService.L("本机共享计数读取或保存失败：", "Unable to read or save local shared counts: ") + ex.Message };
         }
 
-        var serverThreads = threads is { } threadValue ? ParseThreads(threadValue) : new();
-        var mergedThreads = SortTasksByStatusAndTime(MergeFloatingTasks(serverThreads, localData.Tasks)
-                .Where(IsUsefulFloatingTask))
-            .Take(12)
-            .ToList();
+        LastQuotaError = null;
         LastSnapshot = new AiManagerSnapshot
         {
             Limits = limits,
             DailyUsage = usage is { } usageValue ? ParseDailyUsage(usageValue) : new(),
             LifetimeTokens = usage is { } usageSummary ? ParseLifetimeTokens(usageSummary) : null,
-            Threads = mergedThreads,
+            Threads = tasks.Take(12).ToList(),
             ResetCredits = ParseResetCredits(rate),
-            LocalUsage = localData.Usage,
+            LocalUsage = localUsage,
             SharedUsage = sharedUsage,
             CapturedAt = DateTimeOffset.Now
         };
         return LastSnapshot;
     }
 
-    public async Task<AiFloatingSnapshot> RefreshFloatingAsync(CancellationToken cancellationToken = default)
+    public async Task<AiFloatingSnapshot> RefreshFloatingAsync(CancellationToken cancellationToken = default,
+        bool forceRefresh = false)
     {
-        var appServerAvailable = await TryConnectFloatingAsync(cancellationToken);
+        var appServerAvailable = await TryConnectFloatingAsync(cancellationToken, forceRefresh);
         var now = DateTimeOffset.Now;
-        var refreshLimits = _floatingLimits.Count == 0 || now - _floatingLimitsAt >= TimeSpan.FromMinutes(1);
-        var refreshModels = _floatingModelsRoot is null || now - _floatingModelsAt >= TimeSpan.FromMinutes(10);
+        var refreshLimits = forceRefresh || now - _floatingLimitsAttemptAt >= TimeSpan.FromMinutes(1);
+        var refreshModels = forceRefresh || now - _floatingModelsAttemptAt >=
+            TimeSpan.FromMinutes(_floatingModelsRoot is null ? 1 : 10);
+        if (appServerAvailable && refreshLimits) _floatingLimitsAttemptAt = now;
+        if (appServerAvailable && refreshModels) _floatingModelsAttemptAt = now;
 
-        // Start from the fast state database so a cold floating-window launch does not wait for
-        // a full rollout scan. Each visible task is enriched below from thread/read and its rollout.
-        var localTasksTask = Task.Run(() => DiscoverLocalTasks(24, 8, cancellationToken), cancellationToken);
-        var threadsTask = appServerAvailable
-            ? TryRequestAsync("thread/list", BuildLatestThreadParameters(), TimeSpan.FromSeconds(10), cancellationToken)
-            : Task.FromResult<JsonElement?>(null);
+        var tasksTask = RefreshTaskSummariesAsync(appServerAvailable, cancellationToken);
         var rateTask = appServerAvailable && refreshLimits
-            ? TryRequestAsync("account/rateLimits/read", null, TimeSpan.FromSeconds(8), cancellationToken)
+            ? TryReadFloatingQuotaAsync(cancellationToken)
             : Task.FromResult<JsonElement?>(null);
         var modelsTask = appServerAvailable && refreshModels
             ? TryRequestAsync("model/list", new JsonObject
@@ -153,7 +188,7 @@ internal sealed class AiManagerService : IAsyncDisposable
                 ["includeHidden"] = true
             }, TimeSpan.FromSeconds(8), cancellationToken)
             : Task.FromResult<JsonElement?>(null);
-        var threadsRoot = await threadsTask;
+        var tasks = await tasksTask;
         var rate = await rateTask;
         var modelsRoot = await modelsTask;
         if (rate is { } rateValue)
@@ -167,23 +202,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             _floatingModelsAt = now;
         }
 
-        var threads = threadsRoot is { } threadValue ? ParseThreads(threadValue) : new();
-        var serverCandidates = SortTasksByStatusAndTime(threads.Where(IsUsefulFloatingTask))
-            .Take(8)
-            .ToList();
-        var enrichedServerTasks = serverCandidates.Count == 0
-            ? new List<AiThreadSummary>()
-            : (await Task.WhenAll(serverCandidates.Select(item => EnrichFloatingTaskAsync(item, cancellationToken))))
-                .ToList();
-
-        // A packaged app-server can temporarily return an empty state database or `notLoaded`
-        // for sessions owned by another Codex process. Rollout JSONL files are shared persisted
-        // state, so merge them in as an independent source instead of showing a false empty state.
-        var localTasks = await localTasksTask;
-        var visibleTasks = SortTasksByStatusAndTime(MergeFloatingTasks(enrichedServerTasks, localTasks)
-                .Where(IsUsefulFloatingTask))
-            .Take(8)
-            .ToList();
+        var visibleTasks = tasks.Take(8).ToList();
         var focus = visibleTasks.FirstOrDefault();
 
         var model = ResolveModel(_floatingModelsRoot, focus?.ModelName);
@@ -202,20 +221,128 @@ internal sealed class AiManagerService : IAsyncDisposable
                 ? LocalizationService.L("额度窗口未知", "Unknown quota window")
                 : $"{tightest.DisplayName} · {tightest.WindowName}",
             ResetsAt = tightest?.ResetsAt,
+            QuotaError = LastQuotaError,
+            QuotaCapturedAt = _floatingLimitsAt == default ? null : _floatingLimitsAt,
             CapturedAt = DateTimeOffset.Now
         };
     }
 
-    private async Task<bool> TryConnectFloatingAsync(CancellationToken cancellationToken)
+    private async Task<List<AiThreadSummary>> RefreshTaskSummariesAsync(bool appServerAvailable,
+        CancellationToken cancellationToken)
+    {
+        // Main and floating windows own separate clients. Serialize the complete read and
+        // publish cycle so an older request cannot overwrite a newer task snapshot.
+        await TaskRefreshGate.WaitAsync(cancellationToken);
+        try
+        {
+            var taskRevision = AiTaskSnapshotFeed.CurrentRevision;
+            var localTasksTask = Task.Run(() =>
+                DiscoverLocalTasks(LocalTaskScanLimit, TaskCandidateLimit, cancellationToken), cancellationToken);
+            var threadsTask = appServerAvailable
+                ? TryRequestAsync("thread/list", BuildThreadListParameters(TaskCandidateLimit, interactiveOnly: true),
+                    TimeSpan.FromSeconds(10), cancellationToken)
+                : Task.FromResult<JsonElement?>(null);
+            var threadsRoot = await threadsTask;
+            var localTasks = await localTasksTask;
+            var serverTasks = threadsRoot is { } root ? ParseThreads(root) : new List<AiThreadSummary>();
+            var tasks = await BuildTaskSummariesAsync(serverTasks, localTasks, appServerAvailable, cancellationToken);
+            return AiTaskSnapshotFeed.PublishIfCurrent(tasks, taskRevision).Tasks.ToList();
+        }
+        finally
+        {
+            TaskRefreshGate.Release();
+        }
+    }
+
+    internal async Task<List<AiThreadSummary>> BuildTaskSummariesAsync(IEnumerable<AiThreadSummary> serverTasks,
+        IEnumerable<AiThreadSummary> localTasks, bool appServerAvailable = true,
+        CancellationToken cancellationToken = default)
+    {
+        ReloadTaskNameSource();
+        // A separately launched app-server may omit sessions owned by the desktop. Merge
+        // persisted local sessions before enrichment and apply limits only after final status sorting.
+        var candidates = MergeFloatingTasks(serverTasks, localTasks).Where(IsUsefulFloatingTask).ToList();
+        var enriched = await Task.WhenAll(candidates.Select(item =>
+            appServerAvailable || (!string.IsNullOrWhiteSpace(item.RolloutPath) && !string.IsNullOrWhiteSpace(item.ModelName))
+                ? EnrichFloatingTaskAsync(item, cancellationToken)
+                : Task.FromResult(item)));
+        var ordered = SortTasksByStatusAndTime(ApplyDesktopStatuses(enriched.Where(IsUsefulFloatingTask)))
+            .Take(TaskCandidateLimit)
+            .ToList();
+        _runtime.DesktopTasks.SetTrackedThreads(ordered.Select(task => task.Id));
+        return ordered;
+    }
+
+    internal AiTaskSnapshot RefreshLocalTaskSnapshot(string sessionsRoot, CancellationToken cancellationToken = default)
+    {
+        var scanStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        ReloadTaskNameSource();
+        var localTasks = DiscoverLocalTasks(sessionsRoot, LocalTaskScanLimit, TaskCandidateLimit, cancellationToken);
+        var changedStates = localTasks.Where(task =>
+                (_monitoredTaskStates.TryGetValue(task.Id, out var previous) && previous != task.Status) ||
+                task.Status == "waitingOnUserInput")
+            .Select(task => task.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        cancellationToken.ThrowIfCancellationRequested();
+        var snapshot = AiTaskSnapshotFeed.Update(current =>
+        {
+            var candidates = SortTasksByStatusAndTime(ApplyDesktopStatuses(MergeFloatingTasksCore(current, localTasks, changedStates)))
+                .Take(TaskCandidateLimit).ToList();
+            _runtime.DesktopTasks.SetTrackedThreads(candidates.Select(task => task.Id));
+            return candidates;
+        });
+        _monitoredTaskStates.Clear();
+        foreach (var task in localTasks) _monitoredTaskStates[task.Id] = task.Status;
+        TaskMonitorTrace.Record("scan", revision: snapshot.Revision,
+            detail: $"selected={localTasks.Count}; elapsedMs={System.Diagnostics.Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds:0}");
+        return snapshot;
+    }
+
+    private void ReloadTaskNameSource()
     {
         try
         {
-            await _client.ConnectAsync(cancellationToken);
-            return true;
+            if (!File.Exists(_settingsPath)) return;
+            using var document = JsonDocument.Parse(File.ReadAllText(_settingsPath));
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return;
+            Settings.TaskNameSource = TaskNameSources.Normalize(ReadString(document.RootElement, "taskNameSource"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AiManager] Task name preference unavailable: {ex.Message}");
+        }
+    }
+
+    private async Task<JsonElement?> TryReadFloatingQuotaAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _client.RequestAsync("account/rateLimits/read", cancellationToken: cancellationToken,
+                timeout: TimeSpan.FromSeconds(8));
+            LastQuotaError = null;
+            return result;
         }
         catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or IOException)
         {
-            System.Diagnostics.Debug.WriteLine($"[AiManager] App-server unavailable; using local sessions: {ex.Message}");
+            LastQuotaError = ex.Message;
+            return null;
+        }
+    }
+
+    private async Task<bool> TryConnectFloatingAsync(CancellationToken cancellationToken, bool forceRefresh = false)
+    {
+        if (_client.IsConnected) return true;
+        if (!forceRefresh && DateTimeOffset.Now < _nextConnectAttemptAt) return false;
+        _nextConnectAttemptAt = DateTimeOffset.Now.AddSeconds(30);
+        try
+        {
+            await _client.ConnectAsync(cancellationToken);
+            _nextConnectAttemptAt = default;
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LastQuotaError = ex.Message;
+            System.Diagnostics.Debug.WriteLine("[AiManager] App-server unavailable; using local sessions.");
             return false;
         }
     }
@@ -231,43 +358,54 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     private static int TaskStatusOrder(string status) => status switch
     {
-        "waitingOnApproval" or "waitingOnUserInput" => 0,
-        "active" or "inProgress" => 1,
-        "failed" or "systemError" => 2,
-        "interrupted" => 3,
-        "idle" or "completed" => 4,
-        "notLoaded" => 5,
-        _ => 6
+        "waitingOnApproval" => 0,
+        "waitingOnUserInput" => 1,
+        "active" or "inProgress" => 2,
+        "failed" or "systemError" => 3,
+        "interrupted" => 4,
+        "idle" or "completed" => 5,
+        "notLoaded" => 6,
+        _ => 7
     };
+
+    internal static string ResolveExecutionStatus(string threadStatus, string executionStatus) =>
+        // Waiting flags describe live interaction. Turn/rollout boundaries only describe
+        // execution and can still refer to the previous turn while approval/input is pending.
+        threadStatus is "waitingOnApproval" or "waitingOnUserInput" ? threadStatus : executionStatus;
 
     private List<AiThreadSummary> DiscoverLocalTasks(int scanLimit, int resultLimit,
         CancellationToken cancellationToken = default)
     {
+        var configuredHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        var codexHome = string.IsNullOrWhiteSpace(configuredHome)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex")
+            : configuredHome;
+        return DiscoverLocalTasks(Path.Combine(codexHome, "sessions"), scanLimit, resultLimit, cancellationToken);
+    }
+
+    internal List<AiThreadSummary> DiscoverLocalTasks(string sessionsRoot, int scanLimit, int resultLimit,
+        CancellationToken cancellationToken = default)
+    {
         try
         {
-            var configuredHome = Environment.GetEnvironmentVariable("CODEX_HOME");
-            var codexHome = string.IsNullOrWhiteSpace(configuredHome)
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex")
-                : configuredHome;
-            var sessionsRoot = Path.Combine(codexHome, "sessions");
             if (!Directory.Exists(sessionsRoot)) return new();
+            _runtime.PruneCaches();
 
-            var candidates = Directory.EnumerateFiles(sessionsRoot, "*.jsonl", SearchOption.AllDirectories)
-                .Select(path => new { Path = path, UpdatedAt = File.GetLastWriteTimeUtc(path) })
-                .OrderByDescending(item => item.UpdatedAt)
+            var candidates = _rolloutActivityIndex.GetCandidates(sessionsRoot, cancellationToken)
+                .Where(item => item.IsUserSession)
                 .Take(scanLimit)
                 .ToList();
             var tasks = new Dictionary<string, AiThreadSummary>(StringComparer.OrdinalIgnoreCase);
             foreach (var item in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var task = ReadLocalTask(item.Path, item.UpdatedAt);
+                var task = ReadLocalTask(item.Path, item.ActivityAtUtc);
                 if (task is null || !IsUsefulFloatingTask(task) || tasks.ContainsKey(task.Id)) continue;
                 tasks[task.Id] = task;
-                if (tasks.Count >= resultLimit) break;
             }
-            return tasks.Values
-                .OrderByDescending(item => item.UpdatedAt)
+            return SortTasksByStatusAndTime(ApplyDesktopStatuses(tasks.Values))
+                .Take(resultLimit)
+                .Select(ApplyTaskNamePreference)
                 .ToList();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -281,8 +419,8 @@ internal sealed class AiManagerService : IAsyncDisposable
     {
         // Reading status also incrementally parses the small set of metadata needed by the
         // floating window. Existing files are scanned once; later refreshes only read appends.
-        var status = ReadRolloutExecutionStatus(path, "completed");
-        if (!_rolloutCursors.TryGetValue(path, out var cursor)) return null;
+        var status = ReadRolloutExecutionStatus(path, "completed", out var cursor);
+        if (cursor is null) return null;
         lock (cursor.Sync)
         {
             if (string.IsNullOrWhiteSpace(cursor.ThreadId) ||
@@ -301,14 +439,19 @@ internal sealed class AiManagerService : IAsyncDisposable
                 ModelName = cursor.ModelName,
                 ReasoningEffort = cursor.ReasoningEffort,
                 RolloutPath = path,
-                UpdatedAt = new DateTimeOffset(DateTime.SpecifyKind(updatedAtUtc, DateTimeKind.Utc))
+                UpdatedAt = cursor.LatestRecordAt ?? new DateTimeOffset(DateTime.SpecifyKind(updatedAtUtc, DateTimeKind.Utc))
             };
         }
     }
 
     private IEnumerable<AiThreadSummary> MergeFloatingTasks(
         IEnumerable<AiThreadSummary> serverTasks,
-        IEnumerable<AiThreadSummary> localTasks)
+        IEnumerable<AiThreadSummary> localTasks) => MergeFloatingTasksCore(serverTasks, localTasks);
+
+    private IEnumerable<AiThreadSummary> MergeFloatingTasksCore(
+        IEnumerable<AiThreadSummary> serverTasks,
+        IEnumerable<AiThreadSummary> localTasks,
+        IReadOnlySet<string>? changedLocalStates = null)
     {
         var merged = new Dictionary<string, AiThreadSummary>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in serverTasks) merged[item.Id] = ApplyTaskNamePreference(item);
@@ -332,7 +475,9 @@ internal sealed class AiManagerService : IAsyncDisposable
                 Title = SelectTaskTitle(conversationTitle, latestUserMessage, server.Title),
                 ConversationTitle = conversationTitle,
                 LatestUserMessage = latestUserMessage,
-                Status = local.Status,
+                Status = changedLocalStates?.Contains(local.Id) == true && server.Status != "waitingOnApproval"
+                    ? local.Status
+                    : ResolveExecutionStatus(server.Status, local.Status),
                 ModelName = local.ModelName ?? server.ModelName,
                 ReasoningEffort = local.ReasoningEffort ?? server.ReasoningEffort,
                 RolloutPath = local.RolloutPath ?? server.RolloutPath,
@@ -348,12 +493,32 @@ internal sealed class AiManagerService : IAsyncDisposable
         Title = SelectTaskTitle(item.ConversationTitle, item.LatestUserMessage, item.Title),
         ConversationTitle = item.ConversationTitle,
         LatestUserMessage = item.LatestUserMessage,
-        Status = item.Status,
+        Status = item.StatusBeforeDesktopObservation ?? item.Status,
         ModelName = item.ModelName,
         ReasoningEffort = item.ReasoningEffort,
         RolloutPath = item.RolloutPath,
         UpdatedAt = item.UpdatedAt
     };
+
+    private IEnumerable<AiThreadSummary> ApplyDesktopStatuses(IEnumerable<AiThreadSummary> tasks)
+    {
+        foreach (var task in tasks)
+        {
+            var status = _runtime.DesktopTasks.GetStatus(task.Id);
+            // Async desktop questions can remain unanswered while execution continues.
+            // The rollout tracker has the exact reply identity; a coarse running flag cannot dismiss it.
+            if (status == "inProgress" && task.Status == "waitingOnUserInput") status = null;
+            if (status is null) { yield return task; continue; }
+            yield return new AiThreadSummary
+            {
+                Id = task.Id, Title = task.Title, ConversationTitle = task.ConversationTitle,
+                LatestUserMessage = task.LatestUserMessage, Status = status,
+                StatusBeforeDesktopObservation = task.StatusBeforeDesktopObservation ?? task.Status,
+                ModelName = task.ModelName, ReasoningEffort = task.ReasoningEffort,
+                RolloutPath = task.RolloutPath, UpdatedAt = task.UpdatedAt
+            };
+        }
+    }
 
     private string SelectTaskTitle(string? conversationTitle, string? latestUserMessage, string? fallback)
     {
@@ -439,7 +604,7 @@ internal sealed class AiManagerService : IAsyncDisposable
                 if (_sharedUsageLimitsReader is not null) limits = await _sharedUsageLimitsReader(cancellationToken);
                 else
                 {
-                    limits = LastSnapshot?.Limits ?? _floatingLimits;
+                    limits = LastQuotaError is null ? LastSnapshot?.Limits ?? _floatingLimits : [];
                     if (settings.SharedUsageResetMode == SharedUsageResetModes.AccountReset && _client.IsConnected)
                     {
                         var rate = await TryRequestAsync("account/rateLimits/read", null, TimeSpan.FromSeconds(8), cancellationToken);
@@ -451,10 +616,16 @@ internal sealed class AiManagerService : IAsyncDisposable
             {
                 // Capture available history for this policy's manual baseline, keeping the
                 // other policies' independent baselines untouched.
-                var samples = ReadSharedUsageSamples(action == SharedUsageCounterAction.Clear || counter.RequiresTimestampMigration
-                    ? SharedUsageResetModes.Never : settings.SharedUsageResetMode, cancellationToken);
+                var scan = ReadSharedUsageSamples(action == SharedUsageCounterAction.Clear || counter.RequiresTimestampMigration
+                    ? SharedUsageResetModes.Never : settings.SharedUsageResetMode, counter.RequiresTimestampMigration, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                return counter.Update(samples, settings.SharedUsageResetMode, DateTimeOffset.Now, limits, action);
+                var summary = counter.Update(scan.Samples, settings.SharedUsageResetMode, DateTimeOffset.Now, limits, action);
+                // A failed save must retry the same observations next time. Commit fingerprints
+                // only after the ledger has accepted them, never merely after reading a file.
+                foreach (var (path, version) in scan.Versions) _sharedUsageFileVersions[path] = version;
+                foreach (var path in _sharedUsageFileVersions.Keys.Where(path => !scan.Seen.Contains(path)).ToArray())
+                    _sharedUsageFileVersions.Remove(path);
+                return summary;
             }, cancellationToken);
             // An unknown boundary must not upload a fake zero or lifetime total as reset-period usage.
             if (usage.Error is not null)
@@ -476,11 +647,12 @@ internal sealed class AiManagerService : IAsyncDisposable
             _sharedUsageCounter = new SharedUsageCounter(Path.Combine(Path.GetDirectoryName(_settingsPath)!,
                 $"shared-usage-{deviceId}.json"), Settings.SharedUsageResetMode);
             _sharedUsageCounterDevice = deviceId;
+            _sharedUsageFileVersions.Clear();
         }
         return _sharedUsageCounter;
     }
 
-    private List<SharedUsageSample> ReadSharedUsageSamples(string mode, CancellationToken cancellationToken)
+    private SharedUsageScan ReadSharedUsageSamples(string mode, bool forceRead, CancellationToken cancellationToken)
     {
         var configuredHome = Environment.GetEnvironmentVariable("CODEX_HOME");
         var codexHome = _sharedUsageSourceHome ?? (string.IsNullOrWhiteSpace(configuredHome)
@@ -490,6 +662,8 @@ internal sealed class AiManagerService : IAsyncDisposable
         var monday = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
         var earliestWriteUtc = monday.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
         var samples = new List<SharedUsageSample>();
+        var versions = new Dictionary<string, SharedFileStamp>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Archived rollouts keep the same session identity and must not count a second time.
         foreach (var folder in new[] { "sessions", "archived_sessions" })
         {
@@ -498,18 +672,22 @@ internal sealed class AiManagerService : IAsyncDisposable
             foreach (var path in Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (mode == SharedUsageResetModes.Weekly && File.GetLastWriteTimeUtc(path) < earliestWriteUtc) continue;
-                ScanLocalUsageFile(path, DateOnly.FromDateTime(File.GetLastWriteTime(path)), cancellationToken);
+                seen.Add(path);
+                var file = new FileInfo(path);
+                if (mode == SharedUsageResetModes.Weekly && file.LastWriteTimeUtc < earliestWriteUtc) continue;
+                var version = new SharedFileStamp(file.Length, file.LastWriteTimeUtc);
+                if (!forceRead && _sharedUsageFileVersions.TryGetValue(path, out var previous) && previous == version) continue;
+                var cursor = ScanLocalUsageFile(path, DateOnly.FromDateTime(file.LastWriteTime), cancellationToken);
                 var sessionId = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                     Encoding.UTF8.GetBytes(Path.GetFileNameWithoutExtension(path))));
-                var cursor = _localUsageCursors[path];
                 lock (cursor.Sync)
                     samples.AddRange(cursor.Records.GroupBy(item => (item.Date, item.ModelName, item.Timestamp))
                         .Select(group => new SharedUsageSample(sessionId, group.Key.Date, group.Key.ModelName,
                             group.Sum(item => item.Tokens), group.Key.Timestamp)));
+                versions[path] = version;
             }
         }
-        return samples;
+        return new SharedUsageScan(samples, versions, seen);
     }
 
     public AiForecast BuildForecast(AiManagerSnapshot snapshot)
@@ -609,27 +787,46 @@ internal sealed class AiManagerService : IAsyncDisposable
     {
         var weekEnd = weekStart.AddDays(6);
         if (!Directory.Exists(sessionsRoot))
+        {
+            PruneUsageSummaries(sessionsRoot, null);
             return new AiLocalUsageSummary { PeriodStart = weekStart, PeriodEnd = weekEnd };
+        }
         var today = DateOnly.FromDateTime(DateTime.Now);
         var rollingStart = today.AddDays(-6);
         var scanStart = rollingStart < weekStart ? rollingStart : weekStart;
         var earliestWriteUtc = scanStart.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
         var sessionRecords = new List<(string SessionPath, LocalUsageRecord Record)>();
+        var eligible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var path in Directory.EnumerateFiles(sessionsRoot, "*.jsonl", SearchOption.AllDirectories))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var updatedAt = File.GetLastWriteTimeUtc(path);
+            var file = new FileInfo(path);
+            var updatedAt = file.LastWriteTimeUtc;
             if (updatedAt < earliestWriteUtc) continue;
-            ScanLocalUsageFile(path, DateOnly.FromDateTime(updatedAt.ToLocalTime()), cancellationToken);
-            if (!_localUsageCursors.TryGetValue(path, out var cursor)) continue;
-            lock (cursor.Sync)
+            eligible.Add(path);
+            if (!_runtime.UsageSummaries.TryGetValue(path, out var cached) || cached.Length != file.Length ||
+                cached.LastWriteUtc != updatedAt || cached.Start != scanStart || cached.End != weekEnd)
             {
-                sessionRecords.AddRange(cursor.Records
-                    .Where(item => item.Date >= scanStart && item.Date <= weekEnd)
-                    .Select(item => (path, item)));
+                var cursor = ScanLocalUsageFile(path, DateOnly.FromDateTime(updatedAt.ToLocalTime()), cancellationToken);
+                lock (cursor.Sync)
+                {
+                    // Dashboard statistics need hour/project/model totals, not a retained
+                    // object for every historical token event. Keep the compact recent view
+                    // independently of the bounded detailed parser cache.
+                    var records = cursor.Records.Where(item => item.Date >= scanStart && item.Date <= weekEnd)
+                        .GroupBy(item => (item.Date, item.Hour, item.ProjectPath, item.ModelName))
+                        .Select(group => new LocalUsageRecord(group.Key.Date, group.Key.Hour,
+                            group.Key.ProjectPath, group.Key.ModelName, group.Sum(item => item.Tokens)))
+                        .ToArray();
+                    cached = new LocalSummaryEntry(file.Length, updatedAt, scanStart, weekEnd, records);
+                }
+                lock (_runtime.CacheSync)
+                    if (!_runtime.IsDisposed) _runtime.UsageSummaries[path] = cached;
             }
+            sessionRecords.AddRange(cached.Records.Select(item => (path, item)));
         }
+        PruneUsageSummaries(sessionsRoot, eligible);
 
         var weeklyRecords = sessionRecords
             .Where(item => item.Record.Date >= weekStart && item.Record.Date <= weekEnd)
@@ -680,9 +877,18 @@ internal sealed class AiManagerService : IAsyncDisposable
         };
     }
 
-    private void ScanLocalUsageFile(string path, DateOnly fallbackDate, CancellationToken cancellationToken)
+    private void PruneUsageSummaries(string sessionsRoot, HashSet<string>? eligible)
     {
-        var cursor = _localUsageCursors.GetOrAdd(path, _ => new LocalUsageCursor());
+        var prefix = Path.GetFullPath(sessionsRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        foreach (var path in _runtime.UsageSummaries.Keys)
+            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && (eligible is null || !eligible.Contains(path)))
+                _runtime.UsageSummaries.TryRemove(path, out _);
+    }
+
+    private LocalUsageCursor ScanLocalUsageFile(string path, DateOnly fallbackDate, CancellationToken cancellationToken)
+    {
+        using var lease = _runtime.AcquireUsage(path);
+        var cursor = lease.Value;
         lock (cursor.Sync)
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
@@ -694,34 +900,40 @@ internal sealed class AiManagerService : IAsyncDisposable
                 cursor.ModelName = null;
                 cursor.HasTokenUsageRecords = false;
                 cursor.Records.Clear();
-                cursor.PendingLine.SetLength(0);
+                ResetPendingLine(cursor.PendingLine);
             }
+            if (stream.Length == cursor.Offset) return cursor;
             stream.Position = cursor.Offset;
-            var buffer = new byte[64 * 1024];
-            int read;
-            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var segmentStart = 0;
-                for (var index = 0; index < read; index++)
+                int read;
+                while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
                 {
-                    if (buffer[index] != (byte)'\n') continue;
-                    cursor.PendingLine.Write(buffer, segmentStart, index - segmentStart);
-                    ParseLocalUsageLine(cursor, fallbackDate);
-                    cursor.PendingLine.SetLength(0);
-                    segmentStart = index + 1;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var segmentStart = 0;
+                    for (var index = 0; index < read; index++)
+                    {
+                        if (buffer[index] != (byte)'\n') continue;
+                        cursor.PendingLine.Append(buffer.AsSpan(segmentStart, index - segmentStart));
+                        ParseLocalUsageLine(cursor, fallbackDate);
+                        ResetPendingLine(cursor.PendingLine);
+                        segmentStart = index + 1;
+                    }
+                    if (segmentStart < read)
+                        cursor.PendingLine.Append(buffer.AsSpan(segmentStart, read - segmentStart));
+                    cursor.Offset += read;
                 }
-                if (segmentStart < read)
-                    cursor.PendingLine.Write(buffer, segmentStart, read - segmentStart);
-                cursor.Offset += read;
             }
+            finally { ArrayPool<byte>.Shared.Return(buffer); }
         }
+        return cursor;
     }
 
     private static void ParseLocalUsageLine(LocalUsageCursor cursor, DateOnly fallbackDate)
     {
-        if (cursor.PendingLine.Length == 0) return;
-        var line = Encoding.UTF8.GetString(cursor.PendingLine.GetBuffer(), 0, (int)cursor.PendingLine.Length);
+        var line = cursor.PendingLine.CompleteRecord();
+        if (line.IsEmpty) return;
         try
         {
             using var document = JsonDocument.Parse(line, new JsonDocumentOptions { MaxDepth = 128 });
@@ -919,7 +1131,7 @@ internal sealed class AiManagerService : IAsyncDisposable
     {
         var sources = new JsonArray();
         var sourceKinds = interactiveOnly
-            ? new[] { "cli", "vscode", "exec", "appServer" }
+            ? new[] { "cli", "vscode", "exec", "appServer", "unknown" }
             : new[]
             {
                 "cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview",
@@ -936,14 +1148,6 @@ internal sealed class AiManagerService : IAsyncDisposable
             ["useStateDbOnly"] = true
         };
     }
-
-    private static JsonObject BuildLatestThreadParameters() => new()
-    {
-        ["limit"] = 8,
-        ["sortKey"] = "updated_at",
-        ["sortDirection"] = "desc",
-        ["useStateDbOnly"] = true
-    };
 
     private static List<AiLimitWindow> ParseLimits(JsonElement root)
     {
@@ -1019,8 +1223,9 @@ internal sealed class AiManagerService : IAsyncDisposable
         if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return result;
         foreach (var item in data.EnumerateArray())
         {
-            var conversationTitle = ReadString(item, "name") ?? ReadString(item, "title");
-            var latestUserMessage = ReadString(item, "preview");
+            if (IsSubAgentThread(item)) continue;
+            var conversationTitle = BoundTaskMetadata(ReadString(item, "name") ?? ReadString(item, "title"));
+            var latestUserMessage = BoundTaskMetadata(ReadString(item, "preview"), preserveLastRequest: true);
             var title = NormalizeTitle(conversationTitle ?? latestUserMessage ?? "未命名任务");
             var status = item.TryGetProperty("status", out var statusElement)
                 ? ParseThreadStatus(statusElement)
@@ -1042,13 +1247,24 @@ internal sealed class AiManagerService : IAsyncDisposable
         return result;
     }
 
+    private static bool IsSubAgentThread(JsonElement thread)
+    {
+        if (!thread.TryGetProperty("source", out var source)) return false;
+        return source.ValueKind switch
+        {
+            JsonValueKind.String => source.GetString()?.StartsWith("subAgent", StringComparison.OrdinalIgnoreCase) == true,
+            JsonValueKind.Object => source.TryGetProperty("subAgent", out _),
+            _ => false
+        };
+    }
+
     private async Task<AiThreadSummary> EnrichFromLatestTurnAsync(AiThreadSummary summary,
         CancellationToken cancellationToken)
     {
         var detail = await TryRequestAsync("thread/read", new JsonObject
         {
             ["threadId"] = summary.Id,
-            ["includeTurns"] = true
+            ["includeTurns"] = false
         }, TimeSpan.FromSeconds(7), cancellationToken);
         if (detail is not { } root || !root.TryGetProperty("thread", out var thread)) return summary;
 
@@ -1059,7 +1275,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         {
             foreach (var turn in turns.EnumerateArray().Reverse())
             {
-                status = ReadString(turn, "status") ?? status;
+                status = ResolveExecutionStatus(status, ReadString(turn, "status") ?? status);
                 break;
             }
         }
@@ -1067,10 +1283,22 @@ internal sealed class AiManagerService : IAsyncDisposable
         // active flag. The shared rollout is authoritative for the latest execution boundary
         // and is appended while the desktop task is running.
         var rolloutPath = ReadString(thread, "path") ?? summary.RolloutPath;
-        status = ReadRolloutExecutionStatus(rolloutPath, status);
+        status = ReadRolloutExecutionStatus(rolloutPath, status, out var localCursor);
         var conversationTitle = ReadString(thread, "name") ?? ReadString(thread, "title") ??
                                 summary.ConversationTitle;
         var latestUserMessage = FindLatestUserMessage(thread) ?? summary.LatestUserMessage;
+        var modelName = ReadString(thread, "model") ?? summary.ModelName;
+        var reasoningEffort = ReadString(thread, "reasoningEffort") ?? summary.ReasoningEffort;
+        if (localCursor is not null)
+            lock (localCursor.Sync)
+            {
+                conversationTitle ??= localCursor.FirstUserMessage;
+                latestUserMessage = localCursor.LatestUserMessage ?? latestUserMessage;
+                modelName ??= localCursor.ModelName;
+                reasoningEffort ??= localCursor.ReasoningEffort;
+            }
+        conversationTitle = BoundTaskMetadata(conversationTitle);
+        latestUserMessage = BoundTaskMetadata(latestUserMessage, preserveLastRequest: true);
         return new AiThreadSummary
         {
             Id = summary.Id,
@@ -1078,8 +1306,8 @@ internal sealed class AiManagerService : IAsyncDisposable
             ConversationTitle = conversationTitle,
             LatestUserMessage = latestUserMessage,
             Status = status,
-            ModelName = ReadString(thread, "model") ?? summary.ModelName,
-            ReasoningEffort = ReadString(thread, "reasoningEffort") ?? summary.ReasoningEffort,
+            ModelName = modelName,
+            ReasoningEffort = reasoningEffort,
             RolloutPath = rolloutPath,
             UpdatedAt = ReadLong(thread, "updatedAt") is var updated && updated > 0
                 ? DateTimeOffset.FromUnixTimeSeconds(updated)
@@ -1104,7 +1332,28 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     private static string NormalizeTitle(string title)
     {
-        return TaskTitleFormatter.Format(title);
+        return BoundTaskMetadata(TaskTitleFormatter.Format(BoundTaskMetadata(title, preserveLastRequest: true)))!;
+    }
+
+    private static string? BoundTaskMetadata(string? text, bool preserveLastRequest = false)
+    {
+        const int maximumCharacters = 32 * 1024;
+        const string ellipsis = " … ";
+        if (text is null || text.Length <= maximumCharacters) return text;
+
+        // Thread previews can include transport context before the actual request.
+        // Select its last request before taking a bounded beginning/end window.
+        const string marker = "## My request:";
+        var request = preserveLastRequest ? text.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase) : -1;
+        var value = text.AsSpan(request >= 0 ? request : 0);
+        if (value.Length <= maximumCharacters) return value.ToString();
+
+        var headLength = (maximumCharacters - ellipsis.Length) / 2;
+        var tailStart = value.Length - (maximumCharacters - ellipsis.Length - headLength);
+        // A cut may discard a whole supplementary character, never half of it.
+        if (char.IsHighSurrogate(value[headLength - 1]) && char.IsLowSurrogate(value[headLength])) headLength--;
+        if (char.IsLowSurrogate(value[tailStart]) && char.IsHighSurrogate(value[tailStart - 1])) tailStart++;
+        return string.Concat(value[..headLength], ellipsis.AsSpan(), value[tailStart..]);
     }
 
     private static string? FindLatestUserMessage(JsonElement thread)
@@ -1146,11 +1395,16 @@ internal sealed class AiManagerService : IAsyncDisposable
             .Where(text => !string.IsNullOrWhiteSpace(text))!);
     }
 
-    private string ReadRolloutExecutionStatus(string? path, string fallback)
+    private string ReadRolloutExecutionStatus(string? path, string fallback) =>
+        ReadRolloutExecutionStatus(path, fallback, out _);
+
+    private string ReadRolloutExecutionStatus(string? path, string fallback, out RolloutCursor? result)
     {
+        result = null;
         if (path?.StartsWith(@"\\?\", StringComparison.Ordinal) == true) path = path[4..];
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return fallback;
-        var cursor = _rolloutCursors.GetOrAdd(path, _ => new RolloutCursor());
+        using var lease = _runtime.AcquireRollout(path);
+        var cursor = result = lease.Value;
         try
         {
             lock (cursor.Sync)
@@ -1167,45 +1421,70 @@ internal sealed class AiManagerService : IAsyncDisposable
                     cursor.ModelName = null;
                     cursor.ReasoningEffort = null;
                     cursor.ThreadSource = null;
-                    cursor.PendingLine.SetLength(0);
+                    cursor.LatestRecordAt = null;
+                    cursor.InputTracker.Reset();
+                    ResetPendingLine(cursor.PendingLine);
                 }
+                if (stream.Length == cursor.Offset) return ResolveRolloutExecutionStatus(cursor, fallback);
+                var statusBeforeRead = ResolveRolloutExecutionStatus(cursor, fallback);
                 stream.Position = cursor.Offset;
-                var buffer = new byte[64 * 1024];
-                int read;
-                while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+                try
                 {
-                    var segmentStart = 0;
-                    for (var index = 0; index < read; index++)
+                    int read;
+                    while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
                     {
-                        if (buffer[index] != (byte)'\n') continue;
-                        cursor.PendingLine.Write(buffer, segmentStart, index - segmentStart);
-                        ParseRolloutLine(cursor);
-                        cursor.PendingLine.SetLength(0);
-                        segmentStart = index + 1;
+                        var segmentStart = 0;
+                        for (var index = 0; index < read; index++)
+                        {
+                            if (buffer[index] != (byte)'\n') continue;
+                            cursor.PendingLine.Append(buffer.AsSpan(segmentStart, index - segmentStart));
+                            ParseRolloutLine(cursor);
+                            ResetPendingLine(cursor.PendingLine);
+                            segmentStart = index + 1;
+                        }
+                        if (segmentStart < read)
+                            cursor.PendingLine.Append(buffer.AsSpan(segmentStart, read - segmentStart));
+                        cursor.Offset += read;
                     }
-                    if (segmentStart < read)
-                        cursor.PendingLine.Write(buffer, segmentStart, read - segmentStart);
-                    cursor.Offset += read;
                 }
-                return cursor.Status ?? fallback;
+                finally { ArrayPool<byte>.Shared.Return(buffer); }
+                var status = ResolveRolloutExecutionStatus(cursor, fallback);
+                if (cursor.Status is not null && status != statusBeforeRead)
+                    TaskMonitorTrace.Record("parsed", cursor.ThreadId, status,
+                        detail: $"offset={cursor.Offset}; recordAt={cursor.LatestRecordAt:O}");
+                return status;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             System.Diagnostics.Debug.WriteLine($"[AiManager] Rollout status unavailable: {ex.Message}");
         }
-        return cursor.Status ?? fallback;
+        return ResolveRolloutExecutionStatus(cursor, fallback);
+    }
+
+    private static string ResolveRolloutExecutionStatus(RolloutCursor cursor, string fallback)
+    {
+        var localStatus = cursor.InputTracker.IsWaiting ? "waitingOnUserInput" : cursor.Status ?? fallback;
+        if (fallback == "waitingOnUserInput" && cursor.InputTracker.HasObservedRequest && !cursor.InputTracker.IsWaiting)
+            return localStatus;
+        return ResolveExecutionStatus(fallback, localStatus);
     }
 
     private static void ParseRolloutLine(RolloutCursor cursor)
     {
-        if (cursor.PendingLine.Length == 0) return;
-        var line = Encoding.UTF8.GetString(cursor.PendingLine.GetBuffer(), 0, (int)cursor.PendingLine.Length);
+        var line = cursor.PendingLine.CompleteRecord();
+        if (line.IsEmpty) return;
         try
         {
             using var document = JsonDocument.Parse(line, new JsonDocumentOptions { MaxDepth = 256 });
             var root = document.RootElement;
             if (!root.TryGetProperty("payload", out var payload)) return;
+            if (root.TryGetProperty("timestamp", out var timestamp) && timestamp.ValueKind == JsonValueKind.String &&
+                timestamp.TryGetDateTimeOffset(out var recordAt) &&
+                (cursor.LatestRecordAt is null || recordAt > cursor.LatestRecordAt))
+                cursor.LatestRecordAt = recordAt;
+            cursor.InputTracker.Observe(ReadString(root, "type"), payload);
             switch (ReadString(root, "type"))
             {
                 case "session_meta":
@@ -1241,6 +1520,8 @@ internal sealed class AiManagerService : IAsyncDisposable
             // Ignore a malformed record and continue with the next complete JSONL line.
         }
     }
+
+    private static void ResetPendingLine(RolloutRecordProjector pending) => pending.Reset();
 
     private static void CaptureLocalUserMessage(RolloutCursor cursor, JsonElement payload)
     {
@@ -1314,12 +1595,8 @@ internal sealed class AiManagerService : IAsyncDisposable
         await _sharedUsageGate.WaitAsync();
         try
         {
-            foreach (var cursor in _rolloutCursors.Values) cursor.PendingLine.Dispose();
-            _rolloutCursors.Clear();
-            foreach (var cursor in _localUsageCursors.Values) cursor.PendingLine.Dispose();
-            _localUsageCursors.Clear();
             _sharedUsageClient.Dispose();
-            await _client.DisposeAsync();
+            if (_ownsRuntime) await _runtime.DisposeAsync();
         }
         finally { _sharedUsageGate.Release(); }
     }
