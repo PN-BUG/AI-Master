@@ -60,9 +60,7 @@ public partial class App : WpfApplication
             return;
         }
 
-        base.OnStartup(e);
-        StartTaskMonitoring();
-        InitializeTrayIcon();
+        // Register the process/shortcut identity before Startup handlers or tray UI can create windows.
         try
         {
             _notificationCenter = new NotificationCenterService(new WindowsNotificationCenter(
@@ -75,6 +73,9 @@ public partial class App : WpfApplication
             _notificationCenterStartupError = ex;
             Dispatcher.BeginInvoke(() => ReportNotificationFailure(ex), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         }
+        base.OnStartup(e);
+        StartTaskMonitoring();
+        InitializeTrayIcon();
     }
 
     internal void InitializeTrayIcon()

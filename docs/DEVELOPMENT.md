@@ -40,6 +40,10 @@ dotnet run --project .\AIMaster.csproj
 dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release
 ```
 
+开机自启定向回归使用 `--startup-tests`；界面与中英文离线截图使用 `--startup-ui-tests --output .\artifacts\startup`。两者仅操作随机命名的测试注册表项，不修改真实 Windows 启动项。注册表保存当前程序路径，界面读取注册表状态，不随设置备份或设备同步迁移。
+
+任务栏身份定向回归使用 `--taskbar-tests`，通过临时目录中的真实 `.lnk` 验证旧固定快捷方式迁移、参数与图标保留、其他安装路径隔离、损坏/锁定快捷方式容错及重复启动，同时运行通知中心回归；不修改用户真实固定项。应用在创建窗口和托盘之前，将进程和指向当前 EXE 的已有任务栏固定快捷方式同步到通知注册的 `AppUserModelID`，并通知 Shell 更新。不会自动新增固定项。
+
 内存定向回归使用 `--memory-tests`，覆盖大记录、分段追加、截断重写、未变化文件的扫描分配，
 以及共享账本更新的分配和保存失败时的状态隔离。
 需要测量真实日志时，可显式传入 `--memory-profile --sessions-root <sessions目录>`；它只读日志，

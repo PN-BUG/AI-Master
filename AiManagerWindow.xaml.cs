@@ -18,6 +18,8 @@ namespace AIMaster;
 public partial class AiManagerWindow : Window
 {
     private readonly AiManagerService _service;
+    private readonly WindowsStartupService _windowsStartup;
+    private bool _startupEnabled;
     private readonly ResetSignalAttention _resetAttention;
     private readonly DispatcherTimer _timer = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -82,9 +84,11 @@ public partial class AiManagerWindow : Window
 
     private AiTaskSnapshot? _taskSnapshot;
 
-    internal AiManagerWindow(AiManagerService service, ResetSignalAttention? resetAttention = null)
+    internal AiManagerWindow(AiManagerService service, ResetSignalAttention? resetAttention = null,
+        WindowsStartupService? windowsStartup = null)
     {
         _service = service;
+        _windowsStartup = windowsStartup ?? new WindowsStartupService();
         _resetAttention = resetAttention ?? ResetSignalAttention.Shared;
         _accountResetTracker = new AccountResetTracker(service.AccountResetStatePath);
         _resetNotificationHistory = new ResetNotificationHistory(System.IO.Path.Combine(
@@ -105,6 +109,45 @@ public partial class AiManagerWindow : Window
         RenderResetAttention();
         AiTaskSnapshotFeed.Changed += TaskSnapshot_Changed;
         if (AiTaskSnapshotFeed.Latest is { } latestTasks) TaskSnapshot_Changed(latestTasks);
+        LoadStartupControls();
+    }
+
+    private void LoadStartupControls()
+    {
+        try
+        {
+            _startupEnabled = _windowsStartup.IsEnabled();
+            StartWithWindowsCheck.IsChecked = _startupEnabled;
+            StartWithWindowsCheck.IsEnabled = true;
+            StartupStatusText.Text = "";
+        }
+        catch (Exception ex)
+        {
+            StartWithWindowsCheck.IsEnabled = false;
+            StartupStatusText.Text = L($"无法读取开机自启状态：{ex.Message}",
+                $"Unable to read Windows startup status: {ex.Message}");
+        }
+    }
+
+    private void StartWithWindows_Click(object sender, RoutedEventArgs e)
+    {
+        var enabled = StartWithWindowsCheck.IsChecked == true;
+        try
+        {
+            _windowsStartup.SetEnabled(enabled);
+            _startupEnabled = enabled;
+            StartupStatusText.Text = "";
+            SetFooterStatus(enabled
+                ? L("已开启开机自启，将在下次登录 Windows 时启动。", "Windows startup enabled for your next sign-in.")
+                : L("已关闭开机自启。", "Windows startup disabled."));
+        }
+        catch (Exception ex)
+        {
+            StartWithWindowsCheck.IsChecked = _startupEnabled;
+            StartupStatusText.Text = L($"无法更改开机自启：{ex.Message}",
+                $"Unable to change Windows startup: {ex.Message}");
+            SetFooterStatus(StartupStatusText.Text, warning: true);
+        }
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -532,6 +575,7 @@ public partial class AiManagerWindow : Window
         if (sender is not RadioButton { Tag: string id } || !_dashboardPages.TryGetValue(id, out var selected)) return;
         _dashboardPages[_activeDashboardPage].ScrollOffset = DashboardScrollViewer.VerticalOffset;
         _activeDashboardPage = id;
+        if (id == "settings") LoadStartupControls();
         foreach (var page in _dashboardPages.Values)
             page.Host.Visibility = ReferenceEquals(page, selected) ? Visibility.Visible : Visibility.Collapsed;
         UpdateDashboardPageLanguage();

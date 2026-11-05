@@ -4,6 +4,12 @@
 
 ![AIMaster dashboard in English](images/dashboard-en.png)
 
+## Start with Windows
+
+Enable **Start AIMaster with Windows** on the **Settings** page to open AIMaster when you next sign in to your Windows account. The main window and floating monitor follow the existing startup behavior. This option is off by default; toggling applies immediately without **Save & apply** or administrator access. Uncheck it to remove the startup entry.
+
+The entry uses the executable's location when enabled. After moving or extracting the app to another folder, switch it off and on from the new location. In-place updates keep working. If you disabled AIMaster in Windows Startup Apps, enable it there as well.
+
 ## Main dashboard
 
 The main window has five functional pages and opens on **Quota overview**:

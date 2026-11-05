@@ -169,7 +169,9 @@ public static class LocalizationService
         ["⇩ 检查更新"] = "⇩ Check for updates", ["检查 GitHub 新版本"] = "Check GitHub for a new version",
         ["查看更新内容"] = "What's new", ["查看最新版本的发布说明"] = "Read the latest release notes",
         ["立即更新"] = "Update now", ["⇩ 立即更新"] = "⇩ Update now", ["下载并安装新版本"] = "Download and install the new version",
-        ["显示主窗口"] = "Show main window", ["AI 悬浮监控"] = "AI floating monitor", ["退出"] = "Exit"
+        ["显示主窗口"] = "Show main window", ["AI 悬浮监控"] = "AI floating monitor", ["退出"] = "Exit",
+        ["启动行为"] = "Startup behavior", ["开机自动启动 AIMaster"] = "Start AIMaster with Windows",
+        ["登录 Windows 后自动启动；切换后立即生效。"] = "Start automatically when you sign in to Windows. Changes apply immediately."
         , ["设置已保存。"] = "Settings saved.", ["保存成功"] = "Saved"
     };
 

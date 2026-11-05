@@ -19,6 +19,17 @@ internal static partial class Program
     private static int Main(string[] args)
     {
         if (TryRunConnectionClientServer(args)) return 0;
+        if (args.Contains("--taskbar-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyTaskbarIdentity();
+            VerifyNotificationCenter();
+            return 0;
+        }
+        if (args.Contains("--startup-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyWindowsStartup();
+            return 0;
+        }
         if (args.Contains("--desktop-ipc-probe", StringComparer.OrdinalIgnoreCase))
         {
             VerifyDesktopIpcProbe(args);
@@ -112,6 +123,12 @@ internal static partial class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         else app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--startup-ui-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyStartupUi(args);
+            app.ExitApplication();
+            return 0;
+        }
         if (args.Contains("--task-live-tests", StringComparer.OrdinalIgnoreCase))
         {
             VerifyRolloutActivityIndex();
@@ -183,6 +200,8 @@ internal static partial class Program
             app.ExitApplication();
             return 0;
         }
+        VerifyWindowsStartup();
+        VerifyTaskbarIdentity();
         VerifyQuotaNotifications();
         if (args.Contains("--capture-docs", StringComparer.OrdinalIgnoreCase))
         {

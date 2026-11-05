@@ -757,6 +757,15 @@
                         <TextBlock Text="保护策略" Style="{StaticResource Label}"/>
                         <Border Grid.Row="1" Style="{StaticResource InsetSection}">
                         <StackPanel>
+                        <TextBlock Text="启动行为" Style="{StaticResource SectionLabel}"/>
+                        <CheckBox x:Name="StartWithWindowsCheck" Foreground="{DynamicResource Ink}"
+                                  Margin="0,8,0,0" Click="StartWithWindows_Click">
+                            <TextBlock Text="开机自动启动 AIMaster" TextWrapping="Wrap"/>
+                        </CheckBox>
+                        <TextBlock Text="登录 Windows 后自动启动；切换后立即生效。" Foreground="{DynamicResource Muted}"
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                        <TextBlock x:Name="StartupStatusText" Foreground="{DynamicResource Warning}"
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,6,0,12"/>
                         <TextBlock Text="安全阈值与通知" Style="{StaticResource SectionLabel}"/>
                         <Grid x:Name="PolicySectionsGrid" SizeChanged="PolicySectionsGrid_SizeChanged">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="320"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

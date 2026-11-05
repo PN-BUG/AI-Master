@@ -5,13 +5,18 @@ using Microsoft.Win32;
 
 namespace AIMaster.Services;
 
-/// <summary>Connects the unpackaged toast identity to a discoverable Start menu application.</summary>
+/// <summary>Keeps the unpackaged toast, running process and shortcuts on the same Shell identity.</summary>
 internal static class NotificationShortcut
 {
     public static void EnsureRegistered()
     {
         var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Missing application executable path.");
         var (appId, activator) = FindRegistration(executable);
+        // Set this before any UI is created, even if shortcut registration later fails.
+        Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(appId));
+        SynchronizeTaskbarShortcuts(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            @"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"), executable, appId);
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "AIMaster");
         Directory.CreateDirectory(directory);
         var shortcut = Path.Combine(directory, "AIMaster.lnk");
@@ -44,10 +49,64 @@ internal static class NotificationShortcut
                 Marshal.FreeCoTaskMem(activatorValue.Pointer);
             }
             File.Move(temporary, shortcut, overwrite: true);
-            Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(appId));
-            SHChangeNotify(2, 5, shortcut, IntPtr.Zero);
+            SHChangeNotify(0x2000, 5, shortcut, IntPtr.Zero); // SHCNE_UPDATEITEM / SHCNF_PATHW
         }
         finally { Marshal.ReleaseComObject(link); }
+    }
+
+    internal static void SynchronizeTaskbarShortcuts(string directory, string executable, string appId)
+    {
+        // Repair existing pins only. Do not create pins or touch another installation's shortcuts.
+        try
+        {
+            if (!Directory.Exists(directory)) return;
+            foreach (var shortcut in Directory.EnumerateFiles(directory, "*.lnk"))
+            {
+                IShellLinkW? link = null;
+                try
+                {
+                    link = (IShellLinkW)Activator.CreateInstance(Type.GetTypeFromCLSID(
+                        new Guid("00021401-0000-0000-C000-000000000046"), throwOnError: true)!)!;
+                    var file = (IPersistFile)link;
+                    file.Load(shortcut, 2); // STGM_READWRITE; never resolve or launch the target.
+                    var target = new StringBuilder(32768);
+                    link.GetPath(target, target.Capacity, IntPtr.Zero, 4); // SLGP_RAWPATH
+                    var targetPath = Environment.ExpandEnvironmentVariables(target.ToString());
+                    if (string.IsNullOrEmpty(targetPath) ||
+                        !string.Equals(Path.GetFullPath(targetPath), Path.GetFullPath(executable),
+                            StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var properties = (IPropertyStore)link;
+                    var key = new PropertyKey(5);
+                    properties.GetValue(ref key, out var current);
+                    try
+                    {
+                        if (current.Type == 31 && Marshal.PtrToStringUni(current.Pointer) == appId) continue;
+                    }
+                    finally { PropVariantClear(ref current); }
+
+                    var value = new PropVariant { Type = 31, Pointer = Marshal.StringToCoTaskMemUni(appId) };
+                    try
+                    {
+                        properties.SetValue(ref key, ref value);
+                        properties.Commit();
+                        file.Save(shortcut, true);
+                    }
+                    finally { Marshal.FreeCoTaskMem(value.Pointer); }
+                    SHChangeNotify(0x2000, 5, shortcut, IntPtr.Zero);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException or ArgumentException)
+                {
+                    // A locked/corrupt pin must not disable notifications or prevent the next pin being repaired.
+                    System.Diagnostics.Debug.WriteLine($"[TaskbarIdentity] {shortcut}: {ex.Message}");
+                }
+                finally { if (link is not null) Marshal.ReleaseComObject(link); }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Debug.WriteLine($"[TaskbarIdentity] {ex.Message}");
+        }
     }
 
     private static (string AppId, Guid Activator) FindRegistration(string executable)
@@ -69,6 +128,8 @@ internal static class NotificationShortcut
     private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern void SHChangeNotify(uint eventId, uint flags, string item, IntPtr other);
+    [DllImport("ole32.dll")]
+    private static extern int PropVariantClear(ref PropVariant value);
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     private struct PropertyKey(uint id)
