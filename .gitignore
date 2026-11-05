@@ -45,6 +45,4 @@ Desktop.ini
 
 # Generated release artifacts. Attach ZIP files to GitHub Releases instead of
 # committing large binaries to repository history.
-/release/AIMaster-*/
-/release/*.zip
-/release/*.zip.sha256
+/[Rr]elease/

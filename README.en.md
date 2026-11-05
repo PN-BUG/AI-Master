@@ -8,13 +8,16 @@
   <img src="Resources/AIMaster.png" width="144" alt="AIMaster icon">
 </p>
 
-AIMaster is a standalone Windows monitor for Codex quota and task activity. It brings quota remaining, reset times, weekly forecasts, recent tasks, execution status, model and reasoning effort into one dashboard, with an optional compact desktop overlay.
+AIMaster is a standalone Windows monitor for Codex and DeepSeek usage and task activity. It brings quota remaining or account balance, reset times, forecasts, recent tasks, execution status, model and reasoning effort into one dashboard, with an optional compact desktop overlay.
 
 ## Highlights
 
 ![AIMaster dashboard in English](docs/images/dashboard-en.png)
 
+- Switch between Codex and DeepSeek from the data-source selector; each account keeps its own dashboard state.
 - View total Codex quota, 7-day and 5-hour windows, usage percentages, and reset times.
+- View the DeepSeek account balance with paid/granted credit, today's and last-30-day spend and tokens, plus a configurable low-balance warning.
+- Read Deep Code (DeepSeek's official coding CLI) local session indexes for task status, model, reasoning effort, and token usage, even when the CLI is not running.
 - Monitor reset previews and announcements from [codex-reset.com](https://codex-reset.com/), notify on new events, and detect account quota recovery separately from official account data.
 - Forecast the remaining weekly quota from Monday through Sunday, switching between the whole account's consumption rate and a projection based only on this device's rate.
 - Track this device's weekly Codex tokens and token-weighted top model, estimate device/project quota attribution from same-period account token history, and show each project's top model without assigning multi-device usage entirely to the current machine.
@@ -51,8 +54,9 @@ Updates replace files in the running executable's directory and restart from tha
 ## Requirements
 
 - Windows 10 version 1809 or later (including Windows 11).
-- Codex installed and signed in. The `codex` command should be on `PATH`, or Codex Desktop should use its standard installation location.
-- Codex App Server available for live quota and online task data.
+- For the Codex data source: Codex installed and signed in. The `codex` command should be on `PATH`, or Codex Desktop should use its standard installation location.
+- For the DeepSeek data source: a DeepSeek API key entered under Settings → DeepSeek access. A Platform token is optional and adds usage details; the task list requires Deep Code to have been used on this device.
+- Codex App Server available for live Codex quota and online task data.
 
 ## Floating monitor
 
@@ -78,7 +82,9 @@ Shared usage is disabled by default. When enabled, only weekly device aggregates
 
 When App Server data is unavailable, AIMaster falls back to local session records under `%USERPROFILE%\.codex\sessions` for the task list. Settings are stored in `%LOCALAPPDATA%\AIMaster\settings.json`. Existing `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` settings are migrated on first launch.
 
-The conversation-title mode uses Codex task metadata. The latest-request mode extracts the most recent real user message while excluding injected attachment notes and environment metadata.
+The DeepSeek data source uses an API key against the official `https://api.deepseek.com/user/balance` endpoint. An optional Platform token adds today's and last-30-day usage from `platform.deepseek.com`; those usage routes are private dashboard endpoints and may change, in which case the balance is still shown. Both credentials are stored only in the local settings file, encrypted with Windows DPAPI, and are never uploaded or logged. Deep Code tasks are read only from local indexes under `%USERPROFILE%\.deepcode\projects\*\sessions-index.json`; Deep Code is never started or modified.
+
+The conversation-title mode uses Codex task metadata. The latest-request mode extracts the most recent real user message while excluding injected attachment notes and environment metadata. DeepSeek mode uses the Deep Code session summary as the task name.
 
 ## Build from source
 

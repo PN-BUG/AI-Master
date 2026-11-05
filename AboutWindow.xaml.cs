@@ -22,8 +22,8 @@ public partial class AboutWindow : Window
             TitleText = LocalizationService.L("关于 AIMaster", "About AIMaster"),
             VersionText = LocalizationService.L($"版本 {version}", $"Version {version}"),
             Description = LocalizationService.L(
-                "Codex 额度与任务监控工具，集中查看额度、重置时间、用量统计与任务状态，并提供桌面悬浮监控。",
-                "A Codex quota and task monitor with quota remaining, reset times, usage statistics, task activity, and a desktop overlay."),
+                "Codex 与 DeepSeek 额度及任务监控工具，集中查看额度、余额、重置时间、用量统计与任务状态，并提供桌面悬浮监控。",
+                "A Codex and DeepSeek quota and task monitor with balances, reset times, usage statistics, task activity, and a desktop overlay."),
             StudioText = LocalizationService.L("开发：涡流工作室", "Developed by Woliu Studio"),
             LicenseText = LocalizationService.L("开源许可：Apache License 2.0", "License: Apache License 2.0"),
             LinksHeading = LocalizationService.L("了解更多", "Learn more"),

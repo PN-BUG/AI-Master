@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Drawing;
 using System.Text.Json;
 using System.Windows;
+using AIMaster.Models;
 using AIMaster.Services;
 using Forms = System.Windows.Forms;
 
@@ -19,6 +20,7 @@ public partial class App : WpfApplication
     private NotificationCenterService? _notificationCenter;
     private Exception? _notificationCenterStartupError;
     private TaskFileChangeMonitor? _taskFileMonitor;
+    private TaskFileChangeMonitor? _deepCodeMonitor;
     private AiManagerService? _taskMonitorService;
     private readonly System.Windows.Threading.DispatcherTimer _trayNotificationTimer = new()
         { Interval = TimeSpan.FromSeconds(2) };
@@ -257,12 +259,21 @@ public partial class App : WpfApplication
         var service = _taskMonitorService = new AiManagerService(runtime: AiManagerRuntime.Shared);
         _taskFileMonitor = new TaskFileChangeMonitor(sessionsRoot, cancellationToken =>
         {
+            if (AiProviderModes.IsDeepSeek(service.Settings.Provider)) return Task.CompletedTask;
             service.RefreshLocalTaskSnapshot(sessionsRoot, cancellationToken);
             return Task.CompletedTask;
         });
+        // Deep Code keeps one sessions-index.json per project; only while that provider is active
+        // may its files replace the shared task view.
+        _deepCodeMonitor = new TaskFileChangeMonitor(DeepCodePaths.GetProjectsRoot(), async cancellationToken =>
+        {
+            if (!AiProviderModes.IsDeepSeek(service.Settings.Provider)) return;
+            await service.RefreshDeepCodeTaskSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        }, "*.json");
         AiManagerRuntime.Shared.DesktopStateChanged += DesktopStateChanged;
         AiManagerRuntime.Shared.StartDesktopMonitoring();
         _taskFileMonitor.Start();
+        _deepCodeMonitor.Start();
     }
 
     private void DesktopStateChanged() => _taskFileMonitor?.RequestRefresh();
@@ -274,6 +285,9 @@ public partial class App : WpfApplication
         var monitor = _taskFileMonitor;
         _taskFileMonitor = null;
         monitor?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        var deepCode = _deepCodeMonitor;
+        _deepCodeMonitor = null;
+        deepCode?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         var service = _taskMonitorService;
         _taskMonitorService = null;
         service?.DisposeAsync().AsTask().GetAwaiter().GetResult();

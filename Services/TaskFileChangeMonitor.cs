@@ -9,6 +9,7 @@ internal sealed class TaskFileChangeMonitor : IAsyncDisposable
     private static readonly TimeSpan RescanInterval = TimeSpan.FromMilliseconds(500);
     private readonly object _sync = new();
     private readonly string _root;
+    private readonly string _filter;
     private readonly Func<CancellationToken, Task> _refresh;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _queuedRefresh = new(0, 1);
@@ -18,11 +19,12 @@ internal sealed class TaskFileChangeMonitor : IAsyncDisposable
     private bool _stopping;
     private int _restartWatcher;
 
-    public TaskFileChangeMonitor(string root, Func<CancellationToken, Task> refresh)
+    public TaskFileChangeMonitor(string root, Func<CancellationToken, Task> refresh, string filter = "*.jsonl")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(refresh);
         _root = Path.GetFullPath(root);
+        _filter = string.IsNullOrWhiteSpace(filter) ? "*.jsonl" : filter;
         _refresh = refresh;
     }
 
@@ -86,7 +88,7 @@ internal sealed class TaskFileChangeMonitor : IAsyncDisposable
         FileSystemWatcher? candidate = null;
         try
         {
-            candidate = new FileSystemWatcher(_root, "*.jsonl")
+            candidate = new FileSystemWatcher(_root, _filter)
             {
                 IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName | NotifyFilters.DirectoryName,

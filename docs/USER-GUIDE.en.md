@@ -20,9 +20,9 @@ The main window has five functional pages and opens on **Quota overview**:
 | Task monitor | Recent tasks, task guard, manual pause |
 | Usage analysis | Local and project usage, today's hourly usage, weekly forecast |
 | Shared usage | Device sync, clear and restore, group usage; displayed at full page width |
-| Settings | Guard policy, daily warnings, floating text size, language, theme, updates, help |
+| Settings | Guard policy, daily warnings, DeepSeek access, floating text size, language, theme, updates, help |
 
-The pages contain ten functional card types:
+The pages contain eleven functional card types (Codex and DeepSeek share the quota, task, usage, and settings cards; the remaining cards follow the active data source):
 
 1. **Primary quota runway** shows remaining quota, usage, and the next reset.
 2. **Task guard** shows protection status and can pause tasks visible to the current connection.
@@ -34,8 +34,18 @@ The pages contain ten functional card types:
 8. **Guard policy** configures warning and pause thresholds, automatic pausing, and floating-window text size.
 9. **Shared usage** groups devices using the same sync key and shows each device's tokens, group share, top model, session count, and last sync time.
 10. **Reset signals** monitors public reset previews and announcements, with source links and separate detection of official account quota recovery.
+11. **DeepSeek access** configures the DeepSeek API key, optional Platform token, and low-balance warning; credentials are encrypted locally.
 
-**Sync now** and **Floating monitor** remain at the top. Language, theme, update actions, the website and About stay at the bottom of the navigation rail on every page. Select **Sync now** to reconnect to Codex and refresh all data. Switching pages preserves unsaved form edits and keeps background monitoring running.
+**Sync now** and **Floating monitor** remain at the top. Language, theme, update actions, the website and About stay at the bottom of the navigation rail on every page. Select **Sync now** to reconnect to the active data source and refresh all data. Switching pages preserves unsaved form edits and keeps background monitoring running.
+
+### Data source
+
+The **Data source** buttons at the top of the navigation rail switch between Codex and DeepSeek. The choice is saved immediately and refreshes the dashboard:
+
+- **Codex** reads Codex quota, online tasks, and local session records, exactly like earlier versions.
+- **DeepSeek** reads the DeepSeek account balance and optional usage details; tasks come from Deep Code local session indexes.
+- Both modes share the windows, overlay, theme, language, and refresh interval but keep their own quota and task data. Switching never erases the other mode's settings or history.
+- Codex-only cards (task guard, forecast, reset signals, shared usage, percentage thresholds) are hidden in DeepSeek mode because DeepSeek has no official percentage quota window.
 
 ### Card layout
 
@@ -47,6 +57,34 @@ The pages contain ten functional card types:
 - Hover over the question mark in a card header for explanations and interaction tips. Drag areas have no visible icons.
 - Double-click the bottom edge to restore its adaptive size.
 - Card order, collapsed state, and custom height are saved automatically.
+
+## DeepSeek data source
+
+### Configuration
+
+Open **Settings → DeepSeek access** and fill in:
+
+- **API key** (required): reads the balance from the official `https://api.deepseek.com/user/balance` endpoint.
+- **Platform token** (optional): adds today's and last-30-day spend, tokens, request count, and per-model cost from `platform.deepseek.com`. Those routes are private dashboard endpoints rather than documented public APIs and may change; if they fail, the balance is still shown and the card explains that usage details are unavailable.
+- **Low-balance warning**: highlights the balance in the quota card when it falls below this amount; 0 disables it.
+- Both credentials are encrypted with Windows DPAPI and stored only in the local `settings.json`. They are never uploaded, logged, or included in shared usage. Select **Save DeepSeek settings** to apply immediately; when DeepSeek is active, the dashboard also refreshes.
+- The Platform token is the signed-in `platform.deepseek.com` session token. It is independent of the API key, so updating one never invalidates the other.
+
+### Balance and usage
+
+- The quota card shows the total balance in large type with its paid/granted split. A zero balance, or `is_available = false`, shows **Balance insufficient**.
+- The card also shows today's spend and tokens, plus the last 30 days (or the current month when the platform falls back to monthly totals).
+- **Today / hourly usage** shows the platform's tokens and spend for today. DeepSeek does not expose hourly buckets, so no hourly chart is drawn.
+- **Local usage** totals tokens from Deep Code local sessions and shows each project's share and top model. Deep Code usage is attributed to the session's last update day; it is not a per-message bill.
+- DeepSeek has no 5-hour or 7-day percentage window, so percentage quota, forecasts, the task guard, and Codex quota notifications are not shown.
+
+### Deep Code tasks
+
+- Tasks are read from `%USERPROFILE%\.deepcode\projects\*\sessions-index.json`; the local indexes are only read, never Deep Code itself.
+- Each row shows the session summary, status (running, awaiting approval, awaiting input, completed, paused, error), model, reasoning effort, and update time.
+- The model comes from the session's `usagePerModel`, falling back to `env.MODEL` in `~/.deepcode/settings.json`; reasoning effort comes from that file's `reasoningEffort`.
+- The main window lists tasks; in the floating monitor, clicking a task opens its project folder in File Explorer.
+- An empty task list is expected when this device has never used Deep Code.
 
 ## Guard policy
 
@@ -102,7 +140,7 @@ Select **Floating monitor** in the main window. The overlay stays on top and dis
 - active model and reasoning effort;
 - recent tasks according to the overlay height (up to eight).
 
-Hover over a task to highlight it; click to open that task in the Codex desktop app. Moving or resizing the overlay saves its position and size for the next launch. If the monitor layout changes, it reopens within the visible work area.
+Hover over a task to highlight it; click to open that task in the Codex desktop app. In DeepSeek mode, clicking opens the Deep Code session's project folder in File Explorer. Moving or resizing the overlay saves its position and size for the next launch. If the monitor layout changes, it reopens within the visible work area.
 
 The main window appears in the Windows taskbar; the floating monitor does not. Closing the main window hides AIMaster to the system tray while monitoring continues.
 
@@ -140,9 +178,12 @@ Open **Settings**, then select `EN` or `中文` under **Appearance and language*
 | Status | Meaning |
 |---|---|
 | Running | The task is still executing or its latest local session has no completion marker. |
-| Waiting for approval/input | The task requires action before it can continue. |
+| Waiting for approval | A Codex command/file-change approval or a Deep Code permission request is unanswered. |
+| Waiting for input | The task is waiting for additional user input. |
+| Pending | A Deep Code session exists but has not started processing yet. |
 | Interrupted/paused | The task was interrupted, cancelled, or paused. |
 | Completed | The task finished normally. |
+| Error | The task failed, permission was denied, or the connection failed. |
 | Offline | App Server is unavailable. Quota may not update, but local task records are still used when possible. |
 
 ## Settings and migration

@@ -8,13 +8,16 @@
   <img src="Resources/AIMaster.png" width="144" alt="AIMaster icon">
 </p>
 
-AIMaster 是一个可独立运行的 Windows Codex 用量与任务监控工具。它集中展示剩余额度、额度重置时间、消耗预测、最近任务、执行状态、当前模型与推理强度，并提供紧凑的桌面悬浮窗。
+AIMaster 是一个可独立运行的 Windows Codex 与 DeepSeek 用量及任务监控工具。它集中展示剩余额度或账户余额、重置时间、消耗预测、最近任务、执行状态、当前模型与推理强度，并提供紧凑的桌面悬浮窗。
 
 ## 主要功能
 
 ![AIMaster 中文主面板](docs/images/dashboard-zh.png)
 
+- 在左侧“数据源”中切换 Codex 与 DeepSeek，两个账户面板互不干扰。
 - 显示 Codex 总额度、7 天窗口、5 小时窗口与重置时间。
+- 显示 DeepSeek 账户余额、付费/赠送构成、今日与近 30 天消耗和 Token；可设置余额预警线。
+- 读取 Deep Code（DeepSeek 官方编程 CLI）的本机会话索引，显示任务状态、模型、推理强度与 Token 用量，无需 CLI 正在运行。
 - 自动追踪 [codex-reset.com](https://codex-reset.com/) 的重置预告与公告，新事件发送 Windows 通知；用官方账号额度变化单独检测额度恢复。
 - 根据近期消耗速度预测额度是否会提前耗尽。
 - 设置预警线和暂停线，越线时提醒并暂停当前连接可见的任务。
@@ -56,8 +59,9 @@ AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“�
 ## 使用要求
 
 - Windows 10 1809 或更新版本（含 Windows 11）。
-- 已安装并登录 Codex；`codex` 命令在 PATH 中，或使用标准的 Codex Desktop 安装位置。
-- 读取额度和在线任务时，Codex App Server 需要可用。
+- 使用 Codex 数据源时：已安装并登录 Codex；`codex` 命令在 PATH 中，或使用标准的 Codex Desktop 安装位置。
+- 使用 DeepSeek 数据源时：在“设置 → DeepSeek 接入”填写 DeepSeek API Key；平台 Token 可选，用于读取用量明细；任务列表需要本机使用过 Deep Code。
+- 读取 Codex 额度和在线任务时，Codex App Server 需要可用。
 
 ## 悬浮窗
 
@@ -84,7 +88,9 @@ AIMaster 启动本机的 `codex app-server --listen stdio://` 并使用 Codex �
 
 当 App Server 暂时不可用时，任务列表会从 `%USERPROFILE%\.codex\sessions` 中的本地会话记录降级读取。设置保存在 `%LOCALAPPDATA%\AIMaster\settings.json`。第一次启动会自动迁移旧版 `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` 设置。
 
-“对话标题”来自 Codex 的任务元数据；“最后发送内容”从对应任务最近一条真实用户消息中提取。附件说明、环境信息等注入文本不会作为任务名。
+DeepSeek 数据源使用 API Key 调用官方 `https://api.deepseek.com/user/balance` 读取余额；可选的平台 Token 用于读取 `platform.deepseek.com` 的今日与近 30 天用量。平台用量接口不是公开文档接口，可能随平台改版失效，失败时仍显示余额。两种凭证只保存在本机设置中，使用 Windows DPAPI 加密，不上传、不写入日志。Deep Code 任务只读取 `%USERPROFILE%\.deepcode\projects\*\sessions-index.json` 本地索引，不启动或修改 Deep Code。
+
+“对话标题”来自 Codex 的任务元数据；“最后发送内容”从对应任务最近一条真实用户消息中提取。附件说明、环境信息等注入文本不会作为任务名。DeepSeek 模式使用 Deep Code 会话摘要作为任务名。
 
 ## 从源码构建
 

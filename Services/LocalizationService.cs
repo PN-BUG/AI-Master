@@ -134,6 +134,35 @@ public static class LocalizationService
         ["生成密钥"] = "Generate key", ["复制密钥"] = "Copy key", ["保存并同步"] = "Save & sync",
         ["等待共享设置"] = "Waiting for sharing settings", ["暂无共享设备数据"] = "No shared device data",
 
+        ["数据源"] = "DATA SOURCE", ["账户余额"] = "ACCOUNT BALANCE", ["余额"] = "Balance",
+        ["DeepSeek 接入"] = "DEEPSEEK ACCESS", ["平台 Token（可选）"] = "Platform token (optional)",
+        ["API Key"] = "API key",
+        ["保存 DeepSeek 配置"] = "Save DeepSeek settings", ["打开 DeepSeek 平台"] = "Open DeepSeek Platform",
+        ["DeepSeek 配置已保存"] = "DeepSeek settings saved",
+        ["API Key 与平台 Token 相互独立：余额来自 API Key，用量明细需要平台 Token。"] =
+            "The API key and Platform token are independent: the API key supplies the balance; the Platform token supplies usage details.",
+        ["设置保存在本机；API Key 与平台 Token 使用 Windows DPAPI 加密。"] =
+            "Settings stay on this device; the API key and Platform token are encrypted with Windows DPAPI.",
+        ["余额预警线"] = "Low balance warning",
+        ["余额低于此值时高亮提示；0 表示关闭。"] = "Highlights the balance when it falls below this value; 0 disables the warning.",
+        ["DeepSeek 按账户余额计费，没有百分比额度窗口；预警线、暂停线、消耗预测与重置信号仅对 Codex 生效。"] =
+            "DeepSeek bills against an account balance and has no percentage quota window; thresholds, the guard, forecasts, and reset signals apply to Codex only.",
+        ["读取 ~/.deepcode 中由 Deep Code 写入的本地会话索引；无需 Deep Code 正在运行。"] =
+            "Reads the local session indexes Deep Code writes under ~/.deepcode; Deep Code does not need to be running.",
+        ["DeepSeek 平台未提供分时用量；此卡显示当日总量。"] =
+            "DeepSeek Platform does not expose hourly usage; this card shows the daily total.",
+        ["本机 Token 来自 Deep Code 会话索引；DeepSeek 平台不提供逐条会话账单。"] =
+            "Local tokens come from Deep Code session indexes; DeepSeek Platform does not expose a per-session bill.",
+        ["查看 DeepSeek 账户余额与近期用量。"] = "Check the DeepSeek account balance and recent usage.",
+        ["查看 Deep Code 最近任务与本地会话状态。"] = "Review recent Deep Code tasks and local session state.",
+        ["分析 Deep Code 本机用量与 DeepSeek 平台统计。"] = "Explore Deep Code local usage and DeepSeek Platform totals.",
+        ["余额可用"] = "Balance available", ["余额不足"] = "Balance insufficient",
+        ["可用余额"] = "AVAILABLE BALANCE",
+        ["余额偏低"] = "Low balance", ["余额同步暂不可用"] = "Balance sync unavailable",
+        ["等待 DeepSeek 数据"] = "Waiting for DeepSeek data", ["未配置"] = "Not configured",
+        ["今日"] = "Today", ["付费"] = "Paid", ["赠送"] = "Granted",
+        ["应用设置"] = "App settings", ["当日消耗"] = "Today's usage",
+
         ["软件清单"] = "Software Inventory", ["我的软件清单"] = "My Software Inventory",
         ["扫描本机软件，挑选要保留或分享的应用，并维护可用的下载入口。"] = "Scan installed software, curate a shareable list, and maintain download links.",
         ["↻ 重新扫描"] = "↻ Rescan", ["设备软件"] = "DEVICE SOFTWARE", ["我的清单"] = "MY LIST",
@@ -241,6 +270,7 @@ public static class LocalizationService
         "waitingOnUserInput" => L("等待输入", "Awaiting input"),
         "idle" or "completed" => L("已完成", "Completed"),
         "interrupted" => L("已暂停", "Paused"),
+        "pending" => L("等待开始", "Pending"),
         "failed" or "systemError" => L("异常", "Error"),
         "notLoaded" => L("未加载", "Unavailable"),
         _ => L("历史记录", "History")

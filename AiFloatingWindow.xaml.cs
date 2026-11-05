@@ -185,6 +185,9 @@ public partial class AiFloatingWindow : Window
         try
         {
             var snapshot = await _service.RefreshFloatingAsync(_lifetime.Token, forceRefresh);
+            if (!string.Equals(AiProviderModes.Normalize(snapshot.Provider),
+                    AiProviderModes.Normalize(_service.Settings.Provider), StringComparison.OrdinalIgnoreCase))
+                return;
             RenderSnapshot(snapshot);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
@@ -207,22 +210,52 @@ public partial class AiFloatingWindow : Window
         TaskNameText.Text = taskName;
         TaskNameText.ToolTip = taskName;
         TaskStatusText.Text = LocalizedStatus(snapshot.TaskStatus);
-        RemainingQuotaText.Text = snapshot.RemainingPercent?.ToString("0.#", CultureInfo.InvariantCulture) ?? "--";
-        var quotaWindow = LocalizationService.LocalizeKnownText(snapshot.QuotaWindow);
-        RemainingQuotaText.ToolTip = snapshot.ResetsAt is { } reset
-            ? LocalizationService.IsEnglish
-                ? $"{quotaWindow}\nResets {reset.LocalDateTime.ToString("MMM d HH:mm", CultureInfo.InvariantCulture)}"
-                : $"{quotaWindow}\n{reset.LocalDateTime:M月d日 HH:mm} 重置"
-            : quotaWindow;
-        if (snapshot.QuotaError is not null)
+        if (snapshot.IsDeepSeek)
         {
-            RemainingQuotaText.ToolTip += LocalizationService.L("\n额度同步暂不可用，将自动重试。", "\nQuota sync unavailable; retrying automatically.") +
-                (snapshot.QuotaCapturedAt is { } quotaAt
-                    ? LocalizationService.L($"\n缓存额度采集于 {quotaAt.LocalDateTime:HH:mm:ss}", $"\nCached quota from {quotaAt.LocalDateTime:HH:mm:ss}")
-                    : string.Empty);
-            RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "WarningText");
+            QuotaLabelText.Text = LocalizationService.T(snapshot.QuotaLabel);
+            QuotaUnitText.Visibility = Visibility.Collapsed;
+            QuotaRowGrid.ColumnDefinitions[0].Width = new GridLength(72);
+            var balanceText = snapshot.QuotaText ?? "--";
+            RemainingQuotaText.Text = balanceText;
+            RemainingQuotaText.FontSize = (balanceText.Length > 9 ? 10 : 12) * _fontScale;
+            var detail = string.Join("\n", new[] { snapshot.QuotaDetail, snapshot.QuotaWindow }
+                .Where(item => !string.IsNullOrWhiteSpace(item)));
+            RemainingQuotaText.ToolTip = detail;
+            if (snapshot.QuotaError is not null)
+            {
+                RemainingQuotaText.ToolTip = detail + "\n" +
+                    LocalizationService.L("余额同步暂不可用，将自动重试。", "Balance sync unavailable; retrying automatically.") +
+                    (snapshot.QuotaCapturedAt is { } cachedAt
+                        ? LocalizationService.L($"\n缓存余额采集于 {cachedAt.LocalDateTime:HH:mm:ss}",
+                            $"\nCached balance from {cachedAt.LocalDateTime:HH:mm:ss}")
+                        : string.Empty);
+                RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "WarningText");
+            }
+            else RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "FloatInk");
         }
-        else RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "FloatInk");
+        else
+        {
+            QuotaLabelText.Text = LocalizationService.T("剩余额度");
+            QuotaUnitText.Visibility = Visibility.Visible;
+            QuotaRowGrid.ColumnDefinitions[0].Width = new GridLength(54);
+            RemainingQuotaText.FontSize = 14 * _fontScale;
+            RemainingQuotaText.Text = snapshot.RemainingPercent?.ToString("0.#", CultureInfo.InvariantCulture) ?? "--";
+            var quotaWindow = LocalizationService.LocalizeKnownText(snapshot.QuotaWindow);
+            RemainingQuotaText.ToolTip = snapshot.ResetsAt is { } reset
+                ? LocalizationService.IsEnglish
+                    ? $"{quotaWindow}\nResets {reset.LocalDateTime.ToString("MMM d HH:mm", CultureInfo.InvariantCulture)}"
+                    : $"{quotaWindow}\n{reset.LocalDateTime:M月d日 HH:mm} 重置"
+                : quotaWindow;
+            if (snapshot.QuotaError is not null)
+            {
+                RemainingQuotaText.ToolTip += LocalizationService.L("\n额度同步暂不可用，将自动重试。", "\nQuota sync unavailable; retrying automatically.") +
+                    (snapshot.QuotaCapturedAt is { } quotaAt
+                        ? LocalizationService.L($"\n缓存额度采集于 {quotaAt.LocalDateTime:HH:mm:ss}", $"\nCached quota from {quotaAt.LocalDateTime:HH:mm:ss}")
+                        : string.Empty);
+                RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "WarningText");
+            }
+            else RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "FloatInk");
+        }
         var modelName = LocalizationService.LocalizeKnownText(snapshot.ModelName);
         ModelText.Text = modelName;
         ModelText.ToolTip = modelName;
@@ -241,7 +274,7 @@ public partial class AiFloatingWindow : Window
             };
         _displayTasks = tasks;
         PrimaryTaskRow.Tag = tasks[0].Id;
-        var primaryHasLink = BuildTaskUri(tasks[0].Id) is not null;
+        var primaryHasLink = CanOpenTask(tasks[0]);
         PrimaryTaskRow.Cursor = primaryHasLink ? Cursors.Hand : Cursors.Arrow;
         PrimaryTaskRow.Style = primaryHasLink ? (Style)FindResource("TaskHoverRow") : null;
         if (!_hasSizedForFirstSnapshot)
@@ -251,6 +284,7 @@ public partial class AiFloatingWindow : Window
         }
         RefreshVisibleTaskRows(force: true);
         ApplyStatusVisual(snapshot.TaskStatus);
+        RenderResetAttention();
     }
 
     private void TaskSnapshot_Changed(AiTaskSnapshot snapshot)
@@ -280,7 +314,7 @@ public partial class AiFloatingWindow : Window
         {
             var waitingForUser = task.Status is "waitingOnApproval" or "waitingOnUserInput";
             var color = ThemeBrush(waitingForUser ? "WarningText" : StatusBrushKey(task.Status));
-            var hasLink = BuildTaskUri(task.Id) is not null;
+            var hasLink = CanOpenTask(task);
             var row = new Grid { Height = 18, Tag = task.Id,
                 Style = hasLink ? (Style)FindResource(waitingForUser ? "AttentionTaskHoverRow" : "TaskHoverRow") : null,
                 Cursor = hasLink ? Cursors.Hand : Cursors.Arrow };
@@ -324,20 +358,36 @@ public partial class AiFloatingWindow : Window
         ? new Uri($"codex://threads/{id:D}")
         : null;
 
+    private bool CanOpenTask(AiThreadSummary task) => _lastSnapshot?.IsDeepSeek == true
+        ? !string.IsNullOrWhiteSpace(task.ProjectPath) && Directory.Exists(task.ProjectPath)
+        : BuildTaskUri(task.Id) is not null;
+
     private void TaskRow_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (sender is not FrameworkElement row || BuildTaskUri(row.Tag as string) is not { } uri) return;
-        e.Handled = true;
-        _dockHideTimer.Stop();
+        if (sender is not FrameworkElement row) return;
+        var task = _displayTasks.FirstOrDefault(item =>
+            string.Equals(item.Id, row.Tag as string, StringComparison.OrdinalIgnoreCase));
+        if (task is null) return;
         try
         {
+            if (_lastSnapshot?.IsDeepSeek == true)
+            {
+                if (string.IsNullOrWhiteSpace(task.ProjectPath) || !Directory.Exists(task.ProjectPath)) return;
+                e.Handled = true;
+                _dockHideTimer.Stop();
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{task.ProjectPath}\"") { UseShellExecute = true });
+                return;
+            }
+            if (BuildTaskUri(task.Id) is not { } uri) return;
+            e.Handled = true;
+            _dockHideTimer.Stop();
             Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
             MessageBox.Show(this,
-                LocalizationService.IsEnglish ? $"Could not open the Codex task: {ex.Message}" : $"无法打开 Codex 任务：{ex.Message}",
-                LocalizationService.IsEnglish ? "Open task" : "打开任务",
+                LocalizationService.L($"无法打开任务：{ex.Message}", $"Could not open the task: {ex.Message}"),
+                LocalizationService.L("打开任务", "Open task"),
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -405,10 +455,11 @@ public partial class AiFloatingWindow : Window
 
     private void RenderError(Exception ex)
     {
+        var provider = _lastSnapshot?.IsDeepSeek == true ? "DeepSeek" : "Codex";
         TaskStatusText.Text = LocalizationService.IsEnglish ? "Connection issue" : "连接异常";
         TaskNameText.Text = ex is TimeoutException
-            ? (LocalizationService.IsEnglish ? "Codex is responding slowly; retrying automatically" : "Codex 响应较慢，将自动重试")
-            : (LocalizationService.IsEnglish ? "Codex status is temporarily unavailable" : "暂时无法读取 Codex 状态");
+            ? LocalizationService.L($"{provider} 响应较慢，将自动重试", $"{provider} is responding slowly; retrying automatically")
+            : LocalizationService.L($"{provider} 状态暂时不可用", $"{provider} status is temporarily unavailable");
         TaskNameText.ToolTip = ex.Message;
         SyncAgeText.Text = "RETRY";
         ApplyStatusVisual("systemError");
@@ -794,7 +845,7 @@ public partial class AiFloatingWindow : Window
 
     private void RenderResetAttention()
     {
-        var visible = _resetAttention.Pending is not null;
+        var visible = _lastSnapshot?.IsDeepSeek != true && _resetAttention.Pending is not null;
         ResetAttentionPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         ResetAttentionButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         ResetAttentionTitle.Text = "● " + _resetAttention.Title;

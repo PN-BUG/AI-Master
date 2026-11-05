@@ -92,7 +92,8 @@ internal static class AiTaskSnapshotFeed
             left.LatestUserMessage == right.LatestUserMessage && left.Status == right.Status &&
             left.StatusBeforeDesktopObservation == right.StatusBeforeDesktopObservation &&
             left.ModelName == right.ModelName && left.ReasoningEffort == right.ReasoningEffort &&
-            left.RolloutPath == right.RolloutPath && left.UpdatedAt == right.UpdatedAt;
+            left.RolloutPath == right.RolloutPath && left.ProjectPath == right.ProjectPath &&
+            left.UpdatedAt == right.UpdatedAt;
 
         public int GetHashCode(AiThreadSummary item) => StringComparer.Ordinal.GetHashCode(item.Id);
     }
@@ -104,6 +105,10 @@ internal static class AiTaskSnapshotFeed
         var sameModel = focus?.ModelName is { } model && previous.Tasks.FirstOrDefault()?.ModelName == model;
         return new AiFloatingSnapshot
         {
+            Provider = previous.Provider,
+            QuotaText = previous.QuotaText,
+            QuotaLabel = previous.QuotaLabel,
+            QuotaDetail = previous.QuotaDetail,
             Tasks = visible,
             TaskName = focus?.DisplayTitle ?? LocalizationService.L("暂无最近任务", "No recent tasks"),
             TaskStatus = focus?.Status ?? "notLoaded",

@@ -179,14 +179,14 @@
 
                 <Border Grid.Row="3" Background="{DynamicResource Line}"/>
 
-                <Grid Grid.Row="4" Margin="0,3,2,0">
+                <Grid x:Name="QuotaRowGrid" Grid.Row="4" Margin="0,3,2,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <StackPanel>
-                        <TextBlock Text="剩余额度" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
+                        <TextBlock x:Name="QuotaLabelText" Text="剩余额度" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
                         <StackPanel Orientation="Horizontal">
                             <TextBlock x:Name="RemainingQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
                                        FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
-                            <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
+                            <TextBlock x:Name="QuotaUnitText" Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
                                        FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
                         </StackPanel>
                     </StackPanel>

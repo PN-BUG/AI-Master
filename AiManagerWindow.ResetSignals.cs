@@ -38,7 +38,7 @@ public partial class AiManagerWindow
 
     private void StartResetRefresh(bool forceRefresh = false)
     {
-        if (_lifetime.IsCancellationRequested || _resetRefreshTask is { IsCompleted: false }) return;
+        if (_deepSeekMode || _lifetime.IsCancellationRequested || _resetRefreshTask is { IsCompleted: false }) return;
         _resetRefreshTask = RefreshResetSignalsAsync(forceRefresh);
     }
 
@@ -267,7 +267,8 @@ public partial class AiManagerWindow
 
     private void RenderResetAttention()
     {
-        ResetAttentionButton.Visibility = _resetAttention.Pending is null ? Visibility.Collapsed : Visibility.Visible;
+        var resetVisible = !_deepSeekMode && _resetAttention.Pending is not null;
+        ResetAttentionButton.Visibility = resetVisible ? Visibility.Visible : Visibility.Collapsed;
         ResetAttentionTitle.Text = _resetAttention.Title;
         ResetAttentionDetail.Text = _resetAttention.TimeText;
         ResetAttentionAction.Text = _resetAttention.DismissText;

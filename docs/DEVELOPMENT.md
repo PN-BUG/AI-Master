@@ -6,6 +6,7 @@
 - WPF
 - Windows Forms `Screen` API（多显示器工作区定位）
 - Codex App Server JSONL 协议
+- DeepSeek HTTP API（余额）与 Deep Code 本地会话索引
 
 项目不依赖 SoftwareToolkit 源码。Windows 应用通知使用 `Microsoft.Toolkit.Uwp.Notifications` 7.1.3，目标系统为 Windows 10 1809 或更新版本。
 
@@ -41,6 +42,8 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release
 ```
 
 开机自启定向回归使用 `--startup-tests`；界面与中英文离线截图使用 `--startup-ui-tests --output .\artifacts\startup`。两者仅操作随机命名的测试注册表项，不修改真实 Windows 启动项。注册表保存当前程序路径，界面读取注册表状态，不随设置备份或设备同步迁移。
+
+DeepSeek 定向回归使用 `--deepseek-tests`（余额、平台用量、Deep Code 索引、凭证加密、快照聚合）和 `--deepseek-ui-tests`（DeepSeek/Codex 两种模式的主面板渲染与卡片显隐）。两者都不访问网络：HTTP 响应由测试内的 `HttpMessageHandler` 桩提供，Deep Code 索引写入临时目录。`--capture-deepseek-preview` 会把带演示数据的 DeepSeek 主面板渲染到临时目录并打印 PNG 路径，用于人工检查布局。
 
 任务栏身份定向回归使用 `--taskbar-tests`，通过临时目录中的真实 `.lnk` 验证旧固定快捷方式迁移、参数与图标保留、其他安装路径隔离、损坏/锁定快捷方式容错及重复启动，同时运行通知中心回归；不修改用户真实固定项。应用在创建窗口和托盘之前，将进程和指向当前 EXE 的已有任务栏固定快捷方式同步到通知注册的 `AppUserModelID`，并通知 Shell 更新。不会自动新增固定项。
 
@@ -114,10 +117,17 @@ WPF 窗口
           -> CodexAppServerClient -> codex app-server（额度、模型、在线任务）
           -> CodexDesktopIpcClient -> 已有 codex-ipc 桌面只读跟随（真实待审批请求）
           -> 本地 JSONL 流式投影 -> %USERPROFILE%\.codex\sessions（统计、任务元数据及有限的用户输入）
+      -> DeepSeekClient         -> https://api.deepseek.com/user/balance（API Key 余额）
+                                -> https://platform.deepseek.com/api/v0/...（可选平台 Token 用量）
+      -> DeepCodeTaskReader     -> %USERPROFILE%\.deepcode\projects\*\sessions-index.json（只读任务索引与 Token）
       -> SharedUsageClient     -> https://www.woliux.com/api/v1/aimaster/sync（可选设备周汇总）
   -> AiManagerSnapshot / AiFloatingSnapshot
   -> 主面板与悬浮窗渲染
 ```
+
+数据源由 `AiManagerSettings.Provider`（`codex` / `deepseek`）决定，`AiManagerService.RefreshAsync`、`RefreshFloatingAsync` 和本地任务监视器都按该值分支。DeepSeek 路径不依赖 App Server 或 Codex 桌面管道；Codex 路径不读取 DeepSeek 凭证。两套数据共用 `AiTaskSnapshotFeed`、`AiManagerSnapshot` 和悬浮窗模型，切换数据源时旧任务会由下一次刷新整体替换。
+
+DeepSeek 凭证分别以 `AIMaster.DeepSeek.v1` 为 DPAPI 附加熵保存；API Key 只用于公开余额接口，平台 Token 只用于平台私有用量接口。`DeepSeekClient` 对平台用量采用容错解析：递归收集带日期、Token、成本、模型和 API Key 字段的对象，兼容嵌套结构和按日/按月两种回退；接口失败时保留余额并单独报告用量错误，不阻塞任务列表。`DeepCodeTaskReader` 每秒最多读取一次索引，按 `usagePerModel` 选主模型，并回退到 `~/.deepcode/settings.json` 的 `env.MODEL` 与 `reasoningEffort`。
 
 App Server 请求使用独立超时；任务、模型或历史用量等可选请求失败时，不应阻止本地任务降级和已有额度信息显示。
 

@@ -109,6 +109,26 @@ public sealed class AiManagerSettings
     [JsonPropertyName("language")]
     public string? Language { get; set; }
 
+    /// <summary>Which account dashboard is active: codex or deepseek.</summary>
+    [JsonPropertyName("provider")]
+    public string Provider { get; set; } = AiProviderModes.Codex;
+
+    [JsonPropertyName("deepseekApiKeyProtected")]
+    public string DeepSeekApiKeyProtected { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string DeepSeekApiKey { get; set; } = string.Empty;
+
+    [JsonPropertyName("deepseekPlatformTokenProtected")]
+    public string DeepSeekPlatformTokenProtected { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string DeepSeekPlatformToken { get; set; } = string.Empty;
+
+    /// <summary>Notify visually below this balance; 0 disables the low-balance state.</summary>
+    [JsonPropertyName("deepseekBalanceWarning")]
+    public double DeepSeekBalanceWarning { get; set; }
+
     [JsonPropertyName("sharedUsageEnabled")]
     public bool SharedUsageEnabled { get; set; }
 
@@ -298,6 +318,8 @@ public sealed class AiThreadSummary
     public string? ModelName { get; init; }
     public string? ReasoningEffort { get; init; }
     public string? RolloutPath { get; init; }
+    /// <summary>Project root for providers that store one task tree per project (Deep Code).</summary>
+    public string? ProjectPath { get; init; }
     public DateTimeOffset? UpdatedAt { get; init; }
     public bool IsActive => Status is "active" or "inProgress" or "waitingOnApproval" or "waitingOnUserInput";
     public string StatusText => LocalizationService.FormatTaskStatus(Status);
@@ -306,6 +328,9 @@ public sealed class AiThreadSummary
 
 public sealed class AiManagerSnapshot
 {
+    public string Provider { get; init; } = AiProviderModes.Codex;
+    public AiDeepSeekSnapshot? DeepSeek { get; init; }
+    public bool IsDeepSeek => AiProviderModes.IsDeepSeek(Provider);
     public List<AiLimitWindow> Limits { get; init; } = new();
     public List<AiDailyUsage> DailyUsage { get; init; } = new();
     public List<AiThreadSummary> Threads { get; init; } = new();
@@ -335,6 +360,12 @@ public sealed record AiRemainingForecastPoint(
 
 public sealed class AiFloatingSnapshot
 {
+    public string Provider { get; init; } = AiProviderModes.Codex;
+    public bool IsDeepSeek => AiProviderModes.IsDeepSeek(Provider);
+    /// <summary>Provider-specific primary value. Codex uses <see cref="RemainingPercent"/>; DeepSeek uses money.</summary>
+    public string? QuotaText { get; init; }
+    public string QuotaLabel { get; init; } = "剩余额度";
+    public string? QuotaDetail { get; init; }
     public string? QuotaError { get; init; }
     public DateTimeOffset? QuotaCapturedAt { get; init; }
     public List<AiThreadSummary> Tasks { get; init; } = new();

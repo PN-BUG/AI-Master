@@ -117,12 +117,29 @@ internal static partial class Program
             VerifyResetSignals(args);
             return 0;
         }
+        if (args.Contains("--deepseek-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyDeepSeekSupport();
+            return 0;
+        }
         App app = args.Contains("--task-live-tests", StringComparer.OrdinalIgnoreCase)
             ? new SharedUsageTestApp() : new App();
         if (args.Contains("--task-live-tests", StringComparer.OrdinalIgnoreCase))
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         else app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--deepseek-ui-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyDeepSeekUi();
+            app.ExitApplication();
+            return 0;
+        }
+        if (args.Contains("--capture-deepseek-preview", StringComparer.OrdinalIgnoreCase))
+        {
+            CaptureDeepSeekPreview();
+            app.ExitApplication();
+            return 0;
+        }
         if (args.Contains("--startup-ui-tests", StringComparer.OrdinalIgnoreCase))
         {
             VerifyStartupUi(args);
@@ -203,6 +220,7 @@ internal static partial class Program
         VerifyWindowsStartup();
         VerifyTaskbarIdentity();
         VerifyQuotaNotifications();
+        VerifyDeepSeekSupport();
         if (args.Contains("--capture-docs", StringComparer.OrdinalIgnoreCase))
         {
             var outputDirectory = args.SkipWhile(arg => !string.Equals(arg, "--output", StringComparison.OrdinalIgnoreCase))
@@ -589,8 +607,8 @@ internal static partial class Program
     {
         var normalized = AiManagerWindow.NormalizeDashboardLayout(
             ["right:quota", "left:quota", "left:unknown", "right:forecast"]);
-        Check(normalized.Count == 10 && normalized[0] == "right:quota" &&
-              normalized[1] == "right:forecast" && normalized.Select(item => item.Split(':')[1]).Distinct().Count() == 10,
+        Check(normalized.Count == 11 && normalized[0] == "right:quota" &&
+              normalized[1] == "right:forecast" && normalized.Select(item => item.Split(':')[1]).Distinct().Count() == 11,
             "dashboard layout preserves valid card moves and restores every missing card once");
     }
 
@@ -600,7 +618,7 @@ internal static partial class Program
             .Where(item => Equals(item.Style, main.FindResource("CardResizeThumb")))
             .ToList();
         var quotaCard = (Border)main.FindName("QuotaCard");
-        Check(resizeThumbs.Count == 10 && resizeThumbs.All(item => Grid.GetRow(item) == 0 && Grid.GetRowSpan(item) == 2 &&
+        Check(resizeThumbs.Count == 11 && resizeThumbs.All(item => Grid.GetRow(item) == 0 && Grid.GetRowSpan(item) == 2 &&
                   item.HorizontalAlignment == HorizontalAlignment.Stretch && item.Height == 8) &&
               main.FindName("DailyUsageCanvas") is Canvas &&
               double.IsNaN(quotaCard.Width) && quotaCard.HorizontalAlignment == HorizontalAlignment.Stretch,
@@ -616,7 +634,7 @@ internal static partial class Program
             "card move edges leave content and the expanded bottom resize edge available");
         var hints = Descendants(main).OfType<TextBlock>().Where(item => Equals(item.Tag, "CardHelp")).ToList();
         var helpButtons = Descendants(main).OfType<Button>().Where(item => Equals(item.Content, "?")).ToList();
-        Check(hints.Count == 11 && hints.All(item => item.Visibility == Visibility.Collapsed) && helpButtons.Count == 10,
+        Check(hints.Count == 12 && hints.All(item => item.Visibility == Visibility.Collapsed) && helpButtons.Count == 11,
             "card explanations are hidden from the page and available through help buttons");
         var scopeHint = (TextBlock)main.FindName("ForecastScopeNoteText");
         var forecastCard = (Border)main.FindName("ForecastCard");

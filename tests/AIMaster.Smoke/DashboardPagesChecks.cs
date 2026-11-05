@@ -41,8 +41,8 @@ internal static partial class Program
             Check(new[] { "LanguageButton", "ThemeButton", "CheckUpdateButton", "ViewUpdateButton", "InstallUpdateButton", "OfficialWebsiteButton", "AboutButton" }
                     .All(name => IsInsideApplicationControls((DependencyObject)main.FindName(name))),
                 $"{pageId} keeps application controls permanently in the navigation rail");
-            Check(main.CaptureDashboardLayout().Count == 10 &&
-                  main.CaptureDashboardLayout().Select(entry => entry.Split(':')[1]).Distinct().Count() == 10,
+            Check(main.CaptureDashboardLayout().Count == 11 &&
+                  main.CaptureDashboardLayout().Select(entry => entry.Split(':')[1]).Distinct().Count() == 11,
                 $"saving a layout from {pageId} retains cards on hidden pages");
             var description = (TextBlock)main.FindName("PageDescriptionText");
             Check(!string.IsNullOrWhiteSpace(description.Text) && !description.Text.Any(c => c >= '\u4e00' && c <= '\u9fff'),

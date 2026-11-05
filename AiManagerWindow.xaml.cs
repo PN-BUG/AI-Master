@@ -32,6 +32,8 @@ public partial class AiManagerWindow : Window
     private bool _checkingForUpdates;
     private bool _showLocalForecast;
     private string _theme = ThemeModes.Dark;
+    private bool _deepSeekMode;
+    private bool _providerControlsReady;
     private UpdateCheckResult? _latestRelease;
     private UpdateCheckResult? _availableUpdate;
     private IReadOnlyList<AiRemainingForecastPoint> _weeklyRemainingForecast =
@@ -53,7 +55,8 @@ public partial class AiManagerWindow : Window
     private static readonly string[] DefaultDashboardLayout =
     [
         "left:quota", "left:limits", "left:threads", "left:localUsage", "left:dailyUsage",
-        "right:guard", "right:resetSignals", "right:forecast", "left:settings", "right:sharedUsage"
+        "right:guard", "right:resetSignals", "right:forecast", "left:settings", "right:sharedUsage",
+        "left:deepseek"
     ];
 
     private sealed class DashboardPageState(
@@ -97,6 +100,11 @@ public partial class AiManagerWindow : Window
         InitializeComponent();
         ApplyTheme(_service.Settings.Theme, refreshContent: false);
         InitializeDashboardCards();
+        _providerControlsReady = false;
+        (AiProviderModes.IsDeepSeek(_service.Settings.Provider) ? DeepSeekProviderButton : CodexProviderButton)
+            .IsChecked = true;
+        _providerControlsReady = true;
+        ApplyProviderMode(_service.Settings.Provider);
         _timer.Tick += async (_, _) => await RefreshAsync();
         LocalizationService.LanguageChanged += LocalizationService_LanguageChanged;
         LocalizationService.Apply(this);
@@ -158,6 +166,7 @@ public partial class AiManagerWindow : Window
             if (_service.Settings.ShouldRestoreFloatingWindow) AiFloatingWindow.ShowOrActivate();
         }
         LoadPolicyControls();
+        LoadDeepSeekControls();
         LoadSharedUsageControls();
         InitializeResetMonitoring();
         _timer.Interval = TimeSpan.FromSeconds(Math.Clamp(_service.Settings.RefreshSeconds, 30, 600));
@@ -468,7 +477,8 @@ public partial class AiManagerWindow : Window
             ("settings", "保护策略", SettingsCard),
             ("localUsage", "本机消耗", LocalUsageCard),
             ("dailyUsage", "当日消耗 / 时段", DailyUsageCard),
-            ("sharedUsage", "共享统计", SharedUsageCard)
+            ("sharedUsage", "共享统计", SharedUsageCard),
+            ("deepseek", "DeepSeek 接入", DeepSeekCard)
         };
 
         foreach (var (id, title, card) in definitions)
@@ -566,7 +576,7 @@ public partial class AiManagerWindow : Window
         "threads" or "guard" => "tasks",
         "localUsage" or "dailyUsage" or "forecast" => "usage",
         "sharedUsage" => "shared",
-        "settings" => "settings",
+        "settings" or "deepseek" => "settings",
         _ => throw new ArgumentOutOfRangeException(nameof(cardId))
     };
 
@@ -587,7 +597,18 @@ public partial class AiManagerWindow : Window
     {
         SharedPageButton.Content = L("共享统计", "Shared usage");
         if (_dashboardPages.TryGetValue(_activeDashboardPage, out var page))
-            PageDescriptionText.Text = LocalizationService.T(page.Description);
+        {
+            var description = _deepSeekMode
+                ? _activeDashboardPage switch
+                {
+                    "quota" => L("查看 DeepSeek 账户余额与近期用量。", "Check the DeepSeek account balance and recent usage."),
+                    "tasks" => L("查看 Deep Code 最近任务与本地会话状态。", "Review recent Deep Code tasks and local session state."),
+                    "usage" => L("分析 Deep Code 本机用量与 DeepSeek 平台统计。", "Explore Deep Code local usage and DeepSeek Platform totals."),
+                    _ => page.Description
+                }
+                : page.Description;
+            PageDescriptionText.Text = LocalizationService.T(description);
+        }
         var (title, eyebrow, index) = _activeDashboardPage switch
         {
             "tasks" => (L("任务监控", "Task monitor"), "TASKS & GUARD", "02"),
@@ -1112,6 +1133,7 @@ public partial class AiManagerWindow : Window
                 "Drag the top or side edges to rearrange cards. Cards grow with their content. Drag the bottom edge to adjust minimum height; double-click to reset.");
             System.Windows.Automation.AutomationProperties.SetName(state.HelpButton, L("卡片帮助", "Card help"));
         }
+        UpdateProviderCardTitles();
     }
 
     private async Task RefreshAsync()
@@ -1119,11 +1141,18 @@ public partial class AiManagerWindow : Window
         if (_refreshing) return;
         _refreshing = true;
         RefreshButton.IsEnabled = false;
-        SyncStatusText.Text = L("正在读取 Codex…", "Reading Codex…");
+        SyncStatusText.Text = _deepSeekMode
+            ? L("正在读取 DeepSeek…", "Reading DeepSeek…")
+            : L("正在读取 Codex…", "Reading Codex…");
         SyncStatusText.ToolTip = null;
         try
         {
             var snapshot = await _service.RefreshAsync(_lifetime.Token);
+            // A provider switch can complete while the previous provider's sync is still running.
+            // Never let that stale result repaint the dashboard; the queued refresh owns it.
+            if (!string.Equals(AiProviderModes.Normalize(snapshot.Provider),
+                    AiProviderModes.Normalize(_service.Settings.Provider), StringComparison.OrdinalIgnoreCase))
+                return;
             RenderSnapshot(snapshot);
             ObserveAccountRecovery(snapshot);
             ApplyQuotaNotification(snapshot);
@@ -1135,8 +1164,12 @@ public partial class AiManagerWindow : Window
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            var message = BuildConnectionError(ex);
-            SyncStatusText.Text = L("额度同步暂不可用", "Quota sync unavailable");
+            var message = _deepSeekMode
+                ? _service.LastDeepSeekError ?? BuildConnectionError(ex)
+                : BuildConnectionError(ex);
+            SyncStatusText.Text = _deepSeekMode
+                ? L("DeepSeek 同步暂不可用", "DeepSeek sync unavailable")
+                : L("额度同步暂不可用", "Quota sync unavailable");
             SyncStatusText.ToolTip = message;
             SetFooterStatus(message, warning: true);
             RenderQuotaSyncState(_service.LastSnapshot, ex);
@@ -1150,6 +1183,17 @@ public partial class AiManagerWindow : Window
 
     private void RenderSnapshot(AiManagerSnapshot snapshot)
     {
+        if (_deepSeekMode != snapshot.IsDeepSeek) ApplyProviderMode(snapshot.Provider);
+        if (snapshot.IsDeepSeek)
+        {
+            RenderDeepSeekSnapshot(snapshot);
+            return;
+        }
+        RemainingCaptionText.Text = LocalizationService.T("剩余额度");
+        RemainingUnitText.Visibility = Visibility.Visible;
+        RemainingText.FontSize = 48;
+        MainUsageBar.Visibility = Visibility.Visible;
+        ResetCreditText.Visibility = Visibility.Visible;
         var main = snapshot.MainLimit;
         if (main != null)
         {
@@ -1196,6 +1240,7 @@ public partial class AiManagerWindow : Window
 
     private void RenderQuotaSyncState(AiManagerSnapshot? snapshot, Exception? error = null)
     {
+        if (snapshot?.IsDeepSeek == true) return;
         if (_service.LastQuotaError is null && error is null)
         {
             QuotaStateBadge.ToolTip = null;
@@ -1262,6 +1307,7 @@ public partial class AiManagerWindow : Window
 
     private void ApplyQuotaNotification(AiManagerSnapshot snapshot)
     {
+        if (snapshot.IsDeepSeek) return;
         if (_service.LastQuotaError is not null || snapshot.Limits.Count == 0) return;
         var settings = _service.Settings;
         RenderDailyQuota(snapshot, notify: true);
@@ -1272,6 +1318,7 @@ public partial class AiManagerWindow : Window
 
     private async Task ApplyGuardAsync(AiManagerSnapshot snapshot)
     {
+        if (snapshot.IsDeepSeek) return;
         if (_service.LastQuotaError is not null || snapshot.Limits.Count == 0) return;
         var highest = snapshot.Limits.Count == 0 ? 0 : snapshot.Limits.Max(item => item.UsedPercent);
         var overPause = highest >= _service.Settings.PausePercent;
@@ -1401,7 +1448,7 @@ public partial class AiManagerWindow : Window
         SetFooterStatus(L("设置已保存并应用", "Settings saved and applied"));
         if (_service.LastSnapshot is { } snapshot)
         {
-            ApplyQuotaVisual(snapshot.MainLimit?.UsedPercent ?? 0);
+            if (!snapshot.IsDeepSeek) ApplyQuotaVisual(snapshot.MainLimit?.UsedPercent ?? 0);
             ApplyQuotaNotification(snapshot);
             await ApplyGuardAsync(snapshot);
             RenderQuotaSyncState(snapshot);
@@ -1927,6 +1974,7 @@ public partial class AiManagerWindow : Window
 
     private void LocalizationService_LanguageChanged(object? sender, EventArgs e)
     {
+        UpdateProviderTexts();
         if (_service.LastSnapshot is { } snapshot) RenderSnapshot(snapshot);
         RenderResetSignals();
         LocalizationService.Apply(this);
