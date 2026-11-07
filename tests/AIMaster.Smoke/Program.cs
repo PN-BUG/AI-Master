@@ -296,8 +296,14 @@ internal static partial class Program
                 "Codex server requests with string IDs do not tear down the response reader");
         }
 
-        var main = new AiManagerWindow();
-        var floating = new AiFloatingWindow();
+        // Persisted reminders and personal settings must not change offline layout assertions.
+        var smokeDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+            "AIMaster-smoke-ui-" + Guid.NewGuid().ToString("N"));
+        var smokeAttention = new ResetSignalAttention(System.IO.Path.Combine(smokeDirectory, "attention.json"));
+        var main = new AiManagerWindow(new AiManagerService(
+            System.IO.Path.Combine(smokeDirectory, "main-settings.json")), smokeAttention);
+        var floating = new AiFloatingWindow(new AiManagerService(
+            System.IO.Path.Combine(smokeDirectory, "floating-settings.json")), smokeAttention);
         app.InitializeTrayIcon();
 
         Check(app.IsTrayIconVisible, "AIMaster creates a visible Windows tray icon");
