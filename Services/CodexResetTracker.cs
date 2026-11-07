@@ -85,10 +85,12 @@ internal sealed class AccountResetTracker
             if (next.Previous.TryGetValue(key, out var old))
             {
                 if (now < old.CheckedAt || current.ResetsAt < old.Limit.ResetsAt) continue;
-                // The official period crossed our last observation. Low prior usage and
-                // consumption accrued before a delayed poll must not suppress a reset alert.
-                if (current.ResetsAt > old.Limit.ResetsAt && current.ResetsAt > now &&
-                    start <= now && (start >= old.CheckedAt || old.Limit.ResetsAt <= now))
+                // An unused rolling window can keep moving its deadline forward. That is
+                // not recovery: before the previous deadline, require actual usage to fall.
+                // After that deadline, delayed polling may already show new consumption.
+                if (old.Limit.UsedPercent > 0 && current.ResetsAt > old.Limit.ResetsAt && current.ResetsAt > now &&
+                    (old.Limit.ResetsAt <= now ||
+                     start >= old.CheckedAt && current.UsedPercent < old.Limit.UsedPercent))
                     recovered.Add(current);
             }
             next.Previous[key] = new(current, now);

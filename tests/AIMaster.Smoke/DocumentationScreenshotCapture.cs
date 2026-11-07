@@ -179,6 +179,10 @@ internal static class DocumentationScreenshotCapture
             ModelName = "GPT-5",
             ReasoningEffort = "high",
             RemainingPercent = 63,
+            FiveHourQuota = new AiLimitWindow { LimitId = "codex", UsedPercent = 12,
+                WindowDurationMinutes = 300, ResetsAt = now.AddHours(3) },
+            WeeklyQuota = new AiLimitWindow { LimitId = "codex", UsedPercent = 37,
+                WindowDurationMinutes = 10080, ResetsAt = now.AddDays(4) },
             QuotaWindow = english ? "Codex total quota · 7-day window" : "Codex 总额度 · 7 天窗口",
             ResetsAt = now.AddDays(4),
             CapturedAt = now

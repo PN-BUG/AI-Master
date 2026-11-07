@@ -106,6 +106,8 @@ internal static class AiTaskSnapshotFeed
         return new AiFloatingSnapshot
         {
             Provider = previous.Provider,
+            FiveHourQuota = previous.FiveHourQuota,
+            WeeklyQuota = previous.WeeklyQuota,
             QuotaText = previous.QuotaText,
             QuotaLabel = previous.QuotaLabel,
             QuotaDetail = previous.QuotaDetail,

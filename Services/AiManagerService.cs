@@ -44,6 +44,7 @@ internal sealed class AiManagerService : IAsyncDisposable
     private List<AiLimitWindow> _floatingLimits = new();
     private DateTimeOffset _floatingLimitsAt;
     private DateTimeOffset _floatingLimitsAttemptAt;
+    private long _floatingQuotaRevision;
     private DateTimeOffset _nextConnectAttemptAt;
     private JsonElement? _floatingModelsRoot;
     private DateTimeOffset _floatingModelsAt;
@@ -140,6 +141,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         }
         // These requests are independent. Starting them together removes a full optional-request
         // round trip from first paint while the local JSONL work stays off the UI thread.
+        var quotaRevision = _runtime.BeginQuotaRead();
         var rateTask = _client.RequestAsync("account/rateLimits/read",
             cancellationToken: cancellationToken, timeout: TimeSpan.FromSeconds(45));
         var usageTask = TryRequestAsync("account/usage/read", null, TimeSpan.FromSeconds(12), cancellationToken);
@@ -156,9 +158,10 @@ internal sealed class AiManagerService : IAsyncDisposable
             LastQuotaError = ex.Message;
             throw;
         }
+        var limits = ParseLimits(rate);
+        _runtime.PublishQuota(quotaRevision, limits, DateTimeOffset.Now);
         var usage = await usageTask;
         var localUsage = await localUsageTask;
-        var limits = ParseLimits(rate);
         AiSharedUsageSummary sharedUsage;
         try { sharedUsage = await SyncSharedUsageAsync(cancellationToken, limits: limits); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -308,8 +311,11 @@ internal sealed class AiManagerService : IAsyncDisposable
         if (AiProviderModes.IsDeepSeek(Settings.Provider))
             return await RefreshDeepSeekFloatingAsync(cancellationToken, forceRefresh).ConfigureAwait(false);
         var appServerAvailable = await TryConnectFloatingAsync(cancellationToken, forceRefresh);
+        AdoptLatestQuota();
         var now = DateTimeOffset.Now;
-        var refreshLimits = forceRefresh || now - _floatingLimitsAttemptAt >= TimeSpan.FromMinutes(1);
+        var refreshLimits = forceRefresh ||
+            now - _floatingLimitsAttemptAt >= TimeSpan.FromMinutes(1) &&
+            now - _floatingLimitsAt >= TimeSpan.FromMinutes(1);
         var refreshModels = forceRefresh || now - _floatingModelsAttemptAt >=
             TimeSpan.FromMinutes(_floatingModelsRoot is null ? 1 : 10);
         if (appServerAvailable && refreshLimits) _floatingLimitsAttemptAt = now;
@@ -327,13 +333,10 @@ internal sealed class AiManagerService : IAsyncDisposable
             }, TimeSpan.FromSeconds(8), cancellationToken)
             : Task.FromResult<JsonElement?>(null);
         var tasks = await tasksTask;
-        var rate = await rateTask;
+        await rateTask;
         var modelsRoot = await modelsTask;
-        if (rate is { } rateValue)
-        {
-            _floatingLimits = ParseLimits(rateValue);
-            _floatingLimitsAt = now;
-        }
+        // A dashboard request may have completed while local task/model reads were pending.
+        AdoptLatestQuota();
         if (modelsRoot is { } modelsValue)
         {
             _floatingModelsRoot = modelsValue.Clone();
@@ -349,6 +352,8 @@ internal sealed class AiManagerService : IAsyncDisposable
         return new AiFloatingSnapshot
         {
             Provider = AiProviderModes.Codex,
+            FiveHourQuota = SelectQuotaWindow(limits, 300),
+            WeeklyQuota = SelectQuotaWindow(limits, 10080),
             Tasks = visibleTasks,
             TaskName = focus?.DisplayTitle ?? LocalizationService.L("暂无最近任务", "No recent tasks"),
             TaskStatus = focus?.Status ?? "notLoaded",
@@ -365,6 +370,11 @@ internal sealed class AiManagerService : IAsyncDisposable
             CapturedAt = DateTimeOffset.Now
         };
     }
+
+    private static AiLimitWindow? SelectQuotaWindow(IEnumerable<AiLimitWindow> limits, int minutes) =>
+        limits.Where(item => item.WindowDurationMinutes == minutes)
+            .OrderByDescending(item => item.LimitId.Equals("codex", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(item => item.RemainingPercent).FirstOrDefault();
 
     private async Task<List<AiThreadSummary>> RefreshTaskSummariesAsync(bool appServerAvailable,
         CancellationToken cancellationToken)
@@ -457,11 +467,13 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     private async Task<JsonElement?> TryReadFloatingQuotaAsync(CancellationToken cancellationToken)
     {
+        var revision = _runtime.BeginQuotaRead();
         try
         {
             var result = await _client.RequestAsync("account/rateLimits/read", cancellationToken: cancellationToken,
                 timeout: TimeSpan.FromSeconds(8));
             LastQuotaError = null;
+            _runtime.PublishQuota(revision, ParseLimits(result), DateTimeOffset.Now);
             return result;
         }
         catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or IOException)
@@ -469,6 +481,15 @@ internal sealed class AiManagerService : IAsyncDisposable
             LastQuotaError = ex.Message;
             return null;
         }
+    }
+
+    private void AdoptLatestQuota()
+    {
+        if (_runtime.LatestQuota is not { } quota || quota.Revision <= _floatingQuotaRevision) return;
+        _floatingQuotaRevision = quota.Revision;
+        _floatingLimits = quota.Limits.ToList();
+        _floatingLimitsAt = quota.CapturedAt;
+        LastQuotaError = null;
     }
 
     private async Task<bool> TryConnectFloatingAsync(CancellationToken cancellationToken, bool forceRefresh = false)

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
+using AIMaster.Models;
 
 namespace AIMaster.Services;
 
@@ -16,6 +17,29 @@ internal sealed class AiManagerRuntime : IAsyncDisposable
     private Task? _disposeTask;
     private int _disposed;
     private long _lastPruneTimestamp;
+    private long _quotaReadRevision;
+    private readonly object _quotaSync = new();
+    private QuotaSnapshot? _quota;
+
+    internal sealed record QuotaSnapshot(long Revision, IReadOnlyList<AiLimitWindow> Limits,
+        DateTimeOffset CapturedAt);
+
+    internal QuotaSnapshot? LatestQuota
+    {
+        get { lock (_quotaSync) return _quota; }
+    }
+
+    internal long BeginQuotaRead() => Interlocked.Increment(ref _quotaReadRevision);
+
+    internal void PublishQuota(long revision, IReadOnlyList<AiLimitWindow> limits, DateTimeOffset capturedAt)
+    {
+        lock (_quotaSync)
+        {
+            // A slower, earlier request must not replace a newer official reading.
+            if (_quota is not null && revision <= _quota.Revision) return;
+            _quota = new(revision, limits.ToArray(), capturedAt);
+        }
+    }
 
     internal static AiManagerRuntime Shared => Production.Value;
 

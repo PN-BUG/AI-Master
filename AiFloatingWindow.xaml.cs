@@ -212,6 +212,8 @@ public partial class AiFloatingWindow : Window
         TaskStatusText.Text = LocalizedStatus(snapshot.TaskStatus);
         if (snapshot.IsDeepSeek)
         {
+            WeeklyQuotaPanel.Visibility = Visibility.Collapsed;
+            QuotaValuesGrid.ColumnDefinitions[1].Width = new GridLength(0);
             QuotaLabelText.Text = LocalizationService.T(snapshot.QuotaLabel);
             QuotaUnitText.Visibility = Visibility.Collapsed;
             QuotaRowGrid.ColumnDefinitions[0].Width = new GridLength(72);
@@ -235,26 +237,14 @@ public partial class AiFloatingWindow : Window
         }
         else
         {
-            QuotaLabelText.Text = LocalizationService.T("剩余额度");
+            QuotaLabelText.Text = LocalizationService.L("5h 剩余", "5h left");
+            WeeklyQuotaLabelText.Text = LocalizationService.L("周剩余", "Week left");
+            WeeklyQuotaPanel.Visibility = Visibility.Visible;
+            QuotaValuesGrid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
             QuotaUnitText.Visibility = Visibility.Visible;
-            QuotaRowGrid.ColumnDefinitions[0].Width = new GridLength(54);
-            RemainingQuotaText.FontSize = 14 * _fontScale;
-            RemainingQuotaText.Text = snapshot.RemainingPercent?.ToString("0.#", CultureInfo.InvariantCulture) ?? "--";
-            var quotaWindow = LocalizationService.LocalizeKnownText(snapshot.QuotaWindow);
-            RemainingQuotaText.ToolTip = snapshot.ResetsAt is { } reset
-                ? LocalizationService.IsEnglish
-                    ? $"{quotaWindow}\nResets {reset.LocalDateTime.ToString("MMM d HH:mm", CultureInfo.InvariantCulture)}"
-                    : $"{quotaWindow}\n{reset.LocalDateTime:M月d日 HH:mm} 重置"
-                : quotaWindow;
-            if (snapshot.QuotaError is not null)
-            {
-                RemainingQuotaText.ToolTip += LocalizationService.L("\n额度同步暂不可用，将自动重试。", "\nQuota sync unavailable; retrying automatically.") +
-                    (snapshot.QuotaCapturedAt is { } quotaAt
-                        ? LocalizationService.L($"\n缓存额度采集于 {quotaAt.LocalDateTime:HH:mm:ss}", $"\nCached quota from {quotaAt.LocalDateTime:HH:mm:ss}")
-                        : string.Empty);
-                RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "WarningText");
-            }
-            else RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "FloatInk");
+            QuotaRowGrid.ColumnDefinitions[0].Width = new GridLength(84 * _fontScale);
+            RenderQuotaWindow(RemainingQuotaText, snapshot.FiveHourQuota, snapshot);
+            RenderQuotaWindow(WeeklyQuotaText, snapshot.WeeklyQuota, snapshot);
         }
         var modelName = LocalizationService.LocalizeKnownText(snapshot.ModelName);
         ModelText.Text = modelName;
@@ -285,6 +275,25 @@ public partial class AiFloatingWindow : Window
         RefreshVisibleTaskRows(force: true);
         ApplyStatusVisual(snapshot.TaskStatus);
         RenderResetAttention();
+    }
+
+    private void RenderQuotaWindow(TextBlock text, AiLimitWindow? quota, AiFloatingSnapshot snapshot)
+    {
+        text.FontSize = 14 * _fontScale;
+        text.Text = quota?.RemainingPercent.ToString("0.#", CultureInfo.InvariantCulture) ?? "--";
+        var detail = quota is null
+            ? LocalizationService.L("额度窗口未知", "Unknown quota window")
+            : $"{quota.DisplayName} · {quota.WindowName}";
+        if (quota?.ResetsAt is { } reset)
+            detail += LocalizationService.L($"\n{reset.LocalDateTime:M月d日 HH:mm} 重置",
+                $"\nResets {reset.LocalDateTime.ToString("MMM d HH:mm", CultureInfo.InvariantCulture)}");
+        if (snapshot.QuotaCapturedAt is { } captured)
+            detail += LocalizationService.L($"\n额度采集于 {captured.LocalDateTime:HH:mm:ss}",
+                $"\nQuota captured at {captured.LocalDateTime:HH:mm:ss}");
+        if (snapshot.QuotaError is not null)
+            detail += LocalizationService.L("\n额度同步暂不可用，将自动重试。", "\nQuota sync unavailable; retrying automatically.");
+        text.ToolTip = detail;
+        text.SetResourceReference(TextBlock.ForegroundProperty, snapshot.QuotaError is null ? "FloatInk" : "WarningText");
     }
 
     private void TaskSnapshot_Changed(AiTaskSnapshot snapshot)

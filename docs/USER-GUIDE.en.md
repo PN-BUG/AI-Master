@@ -136,7 +136,7 @@ Public sync requires HTTPS. The Woliu server stores only an HMAC-SHA256 group id
 Select **Floating monitor** in the main window. The overlay stays on top and displays:
 
 - current status and task name;
-- quota remaining;
+- separate five-hour and weekly quota remaining, with reset and capture times on hover;
 - active model and reasoning effort;
 - recent tasks according to the overlay height (up to eight).
 

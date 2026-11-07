@@ -41,6 +41,10 @@ dotnet run --project .\AIMaster.csproj
 dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release
 ```
 
+额度恢复与悬浮窗刷新定向回归使用 `--account-reset-tests` 和 `--quota-refresh-tests`。
+后者通过离线 App Server 桩检查两窗读数同步、旧响应隔离与强制刷新，
+并将中英文双额度悬浮窗截图写入 `artifacts/quota-reset-ui`。
+
 开机自启定向回归使用 `--startup-tests`；界面与中英文离线截图使用 `--startup-ui-tests --output .\artifacts\startup`。两者仅操作随机命名的测试注册表项，不修改真实 Windows 启动项。注册表保存当前程序路径，界面读取注册表状态，不随设置备份或设备同步迁移。
 
 DeepSeek 定向回归使用 `--deepseek-tests`（余额、平台用量、Deep Code 索引、凭证加密、快照聚合）和 `--deepseek-ui-tests`（DeepSeek/Codex 两种模式的主面板渲染与卡片显隐）。两者都不访问网络：HTTP 响应由测试内的 `HttpMessageHandler` 桩提供，Deep Code 索引写入临时目录。`--capture-deepseek-preview` 会把带演示数据的 DeepSeek 主面板渲染到临时目录并打印 PNG 路径，用于人工检查布局。

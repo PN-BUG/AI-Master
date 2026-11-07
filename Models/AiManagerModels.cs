@@ -360,6 +360,8 @@ public sealed record AiRemainingForecastPoint(
 
 public sealed class AiFloatingSnapshot
 {
+    public AiLimitWindow? FiveHourQuota { get; init; }
+    public AiLimitWindow? WeeklyQuota { get; init; }
     public string Provider { get; init; } = AiProviderModes.Codex;
     public bool IsDeepSeek => AiProviderModes.IsDeepSeek(Provider);
     /// <summary>Provider-specific primary value. Codex uses <see cref="RemainingPercent"/>; DeepSeek uses money.</summary>

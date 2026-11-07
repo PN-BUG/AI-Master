@@ -96,6 +96,11 @@ internal static partial class Program
             VerifyConnectionRefreshChecks();
             return 0;
         }
+        if (args.Contains("--quota-refresh-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyConnectionRefreshChecks(quotaOnly: true);
+            return 0;
+        }
         if (args.Contains("--connection-client-tests", StringComparer.OrdinalIgnoreCase))
         {
             VerifyConnectionClientChecks();

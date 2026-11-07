@@ -242,6 +242,28 @@ internal static partial class Program
         Check(future.Observe([Limit(0, now.AddDays(8))], now.AddMinutes(1)).Count == 0,
             "a future period start cannot announce a reset before it occurs");
 
+        AiLimitWindow ShortLimit(double used, DateTimeOffset reset) => new()
+            { LimitId = "codex", UsedPercent = used, ResetsAt = reset,
+                WindowDurationMinutes = 300, IsPrimary = true };
+        var rolling = new AccountResetTracker();
+        rolling.Observe([ShortLimit(0, now.AddHours(5))], now);
+        for (var minute = 1; minute <= 3; minute++)
+            Check(rolling.Observe([ShortLimit(0, now.AddHours(5).AddMinutes(minute))],
+                      now.AddMinutes(minute)).Count == 0 && rolling.LastRecoveryAt is null,
+                "an unused five-hour deadline sliding with each poll does not repeat recovery alerts");
+        Check(rolling.Observe([ShortLimit(1, now.AddHours(5).AddMinutes(4))], now.AddMinutes(4)).Count == 0,
+            "first consumption in a previously unused rolling window is not recovery");
+        Check(rolling.Observe([ShortLimit(0, now.AddHours(5).AddMinutes(5))], now.AddMinutes(5)).Count == 1 &&
+              rolling.Observe([ShortLimit(0, now.AddHours(5).AddMinutes(6))], now.AddMinutes(6)).Count == 0,
+            "an early official reset with a usage drop alerts once, then idle drift stays silent");
+        rolling.Observe([ShortLimit(10, now.AddHours(5).AddMinutes(6))], now.AddMinutes(7));
+        Check(rolling.Observe([ShortLimit(25, now.AddHours(10).AddMinutes(6))], now.AddHours(5).AddMinutes(6)).Count == 1,
+            "crossing the prior five-hour deadline still detects recovery after delayed consumption");
+        var idle = new AccountResetTracker();
+        idle.Observe([ShortLimit(0, now.AddHours(5))], now);
+        Check(idle.Observe([ShortLimit(0, now.AddHours(11))], now.AddHours(6)).Count == 0,
+            "resuming after an unused window expires does not claim quota recovery");
+
         var directory = Path.Combine(Path.GetTempPath(), "aimaster-account-reset-" + Guid.NewGuid().ToString("N"));
         var path = Path.Combine(directory, "state.json");
         try

@@ -241,6 +241,9 @@ internal static partial class Program
                 response = message == null
                     ? new JsonObject { ["id"] = id, ["result"] = new JsonObject { ["initialized"] = initialized } }
                     : new JsonObject { ["id"] = id, ["error"] = new JsonObject { ["code"] = -32000, ["message"] = message } };
+                if (mode == "quota-snapshots" && method == "account/rateLimits/read")
+                    response = new JsonObject { ["id"] = id,
+                        ["result"] = JsonNode.Parse(File.ReadAllText(Path.Combine(directory, "quota.json"))) };
                 if (mode == "metadata-only" && method == "thread/read")
                 {
                     File.WriteAllText(Path.Combine(directory, "thread-read.json"), root.GetProperty("params").GetRawText());
