@@ -54,6 +54,12 @@ internal static partial class Program
             {
                 var id = entry.Split(':')[1];
                 var card = Descendants(main).OfType<Border>().Single(item => Equals(item.Tag, id));
+                // Empty detail cards are normally hidden; measure every card explicitly here.
+                card.Visibility = Visibility.Visible;
+                card.Measure(new Size(width, double.PositiveInfinity));
+                card.Arrange(new Rect(0, 0, width, card.DesiredSize.Height));
+                card.UpdateLayout();
+                // Width changes can move adaptive sections to a new row; settle their new height.
                 card.Measure(new Size(width, double.PositiveInfinity));
                 card.Arrange(new Rect(0, 0, width, card.DesiredSize.Height));
                 card.UpdateLayout();
@@ -63,18 +69,34 @@ internal static partial class Program
                 Check(double.IsNaN(card.Height) && !frame.Children.OfType<ScrollViewer>().Any() &&
                       bottom <= card.ActualHeight - card.Padding.Bottom + 1,
                     $"{language} {id} at {width}px follows its content instead of the legacy saved height");
-                if (id != "resetSignals") continue;
-                var footer = (TextBlock)main.FindName("ResetCheckedText");
-                var footerBottom = footer.TranslatePoint(new Point(0, footer.ActualHeight), card).Y;
-                Check(card.ActualHeight > 180 && footerBottom <= card.ActualHeight - card.Padding.Bottom + 1,
-                    $"{language} {width}px long announcements and footer are fully visible without scrolling the card");
+                if (id == "quota")
+                {
+                    var quotaGrid = (Grid)main.FindName("QuotaSummaryGrid");
+                    var shortTile = (ContentControl)main.FindName("ShortQuotaTile");
+                    var weeklyTile = (ContentControl)main.FindName("WeeklyQuotaTile");
+                    var shortBounds = new Rect(shortTile.TranslatePoint(new Point(), card), shortTile.RenderSize);
+                    var weeklyBounds = new Rect(weeklyTile.TranslatePoint(new Point(), card), weeklyTile.RenderSize);
+                    Check((Grid.GetRow(weeklyTile) == 1) == (quotaGrid.ActualWidth < 560) &&
+                          !shortBounds.IntersectsWith(weeklyBounds) &&
+                          weeklyBounds.Right <= card.ActualWidth - card.Padding.Right + 1,
+                        $"{language} {width}px quota windows adapt without overlapping or clipping");
+                }
+                else if (id == "resetSignals")
+                {
+                    var footer = (TextBlock)main.FindName("ResetCheckedText");
+                    var footerBottom = footer.TranslatePoint(new Point(0, footer.ActualHeight), card).Y;
+                    Check(card.ActualHeight > 180 && footerBottom <= card.ActualHeight - card.Padding.Bottom + 1,
+                        $"{language} {width}px long announcements and footer are fully visible without scrolling the card");
+                }
+                else continue;
                 if (output is null) continue;
                 Directory.CreateDirectory(output);
                 var bitmap = new RenderTargetBitmap((int)width, (int)Math.Ceiling(card.ActualHeight), 96, 96, PixelFormats.Pbgra32);
                 bitmap.Render(card);
                 var encoder = new PngBitmapEncoder();
                 encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                using var stream = File.Create(Path.Combine(output, $"reset-autosize-{language}-{width}.png"));
+                var prefix = id == "quota" ? "quota" : "reset";
+                using var stream = File.Create(Path.Combine(output, $"{prefix}-autosize-{language}-{width}.png"));
                 encoder.Save(stream);
             }
         }

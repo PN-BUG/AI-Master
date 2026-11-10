@@ -46,6 +46,8 @@ public partial class AiManagerWindow
     {
         _deepSeekMode = AiProviderModes.IsDeepSeek(provider);
         var codexVisibility = _deepSeekMode ? Visibility.Collapsed : Visibility.Visible;
+        QuotaSummaryGrid.Visibility = codexVisibility;
+        DeepSeekQuotaSummary.Visibility = _deepSeekMode ? Visibility.Visible : Visibility.Collapsed;
         GuardCard.Visibility = codexVisibility;
         ResetSignalsCard.Visibility = codexVisibility;
         ForecastCard.Visibility = codexVisibility;

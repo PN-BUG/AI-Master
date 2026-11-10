@@ -88,6 +88,7 @@ function New-Case([string]$Name, [string]$Install = 'standalone', [string]$Failu
     $release = Join-Path $path 'release'
     $null = New-Item -ItemType Directory -Path (Join-Path $path 'Resources') -Force
     Copy-Item -LiteralPath (Join-Path $repository 'package-and-restart.ps1') -Destination $path
+    [IO.File]::WriteAllText((Join-Path $path 'Resources\AssertBuildSdk.ps1'), 'function Assert-BuildSdk {}', $utf8)
     [IO.File]::WriteAllText((Join-Path $path 'build.ps1'), $buildStub, $utf8)
     [IO.File]::WriteAllText((Join-Path $path 'Resources\ApplyUpdate.ps1'), $updateStub, $utf8)
     [IO.File]::WriteAllText((Join-Path $path 'runner.ps1'), $runner, $utf8)

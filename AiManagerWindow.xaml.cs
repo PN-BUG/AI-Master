@@ -105,6 +105,8 @@ public partial class AiManagerWindow : Window
             .IsChecked = true;
         _providerControlsReady = true;
         ApplyProviderMode(_service.Settings.Provider);
+        RenderQuotaWindows(Array.Empty<AiLimitWindow>());
+
         _timer.Tick += async (_, _) => await RefreshAsync();
         LocalizationService.LanguageChanged += LocalizationService_LanguageChanged;
         LocalizationService.Apply(this);
@@ -454,6 +456,8 @@ public partial class AiManagerWindow : Window
         UpdateThemeButton();
         if (refreshContent && _service.LastSnapshot is { } snapshot)
             RenderSnapshot(snapshot);
+        else if (refreshContent)
+            RenderQuotaWindows(_displayedQuotaLimits);
     }
 
     private void UpdateThemeButton()
@@ -535,14 +539,12 @@ public partial class AiManagerWindow : Window
     private void SummaryGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (sender is not Grid grid) return;
-        var quota = ReferenceEquals(grid, QuotaSummaryGrid);
-        FrameworkElement? details = quota ? QuotaSummaryDetails : GuardActions;
+        FrameworkElement? details = GuardActions;
         if (details is null) return;
         var stacked = e.NewSize.Width < 640;
-        grid.ColumnDefinitions[0].Width = new GridLength(stacked || !quota ? 1 : 200,
-            stacked || !quota ? GridUnitType.Star : GridUnitType.Pixel);
+        grid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
         grid.ColumnDefinitions[1].Width = stacked ? new GridLength(0)
-            : quota ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+            : GridLength.Auto;
         Grid.SetColumn(details, stacked ? 0 : 1);
         Grid.SetRow(details, stacked ? 1 : 0);
         details.Margin = stacked ? new Thickness(0, 12, 0, 0) : new Thickness(24, 0, 0, 0);
@@ -1189,36 +1191,11 @@ public partial class AiManagerWindow : Window
             RenderDeepSeekSnapshot(snapshot);
             return;
         }
-        RemainingCaptionText.Text = LocalizationService.T("剩余额度");
-        RemainingUnitText.Visibility = Visibility.Visible;
-        RemainingText.FontSize = 48;
-        MainUsageBar.Visibility = Visibility.Visible;
-        ResetCreditText.Visibility = Visibility.Visible;
-        var main = snapshot.MainLimit;
-        if (main != null)
-        {
-            RemainingText.Text = main.RemainingPercent.ToString("0.#", CultureInfo.InvariantCulture);
-            MainUsageBar.Value = main.UsedPercent;
-            MainUsedText.Text = LocalizationService.IsEnglish
-                ? $"Used {main.UsedPercent:0.#}% · {LocalizationService.T(main.WindowName)}"
-                : $"已用 {main.UsedPercent:0.#}% · {main.WindowName}";
-            MainResetText.Text = main.ResetText;
-            ApplyQuotaVisual(main.UsedPercent);
-        }
-        else
-        {
-            RemainingText.Text = "--";
-            MainUsageBar.Value = 0;
-            MainUsedText.Text = L("账户未返回额度窗口", "No quota window returned by the account");
-            MainResetText.Text = string.Empty;
-        }
-
-        var additionalLimits = snapshot.Limits.Where(item => !ReferenceEquals(item, main)).ToArray();
-        LimitItems.ItemsSource = additionalLimits;
-        LimitsCard.Visibility = additionalLimits.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        RenderQuotaWindows(snapshot.Limits);
         ThreadList.ItemsSource = _taskSnapshot is not null && AiTaskSnapshotFeed.Latest is { } shared
             ? shared.Tasks.Take(12).ToList()
             : snapshot.Threads;
+
         ResetCreditText.Text = snapshot.ResetCredits > 0
             ? (LocalizationService.IsEnglish ? $"Resets available × {snapshot.ResetCredits}" : $"可用重置 × {snapshot.ResetCredits}")
             : L("无可用重置", "No resets available");
@@ -1349,31 +1326,6 @@ public partial class AiManagerWindow : Window
             $"Limit exceeded; guard paused and {interrupted} visible task(s) interrupted."), warning: true);
     }
 
-    private void ApplyQuotaVisual(double used)
-    {
-        if (used >= _service.Settings.PausePercent)
-        {
-            QuotaStateText.Text = L("暂停线", "Pause limit");
-            QuotaStateText.Foreground = ThemeBrush("DangerText");
-            QuotaStateBadge.Background = ThemeBrush("DangerSoft");
-            MainUsageBar.Foreground = ThemeBrush("Danger");
-        }
-        else if (used >= _service.Settings.WarningPercent)
-        {
-            QuotaStateText.Text = L("接近限制", "Near limit");
-            QuotaStateText.Foreground = ThemeBrush("WarningText");
-            QuotaStateBadge.Background = ThemeBrush("WarningSoft");
-            MainUsageBar.Foreground = ThemeBrush("Warning");
-        }
-        else
-        {
-            QuotaStateText.Text = L("额度安全", "Quota safe");
-            QuotaStateText.Foreground = ThemeBrush("SignalText");
-            QuotaStateBadge.Background = ThemeBrush("SignalSoft");
-            MainUsageBar.Foreground = ThemeBrush("Signal");
-        }
-    }
-
     private void SetGuardVisual(bool paused, string status, string detail)
     {
         _localGuardPaused = paused;
@@ -1448,7 +1400,8 @@ public partial class AiManagerWindow : Window
         SetFooterStatus(L("设置已保存并应用", "Settings saved and applied"));
         if (_service.LastSnapshot is { } snapshot)
         {
-            if (!snapshot.IsDeepSeek) ApplyQuotaVisual(snapshot.MainLimit?.UsedPercent ?? 0);
+            if (!snapshot.IsDeepSeek) RenderQuotaWindows(snapshot.Limits);
+
             ApplyQuotaNotification(snapshot);
             await ApplyGuardAsync(snapshot);
             RenderQuotaSyncState(snapshot);
@@ -1976,6 +1929,7 @@ public partial class AiManagerWindow : Window
     {
         UpdateProviderTexts();
         if (_service.LastSnapshot is { } snapshot) RenderSnapshot(snapshot);
+        else RenderQuotaWindows(_displayedQuotaLimits);
         RenderResetSignals();
         LocalizationService.Apply(this);
         UpdateLanguageButton();

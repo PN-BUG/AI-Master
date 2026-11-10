@@ -12,6 +12,9 @@ $ErrorActionPreference = 'Stop'
 $projectPath = Join-Path $PSScriptRoot 'AIMaster.csproj'
 $releaseRoot = [IO.Path]::GetFullPath($OutputRoot)
 
+. (Join-Path $PSScriptRoot 'Resources\AssertBuildSdk.ps1')
+Assert-BuildSdk
+
 function Get-PackageSha256([string]$Path) {
     $stream = [IO.File]::OpenRead($Path)
     $algorithm = [Security.Cryptography.SHA256]::Create()

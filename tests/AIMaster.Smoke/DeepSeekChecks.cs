@@ -343,11 +343,14 @@ internal static partial class Program
                 };
                 typeof(AiManagerWindow).GetMethod("RenderSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(main, [codex]);
-                Check(((TextBlock)main.FindName("RemainingText")).Text == "60" &&
+                var weeklyCard = ((ContentControl)main.FindName("WeeklyQuotaTile")).Content;
+                Check(weeklyCard.GetType().GetProperty("RemainingValue")!.GetValue(weeklyCard) as string == "60" &&
+                      ((Grid)main.FindName("QuotaSummaryGrid")).Visibility == Visibility.Visible &&
+                      ((Grid)main.FindName("DeepSeekQuotaSummary")).Visibility == Visibility.Collapsed &&
                       ((TextBlock)main.FindName("RemainingCaptionText")).Text == "QUOTA LEFT" &&
                       ((TextBlock)main.FindName("RemainingUnitText")).Visibility == Visibility.Visible &&
                       ((Border)main.FindName("GuardCard")).Visibility == Visibility.Visible,
-                    "switching back to Codex restores percentage quota, the unit, and the task guard");
+                    "switching back to Codex restores quota windows and the task guard");
             }
             finally { main.Close(); }
         }

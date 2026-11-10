@@ -6,6 +6,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Resources\AssertBuildSdk.ps1')
+Assert-BuildSdk
+
 $releaseRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'release'))
 $packageWorkspace = Join-Path $releaseRoot ('.package-' + [Guid]::NewGuid().ToString('N'))
 $stagingRoot = Join-Path $packageWorkspace 'staged'

@@ -61,11 +61,38 @@ internal static partial class Program
         var snapshot = DocumentationScreenshotCapture.CreateManagerSnapshot(DateTimeOffset.Now, true);
         render.Invoke(main, new object[] { snapshot });
         var limits = (ItemsControl)main.FindName("LimitItems");
-        Check(limits.Items.Count == snapshot.Limits.Count - 1 && !limits.Items.Contains(snapshot.MainLimit),
-            "the main quota is shown once and additional model windows remain visible");
+        Check(limits.Items.Count == 0 &&
+              ((ContentControl)main.FindName("ShortQuotaTile")).Content is not null &&
+              ((ContentControl)main.FindName("WeeklyQuotaTile")).Content is not null,
+            "five-hour and weekly quotas share the overview without duplicate detail rows");
         render.Invoke(main, new object[] { new AIMaster.Models.AiManagerSnapshot { Limits = new() { snapshot.MainLimit! } } });
         Check(((Border)main.FindName("LimitsCard")).Visibility == Visibility.Collapsed,
             "a single account window does not leave an empty duplicate quota card");
+        var shortTile = (ContentControl)main.FindName("ShortQuotaTile");
+        var weeklyTile = (ContentControl)main.FindName("WeeklyQuotaTile");
+        string TileValue(ContentControl tile, string property) =>
+            (string)tile.Content.GetType().GetProperty(property)!.GetValue(tile.Content)!;
+        Check(TileValue(shortTile, "RemainingValue") == "--" && TileValue(shortTile, "StatusText") == "No data" &&
+              TileValue(weeklyTile, "RemainingValue") == "63",
+            "a missing short window stays unknown while the weekly quota remains available");
+        var accountShort = new AIMaster.Models.AiLimitWindow
+        {
+            LimitId = "codex", WindowDurationMinutes = 300, UsedPercent = 18
+        };
+        var modelShort = new AIMaster.Models.AiLimitWindow
+        {
+            LimitId = "model", WindowDurationMinutes = 300, UsedPercent = 95, IsPrimary = true
+        };
+        render.Invoke(main, new object[] { new AIMaster.Models.AiManagerSnapshot
+        {
+            Limits = new() { modelShort, snapshot.MainLimit!, accountShort }
+        } });
+        Check(TileValue(shortTile, "RemainingValue") == "82" && limits.Items.Count == 1 && limits.Items.Contains(modelShort),
+            "the account short window stays prominent and a separate model limit remains visible in details");
+        render.Invoke(main, new object[] { new AIMaster.Models.AiManagerSnapshot() });
+        Check(TileValue(shortTile, "RemainingValue") == "--" && TileValue(weeklyTile, "RemainingValue") == "--" &&
+              TileValue(weeklyTile, "StatusText") == "No data",
+            "an empty snapshot clears stale quotas without presenting unknown limits as full availability");
         VerifyLocalTaskNameSources();
         Check(new AIMaster.Models.AiThreadSummary
               { Title = "<send_user_message_question_reply> [{\"questionItemId\":\"internal\"}]", ConversationTitle = "Layout review" }
