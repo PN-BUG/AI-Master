@@ -340,6 +340,13 @@ public sealed class AiManagerSnapshot
     public AiSharedUsageSummary SharedUsage { get; init; } = new();
     public DateTimeOffset CapturedAt { get; init; } = DateTimeOffset.Now;
 
+    // Weekly analytics must not fall back to the primary five-hour window.
+    public AiLimitWindow? WeeklyLimit => Limits
+        .Where(item => item.WindowDurationMinutes is >= 6 * 24 * 60 and <= 8 * 24 * 60)
+        .OrderByDescending(item => item.LimitId.Equals("codex", StringComparison.OrdinalIgnoreCase))
+        .ThenByDescending(item => item.UsedPercent)
+        .FirstOrDefault();
+
     public AiLimitWindow? MainLimit => Limits
         .Where(item => item.IsPrimary)
         .OrderByDescending(item => item.WindowDurationMinutes)
@@ -356,7 +363,7 @@ public sealed record AiForecast(
 public sealed record AiRemainingForecastPoint(
     DateOnly Date,
     double RemainingPercent,
-    bool IsProjected);
+    bool IsProjected, DateTimeOffset? Timestamp = null);
 
 public sealed class AiFloatingSnapshot
 {

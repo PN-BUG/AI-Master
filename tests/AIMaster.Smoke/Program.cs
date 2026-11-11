@@ -18,6 +18,13 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--forecast-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            LocalizationService.SetLanguage(LocalizationService.English);
+            VerifyWeeklyRemainingForecast();
+            VerifyLocalForecast();
+            return 0;
+        }
         if (TryRunConnectionClientServer(args)) return 0;
         if (args.Contains("--taskbar-tests", StringComparer.OrdinalIgnoreCase))
         {
@@ -829,10 +836,12 @@ internal static partial class Program
                     Name = "Weekly",
                     UsedPercent = 40,
                     WindowDurationMinutes = 7 * 24 * 60,
-                    IsPrimary = true
+                    IsPrimary = false
                 }
             ]
         };
+        snapshot.Limits.Add(new AiLimitWindow { Name = "5 hour", IsPrimary = true,
+            WindowDurationMinutes = 300, UsedPercent = 95 });
         var forecast = new AiForecast(0, 10, null, false, string.Empty);
         var points = AiManagerService.BuildWeeklyRemainingForecast(snapshot, forecast);
         Check(points.Count == 7 && points[0].Date == new DateOnly(2026, 9, 14) &&
@@ -858,7 +867,7 @@ internal static partial class Program
                     UsedPercent = 40,
                     WindowDurationMinutes = 7 * 24 * 60,
                     ResetsAt = capturedAt.AddDays(4),
-                    IsPrimary = true
+                    IsPrimary = false
                 }
             ],
             DailyUsage =
@@ -883,11 +892,29 @@ internal static partial class Program
             }
         };
         var service = new AiManagerService();
+        snapshot.Limits.Add(new AiLimitWindow { Name = "5 hour", IsPrimary = true,
+            WindowDurationMinutes = 300, UsedPercent = 95, ResetsAt = capturedAt.AddHours(1) });
+        Check(Math.Abs(service.BuildForecast(snapshot).DailyPercent - 40d / 3d) < 0.001,
+            "account forecast uses weekly quota when the five-hour window is primary");
         var forecast = service.BuildLocalForecast(snapshot);
         Check(Math.Abs(forecast.DailyTokens - 10_000d / 7d) < 0.001 &&
               Math.Abs(forecast.DailyPercent - 8d / 3d) < 0.001 &&
               forecast.Summary.Contains("this device's current rate", StringComparison.Ordinal),
             "local forecast uses local tokens and this device's estimated share of account quota velocity");
+        var shortForecast = service.BuildForecast(snapshot, fiveHour: true);
+        var shortPoints = AiManagerService.BuildWeeklyRemainingForecast(snapshot, shortForecast, fiveHour: true);
+        Check(Math.Abs(shortForecast.DailyPercent - 570) < 0.001 &&
+              shortPoints.Count >= 6 && shortPoints.All(p => p.Timestamp.HasValue) &&
+              shortPoints.Any(p => !p.IsProjected && Math.Abs(p.RemainingPercent - 5) < 0.001) &&
+              shortPoints.Last().Timestamp == capturedAt.AddHours(1),
+            "five-hour mode uses the short quota and plots its actual hourly window");
+        Check(Math.Abs(service.BuildLocalForecast(snapshot, fiveHour: true).DailyPercent - 114) < 0.001,
+            "local five-hour mode uses the short quota consumption rate");
+        snapshot.Limits.RemoveAt(0);
+        Check(service.BuildForecast(snapshot).DailyPercent == 0 &&
+              service.BuildLocalForecast(snapshot).DailyPercent == 0 &&
+              AiManagerService.BuildWeeklyRemainingForecast(snapshot, forecast).Count == 0,
+            "weekly forecasts do not fall back to the five-hour window");
         service.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 

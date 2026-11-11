@@ -863,13 +863,13 @@ internal sealed class AiManagerService : IAsyncDisposable
         return new SharedUsageScan(samples, versions, seen);
     }
 
-    public AiForecast BuildForecast(AiManagerSnapshot snapshot)
+    public AiForecast BuildForecast(AiManagerSnapshot snapshot, bool fiveHour = false)
     {
         var recent = snapshot.DailyUsage
             .Where(item => item.Date >= DateOnly.FromDateTime(DateTime.Today.AddDays(-6)))
             .ToList();
         var dailyTokens = recent.Sum(item => (double)item.Tokens) / 7d;
-        var main = snapshot.MainLimit;
+        var main = fiveHour ? SelectQuotaWindow(snapshot.Limits, 300) : snapshot.WeeklyLimit;
         if (main?.ResetsAt is null || main.WindowDurationMinutes <= 0 || main.UsedPercent <= 0)
             return new AiForecast(dailyTokens, 0, null, false,
                 LocalizationService.L("积累更多用量后可预测耗尽时间", "More usage data is needed before forecasting exhaustion"));
@@ -895,11 +895,11 @@ internal sealed class AiManagerService : IAsyncDisposable
         return new AiForecast(dailyTokens, dailyPercent, exhaustion, beforeReset, summary);
     }
 
-    public AiForecast BuildLocalForecast(AiManagerSnapshot snapshot)
+    public AiForecast BuildLocalForecast(AiManagerSnapshot snapshot, bool fiveHour = false)
     {
         var localUsage = snapshot.LocalUsage;
         var dailyTokens = localUsage.DailyUsage.Sum(item => (double)item.Tokens) / 7d;
-        var main = snapshot.MainLimit;
+        var main = fiveHour ? SelectQuotaWindow(snapshot.Limits, 300) : snapshot.WeeklyLimit;
         if (main?.ResetsAt is null || main.WindowDurationMinutes <= 0 || main.UsedPercent <= 0)
             return new AiForecast(dailyTokens, 0, null, false,
                 LocalizationService.L("积累更多额度数据后可预测本机消耗", "More quota data is needed before forecasting local usage"));
@@ -1192,11 +1192,23 @@ internal sealed class AiManagerService : IAsyncDisposable
     }
 
     internal static IReadOnlyList<AiRemainingForecastPoint> BuildWeeklyRemainingForecast(
-        AiManagerSnapshot snapshot, AiForecast forecast)
+        AiManagerSnapshot snapshot, AiForecast forecast, bool fiveHour = false)
     {
-        var main = snapshot.MainLimit;
+        var main = fiveHour ? SelectQuotaWindow(snapshot.Limits, 300) : snapshot.WeeklyLimit;
         if (main is null) return Array.Empty<AiRemainingForecastPoint>();
 
+        if (fiveHour)
+        {
+            if (main.ResetsAt is null) return Array.Empty<AiRemainingForecastPoint>();
+            var start = main.ResetsAt.Value.AddMinutes(-300);
+            var times = Enumerable.Range(0, 6).Select(i => start.AddHours(i))
+                .Append(snapshot.CapturedAt).Where(t => t >= start && t <= main.ResetsAt.Value)
+                .Distinct().OrderBy(t => t);
+            return times.Select(t => new AiRemainingForecastPoint(
+                DateOnly.FromDateTime(t.LocalDateTime),
+                Math.Clamp(main.RemainingPercent - forecast.DailyPercent * (t - snapshot.CapturedAt).TotalDays, 0, 100),
+                t > snapshot.CapturedAt, t)).ToList();
+        }
         var today = DateOnly.FromDateTime(snapshot.CapturedAt.LocalDateTime);
         var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
         var monday = today.AddDays(-daysFromMonday);

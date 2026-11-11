@@ -31,6 +31,7 @@ public partial class AiManagerWindow : Window
     private readonly QuotaNotificationTracker _quotaNotifications = new();
     private bool _checkingForUpdates;
     private bool _showLocalForecast;
+    private bool _showFiveHourForecast;
     private string _theme = ThemeModes.Dark;
     private bool _deepSeekMode;
     private bool _providerControlsReady;
@@ -1265,19 +1266,34 @@ public partial class AiManagerWindow : Window
         LocalForecastButton.Style = (Style)FindResource(_showLocalForecast ? "SignalButton" : "ActionButton");
     }
 
+    private void ForecastWindow_Click(object sender, RoutedEventArgs e)
+    {
+        _showFiveHourForecast = ReferenceEquals(sender, FiveHourForecastButton);
+        if (_service.LastSnapshot is { } snapshot) RenderForecast(snapshot);
+    }
+
     private void RenderForecast(AiManagerSnapshot snapshot)
     {
         var forecast = _showLocalForecast
-            ? _service.BuildLocalForecast(snapshot)
-            : _service.BuildForecast(snapshot);
+            ? _service.BuildLocalForecast(snapshot, _showFiveHourForecast)
+            : _service.BuildForecast(snapshot, _showFiveHourForecast);
+        WeeklyForecastButton.Content = L("一周", "Week");
+        FiveHourForecastButton.Content = L("5 小时", "5 hours");
+        WeeklyForecastButton.Style = (Style)FindResource(_showFiveHourForecast ? "ActionButton" : "SignalButton");
+        FiveHourForecastButton.Style = (Style)FindResource(_showFiveHourForecast ? "SignalButton" : "ActionButton");
+        ForecastTitleText.Text = _showFiveHourForecast ? L("消耗预测 / 5 小时", "USAGE FORECAST / 5 HOURS") : L("消耗预测 / 本周", "USAGE FORECAST / THIS WEEK");
+        ForecastQuotaLabel.Text = _showFiveHourForecast ? L("5 小时剩余额度", "5-HOUR QUOTA REMAINING") : L("本周剩余额度", "WEEKLY QUOTA REMAINING");
         ForecastSummaryText.Text = forecast.Summary;
         ForecastSummaryText.Foreground = ThemeBrush(forecast.ExhaustsBeforeReset ? "Warning" : "Ink");
         ForecastScopeNoteText.Text = _showLocalForecast
             ? L("以账号当前剩余额度为起点，仅按本机速度推演", "Starts from the account's current remaining quota and projects only this device's rate")
             : L("汇总该账号所有设备的用量", "Includes usage from all devices on this account");
-        DailyTokensText.Text = FormatTokens(forecast.DailyTokens);
-        DailyPercentText.Text = forecast.DailyPercent > 0 ? $"{forecast.DailyPercent:0.#}%" : "--";
-        _weeklyRemainingForecast = AiManagerService.BuildWeeklyRemainingForecast(snapshot, forecast);
+        ForecastTokensLabel.Text = _showFiveHourForecast ? L("小时均 TOKEN", "HOURLY TOKENS") : L("日均 TOKEN", "DAILY TOKENS");
+        ForecastRateLabel.Text = _showFiveHourForecast ? L("每小时额度消耗", "QUOTA / HOUR") : L("日均额度", "DAILY QUOTA");
+        var rateDivisor = _showFiveHourForecast ? 24d : 1d;
+        DailyTokensText.Text = FormatTokens(forecast.DailyTokens / rateDivisor);
+        DailyPercentText.Text = forecast.DailyPercent > 0 ? $"{forecast.DailyPercent / rateDivisor:0.#}%" : "--";
+        _weeklyRemainingForecast = AiManagerService.BuildWeeklyRemainingForecast(snapshot, forecast, _showFiveHourForecast);
         RenderRemainingForecastChart();
         RenderUsageBars(_showLocalForecast ? snapshot.LocalUsage.DailyUsage : snapshot.DailyUsage);
     }
@@ -1829,7 +1845,7 @@ public partial class AiManagerWindow : Window
             Canvas.SetTop(marker, point.Y - marker.Height / 2);
             RemainingForecastCanvas.Children.Add(marker);
 
-            var dayLabel = LocalizationService.IsEnglish
+            var dayLabel = item.Timestamp is { } time ? time.LocalDateTime.ToString("HH:mm") : LocalizationService.IsEnglish
                 ? item.Date.DayOfWeek.ToString()[..3]
                 : "一二三四五六日"[index].ToString();
             AddChartText(dayLabel, point.X - (isToday ? 8 : 6), height - bottom + 5,
@@ -1837,9 +1853,9 @@ public partial class AiManagerWindow : Window
         }
         AddChartHoverTargets(RemainingForecastCanvas, points, _weeklyRemainingForecast
             .Select(item => LocalizationService.IsEnglish
-                ? $"{item.Date.ToString("MMM d", CultureInfo.InvariantCulture)} · {item.RemainingPercent:0.##}% remaining" +
+                ? $"{(item.Timestamp?.LocalDateTime.ToString("HH:mm") ?? item.Date.ToString("MMM d", CultureInfo.InvariantCulture))} · {item.RemainingPercent:0.##}% remaining" +
                   (item.IsProjected ? " (projected)" : string.Empty)
-                : $"{item.Date:M月d日} · 剩余 {item.RemainingPercent:0.##}%" +
+                : $"{(item.Timestamp?.LocalDateTime.ToString("HH:mm") ?? item.Date.ToString("M月d日"))} · 剩余 {item.RemainingPercent:0.##}%" +
                   (item.IsProjected ? "（预测）" : string.Empty))
             .ToList(), 0, height);
     }

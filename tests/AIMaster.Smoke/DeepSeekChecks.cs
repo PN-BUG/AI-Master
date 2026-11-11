@@ -220,7 +220,7 @@ internal static partial class Program
         Directory.CreateDirectory(root);
         try
         {
-            var now = new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.FromHours(8));
+            var now = DateTimeOffset.Now;
             var projects = Path.Combine(root, "projects", "demo-project");
             Directory.CreateDirectory(projects);
             File.WriteAllText(Path.Combine(projects, "sessions-index.json"), JsonSerializer.Serialize(new

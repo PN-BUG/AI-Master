@@ -466,9 +466,8 @@
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <StackPanel Margin="10,0,0,18">
                     <StackPanel Orientation="Horizontal">
-                        <Border Width="36" Height="36" Background="{DynamicResource Signal}" CornerRadius="11" Margin="0,0,10,0">
-                            <TextBlock Text="AI" Foreground="{DynamicResource SignalInk}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                        </Border>
+                        <Image Source="/Resources/AIMaster.png" Width="36" Height="36" Margin="0,0,10,0"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="AIMaster" Foreground="{DynamicResource Ink}" FontSize="20" FontWeight="Bold"/>
                             <TextBlock Text="控制中心" Foreground="{DynamicResource Subtle}" FontSize="10" Margin="0,2,0,0"/>
@@ -692,7 +691,7 @@
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <Grid>
-                            <TextBlock Text="消耗预测 / 本周" Style="{StaticResource Label}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="ForecastTitleText" Text="消耗预测 / 本周" Style="{StaticResource Label}" VerticalAlignment="Center"/>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                 <Button x:Name="AccountForecastButton" Content="账号" Style="{StaticResource SignalButton}"
                                         Height="26" Padding="11,0" FontSize="11" Click="ForecastScope_Click"/>
@@ -700,7 +699,11 @@
                                         Height="26" Padding="11,0" FontSize="11" Margin="5,0,0,0" Click="ForecastScope_Click"/>
                             </StackPanel>
                         </Grid>
-                        <StackPanel Grid.Row="1" Margin="0,9,0,0">
+                                                <StackPanel Grid.Row="1" Margin="0,9,0,0">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button x:Name="WeeklyForecastButton" Content="一周" Style="{StaticResource SignalButton}" Height="26" Padding="11,0" Click="ForecastWindow_Click"/>
+                                <Button x:Name="FiveHourForecastButton" Content="5 小时" Style="{StaticResource ActionButton}" Height="26" Padding="11,0" Margin="5,0,0,0" Click="ForecastWindow_Click"/>
+                            </StackPanel>
                             <TextBlock x:Name="ForecastSummaryText" Text="等待数据" Foreground="{DynamicResource Ink}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"/>
                             <TextBlock Tag="CardHelp" x:Name="ForecastScopeNoteText" Text="汇总该账号所有设备的用量" Foreground="{DynamicResource Muted}"
                                        FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap"/>
@@ -709,7 +712,7 @@
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="128"/></Grid.RowDefinitions>
                             <Grid>
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                <TextBlock Text="本周剩余额度" Style="{StaticResource Label}"/>
+                                <TextBlock x:Name="ForecastQuotaLabel" Text="本周剩余额度" Style="{StaticResource Label}"/>
                                 <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,7,0,0">
                                     <Rectangle Width="15" Height="2" Fill="{DynamicResource Signal}" VerticalAlignment="Center"/>
                                     <TextBlock Text="估算" Foreground="{DynamicResource Muted}" FontSize="10" Margin="5,0,10,0"/>
@@ -729,9 +732,9 @@
                         </Grid>
                         <Grid Grid.Row="4">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <StackPanel><TextBlock Text="日均 TOKEN" Style="{StaticResource Label}" FontFamily="Cascadia Mono"/>
+                            <StackPanel><TextBlock x:Name="ForecastTokensLabel" Text="日均 TOKEN" Style="{StaticResource Label}" FontFamily="Cascadia Mono"/>
                                 <TextBlock x:Name="DailyTokensText" Text="--" Foreground="{DynamicResource Ink}" FontFamily="Cascadia Mono" FontSize="17" Margin="0,3,0,0"/></StackPanel>
-                            <StackPanel Grid.Column="1" HorizontalAlignment="Right"><TextBlock Text="日均额度" Style="{StaticResource Label}" FontFamily="Cascadia Mono" HorizontalAlignment="Right"/>
+                            <StackPanel Grid.Column="1" HorizontalAlignment="Right"><TextBlock x:Name="ForecastRateLabel" Text="日均额度" Style="{StaticResource Label}" FontFamily="Cascadia Mono" HorizontalAlignment="Right"/>
                                 <TextBlock x:Name="DailyPercentText" Text="--" Foreground="{DynamicResource Ink}" FontFamily="Cascadia Mono" FontSize="17" Margin="0,3,0,0" HorizontalAlignment="Right"/></StackPanel>
                         </Grid>
                     </Grid>
