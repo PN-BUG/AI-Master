@@ -177,8 +177,11 @@ internal static partial class Program
             var displayTasks = typeof(AiFloatingWindow).GetField("_displayTasks", flags)!;
 
             AiTaskSnapshotFeed.Reset();
-            AiTaskSnapshotFeed.Publish(AiProviderModes.Codex,
-                new[] { FeedTask("codex-1", "Codex task one", "inProgress", AiProviderModes.Codex, "gpt-6", "high") });
+            AiTaskSnapshotFeed.Publish(AiProviderModes.Codex, new[]
+            {
+                FeedTask("codex-1", "Codex task one", "inProgress", AiProviderModes.Codex, "gpt-6", "high"),
+                FeedTask("codex-2", "Codex finished task", "completed", AiProviderModes.Codex, "gpt-6", null)
+            });
             AiTaskSnapshotFeed.Publish(AiProviderModes.DeepSeek,
                 new[] { FeedTask("deep-1", "Deep task", "waitingOnUserInput", AiProviderModes.DeepSeek, "deepseek-chat", null) });
             var shown = ((System.Collections.Generic.IReadOnlyList<AiThreadSummary>)displayTasks.GetValue(floating)!);
@@ -188,6 +191,19 @@ internal static partial class Program
             Check(((TextBlock)floating.FindName("PrimaryModelText")).Text.Length > 0 &&
                   ((TextBlock)floating.FindName("PrimarySourceText")).Text.Length > 0,
                 "the floating primary row labels the task source and model");
+            // Finished rows spare the wording: the dot and tooltip already say it, and the free
+            // width goes back to the title and model.
+            floating.Height = 120 + 2 * 18; // one primary row plus two secondary rows
+            typeof(AiFloatingWindow).GetMethod("RefreshVisibleTaskRows", flags)!.Invoke(floating, [true]);
+            var rows = ((Panel)floating.FindName("SecondaryTasksPanel")).Children.OfType<Grid>()
+                .ToDictionary(row => row.Tag as string ?? string.Empty, row => row);
+            static TextBlock SecondaryStatusText(Grid row) => (TextBlock)row.Children[4];
+            rows.TryGetValue("codex-2", out var finishedRow);
+            rows.TryGetValue("codex-1", out var runningRow);
+            Check(finishedRow is not null && runningRow is not null &&
+                  SecondaryStatusText(finishedRow).Visibility == Visibility.Collapsed &&
+                  SecondaryStatusText(runningRow).Visibility == Visibility.Visible,
+                "the floating rows drop the status wording for finished tasks and keep it for pending ones");
             var dashboardTasks = ((ListBox)main.FindName("ThreadList")).Items.Cast<AiThreadSummary>().ToList();
             Check(dashboardTasks.Any(task => task.IsDeepSeekSource) && dashboardTasks.Any(task => !task.IsDeepSeekSource) &&
                   dashboardTasks.All(task => task.SourceLabel.Length > 0 && task.ModelLabel.Length > 0),

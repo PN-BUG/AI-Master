@@ -347,6 +347,9 @@ public sealed class AiThreadSummary
     public string? RolloutPath { get; init; }
     /// <summary>Project root for providers that store one task tree per project (Deep Code).</summary>
     public string? ProjectPath { get; init; }
+    /// <summary>Deep link that opens this task in its client when the client exposes only a global
+    /// entry point (the DeepSeek desktop app offers <c>dsh://open</c>).</summary>
+    public string? OpenUri { get; init; }
     public DateTimeOffset? UpdatedAt { get; init; }
     public bool IsActive => Status is "active" or "inProgress" or "waitingOnApproval" or "waitingOnUserInput";
     public string StatusText => LocalizationService.FormatTaskStatus(Status);

@@ -83,8 +83,16 @@ Open **Settings → DeepSeek access** and fill in:
 - Tasks are read from `%USERPROFILE%\.deepcode\projects\*\sessions-index.json`; the local indexes are only read, never Deep Code itself.
 - Each row shows the session summary, status (running, awaiting approval, awaiting input, completed, paused, error), model, reasoning effort, and update time.
 - The model comes from the session's `usagePerModel`, falling back to `env.MODEL` in `~/.deepcode/settings.json`; reasoning effort comes from that file's `reasoningEffort`.
-- The main window and the floating monitor merge Codex and Deep Code tasks into one list, each row labeled with its source and model; in the floating monitor, clicking a Deep Code task opens its project folder in File Explorer.
+- The main window and the floating monitor merge Codex, Deep Code and DeepSeek desktop tasks into one list, each row labeled with its source and model; in the floating monitor, clicking a Deep Code task opens its project folder in File Explorer.
 - An empty Deep Code list is expected when this device has never used Deep Code; Codex tasks still appear in the unified list.
+
+### DeepSeek desktop tasks
+
+- Conversations kept locally by the DeepSeek desktop app (`%APPDATA%\@deepseek-ai\dsh-desktop`) are read from its Chromium LevelDB; the app is never started or modified.
+- The desktop app stores conversation bodies in the cloud, so locally only the session id, the prompt being typed or already sent, and pending questions remain. Those tasks are therefore named after the first sent prompt and show the last sent prompt.
+- A conversation with an unanswered question shows **awaiting input**; otherwise it shows **completed**. No model or token data is stored locally, so the model shows `--`.
+- Clicking one of these tasks brings the DeepSeek desktop app to the foreground; when it is not running, `dsh://open` starts it.
+- Set `DSH_DESKTOP_HOME` to read a different data directory (tests or a portable copy).
 
 ## Guard policy
 

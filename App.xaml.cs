@@ -21,6 +21,7 @@ public partial class App : WpfApplication
     private Exception? _notificationCenterStartupError;
     private TaskFileChangeMonitor? _taskFileMonitor;
     private TaskFileChangeMonitor? _deepCodeMonitor;
+    private TaskFileChangeMonitor? _deepSeekDesktopMonitor;
     private AiManagerService? _taskMonitorService;
     private readonly System.Windows.Threading.DispatcherTimer _trayNotificationTimer = new()
         { Interval = TimeSpan.FromSeconds(2) };
@@ -271,12 +272,20 @@ public partial class App : WpfApplication
         // Deep Code keeps one sessions-index.json per project; its tasks join the same unified view.
         _deepCodeMonitor = new TaskFileChangeMonitor(DeepCodePaths.GetProjectsRoot(), async cancellationToken =>
         {
-            await service.RefreshDeepCodeTaskSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            await service.RefreshDeepSeekTaskSnapshotAsync(cancellationToken).ConfigureAwait(false);
         }, "*.json");
+        // The DeepSeek desktop app keeps its local conversations in a Chromium LevelDB; those tasks
+        // join the same slot, so either DeepSeek source republishes both.
+        _deepSeekDesktopMonitor = new TaskFileChangeMonitor(DeepSeekDesktopPaths.GetLevelDbDirectory(),
+            async cancellationToken =>
+            {
+                await service.RefreshDeepSeekTaskSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            }, "*.log");
         AiManagerRuntime.Shared.DesktopStateChanged += DesktopStateChanged;
         AiManagerRuntime.Shared.StartDesktopMonitoring();
         _taskFileMonitor.Start();
         _deepCodeMonitor.Start();
+        _deepSeekDesktopMonitor.Start();
     }
 
     private void DesktopStateChanged() => _taskFileMonitor?.RequestRefresh();
@@ -291,6 +300,9 @@ public partial class App : WpfApplication
         var deepCode = _deepCodeMonitor;
         _deepCodeMonitor = null;
         deepCode?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        var desktop = _deepSeekDesktopMonitor;
+        _deepSeekDesktopMonitor = null;
+        desktop?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         var service = _taskMonitorService;
         _taskMonitorService = null;
         service?.DisposeAsync().AsTask().GetAwaiter().GetResult();

@@ -408,12 +408,16 @@ public partial class AiFloatingWindow : Window
                 ToolTip = task.ModelLabel
             };
             Grid.SetColumn(model, 3);
+            // A finished task needs no wording: the muted dot already says it, and the spare width
+            // goes to the title and model. Other states keep their text because it needs reading.
+            var finished = task.Status == "completed";
             var status = new TextBlock
             {
                 // Rows are narrow; the compact status keeps the title readable while the tooltip and
                 // the primary badge still carry the full wording.
                 Text = CompactStatus(task.Status), Foreground = color, FontSize = (waitingForUser ? 7.5 : 6.5) * _fontScale,
                 FontWeight = waitingForUser ? FontWeights.Bold : FontWeights.Normal,
+                Visibility = finished ? Visibility.Collapsed : Visibility.Visible,
                 VerticalAlignment = VerticalAlignment.Center
             };
             Grid.SetColumn(status, 4);
@@ -439,7 +443,8 @@ public partial class AiFloatingWindow : Window
         : null;
 
     private bool CanOpenTask(AiThreadSummary task) => task.IsDeepSeekSource
-        ? !string.IsNullOrWhiteSpace(task.ProjectPath) && Directory.Exists(task.ProjectPath)
+        ? !string.IsNullOrWhiteSpace(task.OpenUri) ||
+          !string.IsNullOrWhiteSpace(task.ProjectPath) && Directory.Exists(task.ProjectPath)
         : BuildTaskUri(task.Id) is not null;
 
     private void TaskRow_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -452,6 +457,17 @@ public partial class AiFloatingWindow : Window
         {
             if (task.IsDeepSeekSource)
             {
+                // Desktop conversations expose one app-level deep link, so focus the running app
+                // instead of relying on the protocol handler to pop it to the front.
+                if (!string.IsNullOrWhiteSpace(task.OpenUri))
+                {
+                    e.Handled = true;
+                    _dockHideTimer.Stop();
+                    if (DeepSeekDesktopApp.Activate(task.OpenUri)) return;
+                    throw new InvalidOperationException(
+                        LocalizationService.L("DeepSeek 桌面版未响应。", "The DeepSeek desktop app did not respond."));
+                }
+                // Deep Code sessions expose the project folder they belong to instead.
                 if (string.IsNullOrWhiteSpace(task.ProjectPath) || !Directory.Exists(task.ProjectPath)) return;
                 e.Handled = true;
                 _dockHideTimer.Stop();

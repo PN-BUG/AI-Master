@@ -90,19 +90,20 @@ internal sealed class DeepSeekDesktopTaskReader
         var sessions = new Dictionary<string, SessionBuilder>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in entries)
         {
-            cancellationTokenThrow();
+            var builder = GetSession(sessions, entry.SessionId);
             switch (entry.Kind)
             {
                 case DesktopEntryKind.Prompt:
-                    GetSession(sessions, entry.SessionId).AddPrompt(entry.Text, entry.Timestamp);
+                    builder.AddPrompt(entry.Text, entry.Timestamp);
                     break;
                 case DesktopEntryKind.Questions:
-                    GetSession(sessions, entry.SessionId).AddQuestions(entry.Text, entry.Timestamp);
+                    builder.AddQuestions(entry.Text, entry.Timestamp);
                     break;
             }
         }
 
-        return AiManagerService.SortTasksByStatusAndTime(sessions.Values.Select(builder => builder.Build()))
+        return AiManagerService.SortTasksByStatusAndTime(
+                sessions.Values.Where(builder => builder.HasContent).Select(builder => builder.Build()))
             .ToList();
 
         static SessionBuilder GetSession(Dictionary<string, SessionBuilder> sessions, string id)
@@ -111,9 +112,6 @@ internal sealed class DeepSeekDesktopTaskReader
                 sessions[id] = builder = new SessionBuilder(id);
             return builder;
         }
-
-        // The reader never blocks long, but a huge store should still stay interruptible.
-        static void cancellationTokenThrow() { }
     }
 
     private List<DesktopEntry> ReadEntries(CancellationToken cancellationToken)
@@ -242,8 +240,7 @@ internal sealed class DeepSeekDesktopTaskReader
         private bool _waitingForInput;
         private DateTimeOffset _updatedAt;
 
-        public void AddPrompt(string? value, DateTimeOffset timestamp)
-        {
+        public void AddPrompt(string? value, DateTimeOffset timestamp)        {
             if (timestamp > _updatedAt) _updatedAt = timestamp;
             var text = ReadPromptText(value);
             if (string.IsNullOrWhiteSpace(text))
@@ -272,6 +269,10 @@ internal sealed class DeepSeekDesktopTaskReader
             }
             catch (JsonException) { }
         }
+
+        public bool HasContent => !string.IsNullOrWhiteSpace(_openPrompt) ||
+                                  !string.IsNullOrWhiteSpace(_firstPrompt) ||
+                                  !string.IsNullOrWhiteSpace(_latestPrompt);
 
         public AiThreadSummary Build()
         {
@@ -495,8 +496,13 @@ internal static class LevelDbTableReader
         // Compaction rewrote these keys once, so every entry is as old as the table itself.
         var timestamp = new DateTimeOffset(File.GetLastWriteTimeUtc(path));
         var footer = bytes.AsSpan(bytes.Length - FooterSize, FooterSize);
-        if (!TryReadHandle(footer, out var indexOffset, out var indexSize) ||
-            !TryReadHandle(footer.Slice(ReadVarintLength(footer)), out _, out _))
+        // The footer ends with two handles: the metaindex block, then the index block.
+        var metaIndexLength = ReadVarintLength(footer);
+        var indexStart = metaIndexLength + (metaIndexLength < footer.Length
+            ? ReadVarintLength(footer.Slice(metaIndexLength))
+            : 0);
+        if (indexStart <= 0 ||
+            !TryReadHandle(footer.Slice(indexStart), out var indexOffset, out var indexSize))
             return new List<LevelDbRecord>();
 
         var index = ReadBlock(bytes, indexOffset, indexSize);
@@ -553,9 +559,10 @@ internal static class LevelDbTableReader
         var previous = Array.Empty<byte>();
         while (position < end)
         {
-            var shared = ReadVarint(contents, ref position);
-            var nonShared = ReadVarint(contents, ref position);
-            var valueLength = ReadVarint(contents, ref position);
+            var shared = (int)ReadVarint(contents, ref position);
+            var nonShared = (int)ReadVarint(contents, ref position);
+            var valueLength = (int)ReadVarint(contents, ref position);
+            if (shared < 0 || nonShared < 0 || valueLength < 0) break;
             if (position + nonShared + valueLength > end) break;
 
             var key = new byte[shared + nonShared];

@@ -18,6 +18,7 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        IsolateUserDataHomes();
         if (args.Contains("--forecast-tests", StringComparer.OrdinalIgnoreCase))
         {
             LocalizationService.SetLanguage(LocalizationService.English);
@@ -516,6 +517,20 @@ internal static partial class Program
     {
         if (!condition) throw new InvalidOperationException(message);
         Console.WriteLine($"PASS: {message}");
+    }
+
+    /// <summary>Points every local task source at an empty directory so the checks never read (or
+    /// depend on) the machine's real Codex, Deep Code or DeepSeek desktop history.</summary>
+    private static void IsolateUserDataHomes()
+    {
+        foreach (var name in new[] { "DEEPCODE_HOME", "DSH_DESKTOP_HOME" })
+        {
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name))) continue;
+            var directory = Path.Combine(Path.GetTempPath(),
+                $"AIMaster-smoke-{name.ToLowerInvariant()}-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(directory);
+            Environment.SetEnvironmentVariable(name, directory);
+        }
     }
 
     private static void VerifyUpdaterPreparation()

@@ -81,10 +81,19 @@
 ### Deep Code 任务
 
 - 任务列表读取 `%USERPROFILE%\.deepcode\projects\*\sessions-index.json`，只读本地索引，不会启动 Deep Code。
+- DeepSeek 桌面版的本地会话也会并入同一列表（详见“DeepSeek 桌面版任务”）。
 - 显示会话摘要、运行状态（运行中、等待批准、等待输入、已完成、已暂停、异常）、模型、推理强度和更新时间。
 - 模型优先取会话的 `usagePerModel`，缺失时回退到 `~/.deepcode/settings.json` 的 `env.MODEL`；推理强度取该文件的 `reasoningEffort`。
-- 主窗口和悬浮窗的任务列表把 Codex 与 Deep Code 的任务合并显示，每条任务都标注来源和模型；主窗口任务列表只展示状态，悬浮窗中点击 Deep Code 任务会在资源管理器中打开对应项目目录。
+- 主窗口和悬浮窗的任务列表把 Codex、Deep Code 与 DeepSeek 桌面版的任务合并显示，每条任务都标注来源和模型；主窗口任务列表只展示状态，悬浮窗中点击 Deep Code 任务会在资源管理器中打开对应项目目录。
 - 首次使用 DeepSeek 数据源且本机没有 Deep Code 会话时，列表里只剩 Codex 任务是正常现象。
+
+### DeepSeek 桌面版任务
+
+- 额外读取 DeepSeek 桌面版（`%APPDATA%\@deepseek-ai\dsh-desktop`）在 Chromium LevelDB 中保留的本地会话，只读，不会启动或修改桌面版。
+- 桌面版把对话正文保存在云端，本地只剩会话 ID、正在输入/已发送的提示词和待回答的问题，因此这类任务以**第一条已发送的提示词**命名，并显示最后发送的提示词。
+- 有未回答的提问时状态为“等待输入”，否则为“已完成”；本地不保存模型与 Token，模型显示为“--”。
+- 点击这类任务会把 DeepSeek 桌面版切到前台；未运行时通过 `dsh://open` 启动它。
+- 可用环境变量 `DSH_DESKTOP_HOME` 指定其他数据目录（例如测试或绿色版）。
 
 ## 保护策略
 

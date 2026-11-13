@@ -135,6 +135,8 @@ WPF 窗口
 
 DeepSeek 凭证分别以 `AIMaster.DeepSeek.v1` 为 DPAPI 附加熵保存；API Key 只用于公开余额接口，平台 Token 只用于平台私有用量接口。`DeepSeekClient` 对平台用量采用容错解析：递归收集带日期、Token、成本、模型和 API Key 字段的对象，兼容嵌套结构和按日/按月两种回退；接口失败时保留余额并单独报告用量错误，不阻塞任务列表。`DeepCodeTaskReader` 每秒最多读取一次索引，按 `usagePerModel` 选主模型，并回退到 `~/.deepcode/settings.json` 的 `env.MODEL` 与 `reasoningEffort`。
 
+DeepSeek 数据源的任务由两个本地来源合并进同一个 feed 槽位：Deep Code 的 `sessions-index.json` 和 DeepSeek 桌面版（`%APPDATA%\@deepseek-ai\dsh-desktop\Local Storage\leveldb`）的 Chromium LevelDB。`DeepSeekDesktopTaskReader` 只读该目录（`DSH_DESKTOP_HOME` 可覆盖），共享锁读取正在写入的日志，解析 LevelDB 的 WAL 分片记录、WriteBatch、`.ldb` 表的块索引与 Snappy 压缩块；桌面版把对话正文放在云端，本地只有会话 ID、草稿/已发送提示词和待回答问题，因此任务以第一条已发送提示词命名、最后一条作为最新消息，有未回答问题时为 `waitingOnUserInput`，模型显示为 `--`，点击通过 `dsh://open` 唤起桌面版。两处监视器（Deep Code 索引与桌面版 leveldb）任一变化都会重读并发布合并后的列表；冒烟测试通过 `DEEPCODE_HOME` 与 `DSH_DESKTOP_HOME` 指向空目录，避免依赖真实历史。
+
 App Server 请求使用独立超时；任务、模型或历史用量等可选请求失败时，不应阻止本地任务降级和已有额度信息显示。
 
 桌面审批来源使用 Windows `codex-ipc` 的内部跟随协议：初始化版本 0、所有者发现/跟随版本 1、状态流版本 11。只发送初始化、所有者发现和自身跟随状态；拒绝处理请求，不注册所有者、不启动轮次、不回答审批。当前实现依据 Codex Desktop 26.1013.4894.0 的本机协议核实，不能视为公开稳定 API。

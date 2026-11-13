@@ -21,6 +21,7 @@ internal static partial class Program
     {
         VerifyDeepSeekParsing();
         VerifyDeepCodeReader();
+        VerifyDeepSeekDesktopSupport();
         VerifyDeepSeekSettings();
         VerifyDeepSeekRefresh();
         VerifyProviderAwareFloatingSnapshot();

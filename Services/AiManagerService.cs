@@ -25,6 +25,7 @@ internal sealed class AiManagerService : IAsyncDisposable
     private readonly DeepSeekClient _deepSeekClient;
     private readonly bool _ownsDeepSeekClient;
     private readonly DeepCodeTaskReader _deepCodeTaskReader;
+    private readonly DeepSeekDesktopTaskReader _deepSeekDesktopTaskReader;
     private readonly SharedUsageClient _sharedUsageClient;
     private readonly SemaphoreSlim _sharedUsageGate = new(1, 1);
     private SharedUsageCounter? _sharedUsageCounter;
@@ -109,7 +110,8 @@ internal sealed class AiManagerService : IAsyncDisposable
         Func<CancellationToken, Task<IReadOnlyList<AiLimitWindow>>>? sharedUsageLimitsReader = null,
         AiManagerRuntime? runtime = null,
         DeepSeekClient? deepSeekClient = null,
-        DeepCodeTaskReader? deepCodeTaskReader = null)
+        DeepCodeTaskReader? deepCodeTaskReader = null,
+        DeepSeekDesktopTaskReader? deepSeekDesktopTaskReader = null)
     {
         _runtime = runtime ?? new AiManagerRuntime();
         _ownsRuntime = runtime is null;
@@ -117,6 +119,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         _deepSeekClient = deepSeekClient ?? new DeepSeekClient();
         _ownsDeepSeekClient = deepSeekClient is null;
         _deepCodeTaskReader = deepCodeTaskReader ?? new DeepCodeTaskReader();
+        _deepSeekDesktopTaskReader = deepSeekDesktopTaskReader ?? new DeepSeekDesktopTaskReader();
         _rolloutCursors = _runtime.RolloutCursors;
         _localUsageCursors = _runtime.LocalUsageCursors;
         _rolloutActivityIndex = _runtime.ActivityIndex;
@@ -209,7 +212,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         var settings = Settings;
         var quotaTask = _deepSeekClient.ReadAsync(settings.DeepSeekApiKey, settings.DeepSeekPlatformToken,
             cancellationToken);
-        var codeTask = ReadDeepCodeSnapshotAsync(cancellationToken);
+        var codeTask = ReadDeepSeekTasksAsync(cancellationToken);
         AiDeepSeekSnapshot? deepSeek = null;
         try { deepSeek = await quotaTask.ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
@@ -236,7 +239,8 @@ internal sealed class AiManagerService : IAsyncDisposable
         return LastSnapshot;
     }
 
-    private async Task<DeepCodeSnapshot> ReadDeepCodeSnapshotAsync(CancellationToken cancellationToken)
+    /// <summary>Reads every DeepSeek task source and publishes them as one slot.</summary>
+    private async Task<DeepCodeSnapshot> ReadDeepSeekTasksAsync(CancellationToken cancellationToken)
     {
         // Both data sources publish into the unified task view; the feed merges both slots and
         // stamps each task with its source.
@@ -245,23 +249,45 @@ internal sealed class AiManagerService : IAsyncDisposable
         {
             var revision = AiTaskSnapshotFeed.CurrentRevision;
             var now = DateTimeOffset.Now;
-            var snapshot = await Task.Run(() => _deepCodeTaskReader.Read(
-                TaskCandidateLimit, CurrentWeekStart(now), cancellationToken), cancellationToken)
-                .ConfigureAwait(false);
-            AiTaskSnapshotFeed.PublishIfCurrent(AiProviderModes.DeepSeek, snapshot.Tasks, revision);
-            return snapshot;
+            var codeTask = Task.Run(() => _deepCodeTaskReader.Read(
+                TaskCandidateLimit, CurrentWeekStart(now), cancellationToken), cancellationToken);
+            var desktopTask = Task.Run(() => ReadDesktopTasks(cancellationToken), cancellationToken);
+            var code = await codeTask.ConfigureAwait(false);
+            var desktop = await desktopTask.ConfigureAwait(false);
+            var merged = code.Tasks.Concat(desktop)
+                .GroupBy(task => task.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+            AiTaskSnapshotFeed.PublishIfCurrent(AiProviderModes.DeepSeek, merged, revision);
+            return code with { Tasks = merged };
         }
         finally { TaskRefreshGate.Release(); }
     }
 
-    internal async Task<AiTaskSnapshot> RefreshDeepCodeTaskSnapshotAsync(
+    private IReadOnlyList<AiThreadSummary> ReadDesktopTasks(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return _deepSeekDesktopTaskReader.Read(TaskCandidateLimit, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Array.Empty<AiThreadSummary>();
+        }
+    }
+
+    internal async Task<AiTaskSnapshot> RefreshDeepSeekTaskSnapshotAsync(
         CancellationToken cancellationToken = default)
     {
         ReloadTrackedSettings();
-        var snapshot = await ReadDeepCodeSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        var snapshot = await ReadDeepSeekTasksAsync(cancellationToken).ConfigureAwait(false);
         _lastDeepCodeUsage = snapshot.LocalUsage;
         return AiTaskSnapshotFeed.Latest ?? new AiTaskSnapshot(0, snapshot.Tasks, AiProviderModes.DeepSeek);
     }
+
+    internal async Task<AiTaskSnapshot> RefreshDeepCodeTaskSnapshotAsync(
+        CancellationToken cancellationToken = default) =>
+        await RefreshDeepSeekTaskSnapshotAsync(cancellationToken).ConfigureAwait(false);
 
     /// <summary>Refreshes the Codex quota, model catalog and tasks; safe in either data-source mode.</summary>
     private async Task RefreshCodexFloatingAsync(bool forceRefresh, CancellationToken cancellationToken)
@@ -310,7 +336,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         Task<AiDeepSeekSnapshot>? quotaTask = refreshQuota
             ? _deepSeekClient.ReadAsync(Settings.DeepSeekApiKey, Settings.DeepSeekPlatformToken, cancellationToken)
             : null;
-        var codeTask = ReadDeepCodeSnapshotAsync(cancellationToken);
+        var codeTask = ReadDeepSeekTasksAsync(cancellationToken);
         if (quotaTask is not null)
         {
             try
@@ -691,6 +717,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         ReasoningEffort = item.ReasoningEffort,
         RolloutPath = item.RolloutPath,
         ProjectPath = item.ProjectPath,
+        OpenUri = item.OpenUri,
         UpdatedAt = item.UpdatedAt
     };
 
@@ -710,7 +737,8 @@ internal sealed class AiManagerService : IAsyncDisposable
                 StatusBeforeDesktopObservation = task.StatusBeforeDesktopObservation ?? task.Status,
                 Source = task.Source,
                 ModelName = task.ModelName, ReasoningEffort = task.ReasoningEffort,
-                RolloutPath = task.RolloutPath, ProjectPath = task.ProjectPath, UpdatedAt = task.UpdatedAt
+                RolloutPath = task.RolloutPath, ProjectPath = task.ProjectPath,
+                OpenUri = task.OpenUri, UpdatedAt = task.UpdatedAt
             };
         }
     }

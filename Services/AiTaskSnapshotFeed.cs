@@ -171,6 +171,7 @@ internal static class AiTaskSnapshotFeed
         ReasoningEffort = task.ReasoningEffort,
         RolloutPath = task.RolloutPath,
         ProjectPath = task.ProjectPath,
+        OpenUri = task.OpenUri,
         UpdatedAt = task.UpdatedAt
     };
 
@@ -190,6 +191,7 @@ internal static class AiTaskSnapshotFeed
             left.Source == right.Source &&
             left.ModelName == right.ModelName && left.ReasoningEffort == right.ReasoningEffort &&
             left.RolloutPath == right.RolloutPath && left.ProjectPath == right.ProjectPath &&
+            left.OpenUri == right.OpenUri &&
             left.UpdatedAt == right.UpdatedAt;
 
         public int GetHashCode(AiThreadSummary item) => StringComparer.Ordinal.GetHashCode(item.Id);
