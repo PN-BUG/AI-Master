@@ -143,6 +143,8 @@ public static class LocalizationService
             "The API key and Platform token are independent: the API key supplies the balance; the Platform token supplies usage details.",
         ["设置保存在本机；API Key 与平台 Token 使用 Windows DPAPI 加密。"] =
             "Settings stay on this device; the API key and Platform token are encrypted with Windows DPAPI.",
+        ["获取方法：登录 platform.deepseek.com 后按 F12 打开开发者工具 → 网络(Network) → 任意 /api/ 请求 → 复制请求头 Authorization 的 Bearer 值。"] =
+            "To get it: sign in to platform.deepseek.com, press F12 to open DevTools → Network, open any /api/ request, and copy the Authorization Bearer value from its request headers.",
         ["余额预警线"] = "Low balance warning",
         ["余额低于此值时高亮提示；0 表示关闭。"] = "Highlights the balance when it falls below this value; 0 disables the warning.",
         ["DeepSeek 按账户余额计费，没有百分比额度窗口；预警线、暂停线、消耗预测与重置信号仅对 Codex 生效。"] =

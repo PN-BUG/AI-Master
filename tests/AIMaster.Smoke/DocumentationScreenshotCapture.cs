@@ -47,8 +47,8 @@ internal static class DocumentationScreenshotCapture
         var floating = new AiFloatingWindow();
         Invoke(floating, "ApplyFontScale", 1.2d);
         Invoke(floating, "RenderSnapshot", CreateFloatingSnapshot(now, LocalizationService.IsEnglish));
-        var floatingWidth = Math.Max(260, (int)Math.Ceiling(floating.Width));
-        var floatingHeight = Math.Max(130, (int)Math.Ceiling(floating.Height));
+        var floatingWidth = Math.Max(200, (int)Math.Ceiling(floating.Width));
+        var floatingHeight = Math.Max(186, (int)Math.Ceiling(floating.Height));
         Render(floating.Content as FrameworkElement ?? floating, floatingWidth, floatingHeight,
             Path.Combine(outputDirectory, $"floating-{suffix}.png"));
         DetachLanguageChanged(main);
@@ -166,10 +166,14 @@ internal static class DocumentationScreenshotCapture
     {
         var tasks = new List<AiThreadSummary>
         {
-            new() { Id = "docs-1", Title = english ? "Improve dashboard layout" : "优化仪表盘布局", Status = "inProgress", ModelName = "GPT-5", ReasoningEffort = "high", UpdatedAt = now },
-            new() { Id = "docs-2", Title = english ? "Prepare v1.1 release" : "准备 v1.1 发布", Status = "completed", ModelName = "GPT-5", ReasoningEffort = "medium", UpdatedAt = now.AddMinutes(-18) },
-            new() { Id = "docs-3", Title = english ? "Update bilingual docs" : "更新双语文档", Status = "waitingOnUserInput", ModelName = "GPT-5", ReasoningEffort = "medium", UpdatedAt = now.AddMinutes(-42) }
+            new() { Id = "docs-1", Title = english ? "Improve dashboard layout" : "优化仪表盘布局", Status = "inProgress", Source = AiProviderModes.Codex, ModelName = "GPT-5", ReasoningEffort = "high", UpdatedAt = now },
+            new() { Id = "docs-2", Title = english ? "Prepare v1.1 release" : "准备 v1.1 发布", Status = "completed", Source = AiProviderModes.Codex, ModelName = "GPT-5", ReasoningEffort = "medium", UpdatedAt = now.AddMinutes(-18) },
+            new() { Id = "docs-3", Title = english ? "Update bilingual docs" : "更新双语文档", Status = "waitingOnUserInput", Source = AiProviderModes.DeepSeek, ModelName = "deepseek-chat", ReasoningEffort = "medium", UpdatedAt = now.AddMinutes(-42) }
         };
+        var fiveHour = new AiLimitWindow { LimitId = "codex", UsedPercent = 12,
+            WindowDurationMinutes = 300, ResetsAt = now.AddHours(3) };
+        var weekly = new AiLimitWindow { LimitId = "codex", UsedPercent = 37,
+            WindowDurationMinutes = 10080, ResetsAt = now.AddDays(4) };
         return new AiFloatingSnapshot
         {
             Tasks = tasks,
@@ -179,10 +183,14 @@ internal static class DocumentationScreenshotCapture
             ModelName = "GPT-5",
             ReasoningEffort = "high",
             RemainingPercent = 63,
-            FiveHourQuota = new AiLimitWindow { LimitId = "codex", UsedPercent = 12,
-                WindowDurationMinutes = 300, ResetsAt = now.AddHours(3) },
-            WeeklyQuota = new AiLimitWindow { LimitId = "codex", UsedPercent = 37,
-                WindowDurationMinutes = 10080, ResetsAt = now.AddDays(4) },
+            FiveHourQuota = fiveHour,
+            WeeklyQuota = weekly,
+            CodexFiveHourQuota = fiveHour,
+            CodexWeeklyQuota = weekly,
+            CodexQuotaCapturedAt = now,
+            DeepSeekBalanceText = "¥5.39",
+            DeepSeekBalanceDetail = english ? "Paid ¥3.05 · Granted ¥2.34" : "付费 ¥3.05 · 赠送 ¥2.34",
+            DeepSeekBalanceCapturedAt = now,
             QuotaWindow = english ? "Codex total quota · 7-day window" : "Codex 总额度 · 7 天窗口",
             ResetsAt = now.AddDays(4),
             CapturedAt = now

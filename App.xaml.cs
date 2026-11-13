@@ -257,17 +257,20 @@ public partial class App : WpfApplication
             : configuredHome;
         var sessionsRoot = Path.Combine(codexHome, "sessions");
         var service = _taskMonitorService = new AiManagerService(runtime: AiManagerRuntime.Shared);
+        // Declare the saved data source before any monitor publishes so the shared task view never
+        // depends on which monitor wins the first refresh.
+        service.ReloadTrackedSettings();
+        AiTaskSnapshotFeed.ActivateProvider(service.Settings.Provider);
         _taskFileMonitor = new TaskFileChangeMonitor(sessionsRoot, cancellationToken =>
         {
-            if (AiProviderModes.IsDeepSeek(service.Settings.Provider)) return Task.CompletedTask;
+            // The shared task view is unified across data sources, so Codex sessions are always
+            // monitored; the feed labels each task with its source.
             service.RefreshLocalTaskSnapshot(sessionsRoot, cancellationToken);
             return Task.CompletedTask;
         });
-        // Deep Code keeps one sessions-index.json per project; only while that provider is active
-        // may its files replace the shared task view.
+        // Deep Code keeps one sessions-index.json per project; its tasks join the same unified view.
         _deepCodeMonitor = new TaskFileChangeMonitor(DeepCodePaths.GetProjectsRoot(), async cancellationToken =>
         {
-            if (!AiProviderModes.IsDeepSeek(service.Settings.Provider)) return;
             await service.RefreshDeepCodeTaskSnapshotAsync(cancellationToken).ConfigureAwait(false);
         }, "*.json");
         AiManagerRuntime.Shared.DesktopStateChanged += DesktopStateChanged;

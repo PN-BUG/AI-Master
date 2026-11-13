@@ -14,7 +14,19 @@ public partial class AiManagerWindow
         if (!_providerControlsReady || sender is not RadioButton { Tag: string tag }) return;
         var provider = AiProviderModes.Normalize(tag);
         if (string.Equals(provider, _service.Settings.Provider, StringComparison.OrdinalIgnoreCase)) return;
-        var settings = _service.ReloadSettings();
+        // Read before writing: the file holds the other windows' credentials and preferences, so a
+        // failed read must abort the switch instead of saving a defaults-only copy over them.
+        if (!_service.TryReloadSettings())
+        {
+            SetFooterStatus(L("无法读取设置文件，数据源未切换。",
+                "Unable to read the settings file; the data source was not changed."), warning: true);
+            _providerControlsReady = false;
+            (AiProviderModes.IsDeepSeek(_service.Settings.Provider) ? DeepSeekProviderButton : CodexProviderButton)
+                .IsChecked = true;
+            _providerControlsReady = true;
+            return;
+        }
+        var settings = _service.Settings;
         settings.Provider = provider;
         try
         {
@@ -30,6 +42,9 @@ public partial class AiManagerWindow
             return;
         }
         ApplyProviderMode(provider);
+        // The task list is unified across data sources, so only the quota cards and the active
+        // data source change; the shared feed keeps both sources' tasks visible.
+        AiTaskSnapshotFeed.ActivateProvider(provider);
         _ = RefreshWhenIdleAsync();
     }
 
@@ -101,8 +116,12 @@ public partial class AiManagerWindow
     internal void UpdateProviderTexts()
     {
         ThreadsHelpText.Text = _deepSeekMode
-            ? LocalizationService.T("读取 ~/.deepcode 中由 Deep Code 写入的本地会话索引；无需 Deep Code 正在运行。")
-            : LocalizationService.T("运行态只对当前 App Server 连接可见；其他 Codex 窗口可能显示为历史记录。");
+            ? LocalizationService.L(
+                "任务列表统一显示 Codex 与 Deep Code 的任务，并标注来源与所用模型；无需 Deep Code 正在运行。",
+                "Tasks from Codex and Deep Code appear in one list labeled by source and model; Deep Code does not need to be running.")
+            : LocalizationService.L(
+                "任务列表统一显示 Codex 与 Deep Code 的任务，并标注来源与所用模型；运行态只对当前 App Server 连接可见。",
+                "Tasks from Codex and Deep Code appear in one list labeled by source and model; live state is visible only through the current App Server connection.");
         LocalUsageSourceHelpText.Text = _deepSeekMode
             ? LocalizationService.T("本机 Token 来自 Deep Code 会话索引；DeepSeek 平台不提供逐条会话账单。")
             : LocalizationService.T("本机 Token 来自本地会话日志；账户 Token 来自 Codex 用量历史。");

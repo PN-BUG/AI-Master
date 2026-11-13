@@ -40,7 +40,8 @@ internal static partial class Program
         var attention = new ResetSignalAttention(Path.Combine(root, "attention.json"));
         var main = new AiManagerWindow(new AiManagerService(Path.Combine(root, "main.json")), attention);
         var floating = new AiFloatingWindow(new AiManagerService(Path.Combine(root, "floating.json")), attention);
-        AiTaskSnapshotFeed.Publish(Array.Empty<AiThreadSummary>());
+        AiTaskSnapshotFeed.Reset();
+        AiTaskSnapshotFeed.Publish(AiProviderModes.Codex, Array.Empty<AiThreadSummary>());
         var monitor = new TaskFileChangeMonitor(sessions, token =>
         {
             service.RefreshLocalTaskSnapshot(sessions, token);

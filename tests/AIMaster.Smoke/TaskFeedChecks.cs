@@ -27,7 +27,8 @@ internal static partial class Program
             Id = index.ToString(), Title = "Task " + index,
             Status = index == 0 ? "waitingOnUserInput" : "inProgress", ModelName = "gpt-6"
         }).ToList();
-        AiTaskSnapshotFeed.Publish(tasks);
+        AiTaskSnapshotFeed.Reset();
+        AiTaskSnapshotFeed.Publish(AiProviderModes.Codex, tasks);
         var first = AiTaskSnapshotFeed.Latest!;
         var dashboard = ((ListBox)main.FindName("ThreadList")).Items.Cast<AiThreadSummary>().ToList();
         var floatSnapshot = (AiFloatingSnapshot)getFloatingSnapshot.GetValue(floating)!;
@@ -47,7 +48,7 @@ internal static partial class Program
         {
             Id = task.Id, Title = task.Title + " updated", Status = "inProgress", ModelName = task.ModelName
         }).ToList();
-        AiTaskSnapshotFeed.Publish(resumed);
+        AiTaskSnapshotFeed.Publish(AiProviderModes.Codex, resumed);
         // A slower quota refresh may finish after a more recent task-only refresh.
         renderMain.Invoke(main, new object[] { new AiManagerSnapshot { Threads = tasks } });
         renderFloating.Invoke(floating, new object[] { new AiFloatingSnapshot { Tasks = tasks,

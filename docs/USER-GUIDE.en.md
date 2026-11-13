@@ -44,7 +44,7 @@ The **Data source** buttons at the top of the navigation rail switch between Cod
 
 - **Codex** reads Codex quota, online tasks, and local session records, exactly like earlier versions.
 - **DeepSeek** reads the DeepSeek account balance and optional usage details; tasks come from Deep Code local session indexes.
-- Both modes share the windows, overlay, theme, language, and refresh interval but keep their own quota and task data. Switching never erases the other mode's settings or history.
+- Both modes share the windows, overlay, theme, language, and refresh interval. The task lists are unified: Codex and Deep Code tasks appear together, each labeled with its source and model, and switching the data source never hides the other source's history.
 - Codex-only cards (task guard, forecast, reset signals, shared usage, percentage thresholds) are hidden in DeepSeek mode because DeepSeek has no official percentage quota window.
 
 ### Card layout
@@ -83,8 +83,8 @@ Open **Settings → DeepSeek access** and fill in:
 - Tasks are read from `%USERPROFILE%\.deepcode\projects\*\sessions-index.json`; the local indexes are only read, never Deep Code itself.
 - Each row shows the session summary, status (running, awaiting approval, awaiting input, completed, paused, error), model, reasoning effort, and update time.
 - The model comes from the session's `usagePerModel`, falling back to `env.MODEL` in `~/.deepcode/settings.json`; reasoning effort comes from that file's `reasoningEffort`.
-- The main window lists tasks; in the floating monitor, clicking a task opens its project folder in File Explorer.
-- An empty task list is expected when this device has never used Deep Code.
+- The main window and the floating monitor merge Codex and Deep Code tasks into one list, each row labeled with its source and model; in the floating monitor, clicking a Deep Code task opens its project folder in File Explorer.
+- An empty Deep Code list is expected when this device has never used Deep Code; Codex tasks still appear in the unified list.
 
 ## Guard policy
 
@@ -135,12 +135,14 @@ Public sync requires HTTPS. The Woliu server stores only an HMAC-SHA256 group id
 
 Select **Floating monitor** in the main window. The overlay stays on top and displays:
 
-- current status and task name;
-- separate five-hour and weekly quota remaining, with reset and capture times on hover;
-- active model and reasoning effort;
+- the active data source in the header plus the last quota capture time;
+- one recent-task list covering both Codex and Deep Code, each row labeled with its source and the model it used, with the primary task's model and reasoning effort below its title;
+- the Codex five-hour and weekly quota and the DeepSeek balance at the same time, pinned to the bottom of the overlay; extra height goes to the task list;
 - recent tasks according to the overlay height (up to eight).
 
-Hover over a task to highlight it; click to open that task in the Codex desktop app. In DeepSeek mode, clicking opens the Deep Code session's project folder in File Explorer. Moving or resizing the overlay saves its position and size for the next launch. If the monitor layout changes, it reopens within the visible work area.
+The **Quota display** item in the context menu switches between **All data sources** (default: Codex quota and DeepSeek balance together) and **Selected source only**; the choice is saved locally.
+
+Hover over a task to highlight it; click a Codex task to open it in the Codex desktop app, or a Deep Code task to open its project folder in File Explorer. Rows without an available target are not clickable. Moving or resizing the overlay saves its position and size for the next launch. If the monitor layout changes, it reopens within the visible work area.
 
 The main window appears in the Windows taskbar; the floating monitor does not. Closing the main window hides AIMaster to the system tray while monitoring continues.
 
@@ -163,6 +165,7 @@ Drag the overlay to the top, left, or right edge of the current monitor. It coll
 - **Collapse now / Expand window** switches the docked state manually.
 - **Auto-hide at edge** controls automatic collapsing near a screen edge.
 - **Task name** chooses between the conversation title and the latest user request.
+- **Quota display** selects **All data sources** (default) or **Selected source only**; the former shows Codex five-hour/weekly quota and the DeepSeek balance together.
 - **Refresh interval** offers 1, 2, 5, 10, or 30 seconds.
 
 Conversation titles work well as stable identifiers. The latest-request mode is useful when following what a long-running task is currently doing. AIMaster falls back to the other available name if the selected source is missing.

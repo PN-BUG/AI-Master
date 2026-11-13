@@ -807,7 +807,13 @@
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <TextBlock Grid.ColumnSpan="2" Text="{Binding DisplayTitle}" Foreground="{DynamicResource Ink}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="44" LineHeight="22" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
                                         <StackPanel Grid.Row="1" Orientation="Horizontal"><Ellipse x:Name="TaskStatusDot" Width="5" Height="5" Fill="{DynamicResource Signal}" Margin="0,0,7,0" VerticalAlignment="Center"/>
-                                            <TextBlock x:Name="TaskStatusLabel" Text="{Binding StatusText}" Foreground="{DynamicResource Signal}" FontSize="11" Margin="0,0,12,0"/></StackPanel>
+                                            <TextBlock x:Name="TaskStatusLabel" Text="{Binding StatusText}" Foreground="{DynamicResource Signal}" FontSize="11" Margin="0,0,10,0"/>
+                                            <Border Padding="5,1" Margin="0,0,10,0" CornerRadius="4" VerticalAlignment="Center"
+                                                    Background="{DynamicResource InputSurface}" ToolTip="{Binding SourceLabel}">
+                                                <TextBlock Text="{Binding SourceLabel}" Foreground="{DynamicResource Muted}" FontSize="10"/>
+                                            </Border>
+                                            <TextBlock Text="{Binding ModelLabel}" Foreground="{DynamicResource Subtle}" FontSize="11"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="220" VerticalAlignment="Center"/></StackPanel>
                                         <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding UpdatedText}" Foreground="{DynamicResource Muted}" FontSize="11" HorizontalAlignment="Right"/>
                                     </Grid>
                                     <DataTemplate.Triggers>
@@ -907,6 +913,9 @@
                                 <PasswordBox x:Name="DeepSeekPlatformTokenBox" Background="{DynamicResource InputSurface}"
                                              Foreground="{DynamicResource Ink}" BorderBrush="{DynamicResource LineStrong}"
                                              BorderThickness="1" Padding="9,6"/>
+                                <TextBlock x:Name="DeepSeekPlatformTokenHelp"
+                                           Text="获取方法：登录 platform.deepseek.com 后按 F12 打开开发者工具 → 网络(Network) → 任意 /api/ 请求 → 复制请求头 Authorization 的 Bearer 值。"
+                                           Foreground="{DynamicResource Subtle}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                 <Grid Margin="0,12,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="220"/><ColumnDefinition Width="86"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="余额预警线" Foreground="{DynamicResource Ink}" TextWrapping="Wrap"

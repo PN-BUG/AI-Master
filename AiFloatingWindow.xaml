@@ -1,7 +1,7 @@
 <Window x:Class="AIMaster.AiFloatingWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="AI 任务悬浮监控" Width="200" MinWidth="180" Height="98" MinHeight="98"
+        Title="AI 任务悬浮监控" Width="200" MinWidth="180" Height="120" MinHeight="120"
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
         Background="Transparent" Icon="Resources/AIMaster.ico" ShowInTaskbar="False" Topmost="True"
         FontFamily="Microsoft YaHei UI" Loaded="Window_Loaded" Closed="Window_Closed"
@@ -18,6 +18,12 @@
                           IsCheckable="True" Click="TaskNameSource_Click"/>
                 <MenuItem x:Name="LatestUserMessageMenuItem" Header="最后发送内容" Tag="latestUserMessage"
                           IsCheckable="True" Click="TaskNameSource_Click"/>
+            </MenuItem>
+            <MenuItem x:Name="QuotaScopeMenuItem" Header="额度显示">
+                <MenuItem x:Name="AllQuotaMenuItem" Header="全部额度" Tag="all" IsCheckable="True"
+                          Click="QuotaScope_Click"/>
+                <MenuItem x:Name="ActiveQuotaMenuItem" Header="仅当前数据源" Tag="active" IsCheckable="True"
+                          Click="QuotaScope_Click"/>
             </MenuItem>
             <Separator/>
             <MenuItem x:Name="RefreshFrequencyMenuItem" Header="刷新频率">
@@ -97,8 +103,9 @@
                     <RowDefinition Height="17"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="1"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="1"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <Grid>
@@ -162,58 +169,72 @@
                 </Border>
 
                 <StackPanel x:Name="TaskRowsPanel" Grid.Row="2" Margin="0,0,2,1">
-                    <Grid x:Name="PrimaryTaskRow" Height="27"
-                          MouseLeftButtonDown="TaskRow_MouseLeftButtonDown">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <Border x:Name="TaskStatusBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                Background="{DynamicResource SignalSoft}" BorderBrush="Transparent" BorderThickness="1" CornerRadius="5" Padding="4,1">
-                            <TextBlock x:Name="TaskStatusText" Text="正在连接" Foreground="{DynamicResource FloatSignal}"
-                                       FontSize="{DynamicResource FloatFontSmall}" FontWeight="SemiBold"/>
-                        </Border>
-                        <TextBlock x:Name="TaskNameText" Grid.Column="1" Text="读取最近任务…" Foreground="{DynamicResource FloatInk}"
-                                   FontSize="{DynamicResource FloatFontTask}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
-                                   VerticalAlignment="Center" Margin="5,0,0,0" ToolTip="读取最近任务…"/>
+                    <Grid x:Name="PrimaryTaskRow" MouseLeftButtonDown="TaskRow_MouseLeftButtonDown">
+                        <Grid.RowDefinitions><RowDefinition Height="17"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border x:Name="TaskStatusBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                    Background="{DynamicResource SignalSoft}" BorderBrush="Transparent" BorderThickness="1" CornerRadius="5" Padding="4,1">
+                                <TextBlock x:Name="TaskStatusText" Text="正在连接" Foreground="{DynamicResource FloatSignal}"
+                                           FontSize="{DynamicResource FloatFontSmall}" FontWeight="SemiBold"/>
+                            </Border>
+                            <TextBlock x:Name="TaskNameText" Grid.Column="1" Text="读取最近任务…" Foreground="{DynamicResource FloatInk}"
+                                       FontSize="{DynamicResource FloatFontTask}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" Margin="5,0,0,0" ToolTip="读取最近任务…"/>
+                        </Grid>
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,1,0,0">
+                            <Border x:Name="PrimarySourceBadge" Padding="3,0" VerticalAlignment="Center"
+                                    CornerRadius="3" Background="{DynamicResource SignalSoft}">
+                                <TextBlock x:Name="PrimarySourceText" Text="Codex" Foreground="{DynamicResource FloatSignal}"
+                                           FontSize="{DynamicResource FloatFontSmall}" FontWeight="SemiBold"/>
+                            </Border>
+                            <TextBlock x:Name="PrimaryModelText" Text="--" Foreground="{DynamicResource FloatMuted}"
+                                       FontSize="{DynamicResource FloatFontSmall}" TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" Margin="5,0,0,0" MaxWidth="150"/>
+                        </StackPanel>
                     </Grid>
                     <StackPanel x:Name="SecondaryTasksPanel"/>
                 </StackPanel>
 
-                <Border Grid.Row="3" Background="{DynamicResource Line}"/>
+                <Border Grid.Row="4" Background="{DynamicResource Line}"/>
 
-                <Grid x:Name="QuotaRowGrid" Grid.Row="4" Margin="0,3,2,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Grid x:Name="QuotaValuesGrid">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock x:Name="QuotaLabelText" Text="剩余额度" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock x:Name="RemainingQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
-                                       FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
-                            <TextBlock x:Name="QuotaUnitText" Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
-                                       FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                <StackPanel x:Name="QuotaBand" Grid.Row="5" Margin="0,3,2,0">
+                    <Grid x:Name="CodexQuotaRow">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock x:Name="QuotaLabelText" Text="5h 剩余" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="RemainingQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
+                                           FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="QuotaUnitText" Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
+                                           FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                            </StackPanel>
                         </StackPanel>
-                    </StackPanel>
-                    <StackPanel x:Name="WeeklyQuotaPanel" Grid.Column="1" Visibility="Collapsed" Margin="4,0,0,0">
-                        <TextBlock x:Name="WeeklyQuotaLabelText" Text="周剩余" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock x:Name="WeeklyQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
-                                       FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
-                            <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
-                                       FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                        <StackPanel x:Name="WeeklyQuotaPanel" Grid.Column="1" Visibility="Collapsed" Margin="4,0,0,0">
+                            <TextBlock x:Name="WeeklyQuotaLabelText" Text="周剩余" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="WeeklyQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
+                                           FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
+                                <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
+                                           FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                            </StackPanel>
                         </StackPanel>
-                    </StackPanel>
                     </Grid>
-                    <Border Grid.Column="1" Background="{DynamicResource Line}" Margin="0,1,0,1"/>
-                    <StackPanel Grid.Column="2" Margin="6,0,0,0">
-                        <TextBlock Text="当前推理模型" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}" TextTrimming="CharacterEllipsis"/>
-                        <Grid Margin="0,2,0,0">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBlock x:Name="ModelText" Text="--" Foreground="{DynamicResource FloatInk}" FontFamily="Cascadia Mono"
-                                       FontSize="{DynamicResource FloatFontModel}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock x:Name="ReasoningText" Grid.Column="1" Text="" Foreground="{DynamicResource FloatMuted}"
-                                       FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontSmall}" Margin="4,1,0,0"/>
-                        </Grid>
-                    </StackPanel>
-                </Grid>
+                    <Grid x:Name="DeepSeekQuotaRow" Margin="0,3,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="DeepSeekBalanceLabel" Text="余额" VerticalAlignment="Bottom" Margin="0,0,6,1"
+                                   Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
+                        <TextBlock x:Name="DeepSeekBalanceText" Grid.Column="1" Text="--" Foreground="{DynamicResource FloatInk}"
+                                   FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis" ToolTip="DeepSeek"/>
+                    </Grid>
+                </StackPanel>
             </Grid>
 
             <!-- 无边框浮窗的八向缩放命中区。 -->

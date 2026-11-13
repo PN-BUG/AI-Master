@@ -137,7 +137,7 @@ internal static partial class Program
                 }
             }
             attention.Dismiss();
-            Check(floating.MinHeight == 98 && floatButton.Visibility == Visibility.Collapsed,
+            Check(floating.MinHeight == 120 && floatButton.Visibility == Visibility.Collapsed,
                 "dismissing restores the compact floating height");
             CaptureState("dismissed");
             // These windows are rendered offline; their Loaded/network handlers never run.

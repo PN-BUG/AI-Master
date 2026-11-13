@@ -129,7 +129,9 @@ WPF 窗口
   -> 主面板与悬浮窗渲染
 ```
 
-数据源由 `AiManagerSettings.Provider`（`codex` / `deepseek`）决定，`AiManagerService.RefreshAsync`、`RefreshFloatingAsync` 和本地任务监视器都按该值分支。DeepSeek 路径不依赖 App Server 或 Codex 桌面管道；Codex 路径不读取 DeepSeek 凭证。两套数据共用 `AiTaskSnapshotFeed`、`AiManagerSnapshot` 和悬浮窗模型，切换数据源时旧任务会由下一次刷新整体替换。
+数据源由 `AiManagerSettings.Provider`（`codex` / `deepseek`）决定，`AiManagerService.RefreshAsync`、`RefreshFloatingAsync` 和本地任务监视器都按该值选择凭证与额度接口。DeepSeek 路径不依赖 App Server 或 Codex 桌面管道；Codex 路径不读取 DeepSeek 凭证。任务列表不受数据源限制：`AiTaskSnapshotFeed` 为两个数据源各保留一个槽位，任何一方扫描到新内容都会合并排序后发布一份统一列表，每条任务带 `Source`，因此 Codex 与 Deep Code 的任务在同一个列表里显示（主面板标注来源与模型，悬浮窗用 C/D 徽标和模型文字标注）。数据源切换只改变额度、凭证与“当前数据源”标识：主面板写入设置后调用 `AiTaskSnapshotFeed.ActivateProvider` 广播 `ProviderChanged`，两个窗口重新读取设置并以新凭证刷新，任务列表保持不空，因此不再出现 Codex 与 DeepSeek 列表交替闪烁。悬浮窗的额度区默认同时显示 Codex 的 5 小时/周额度与 DeepSeek 余额（`AiManagerSettings.FloatingQuotaScope` = `all`），也可在右键菜单中改为 `active` 仅显示当前数据源的额度；额度区固定贴住窗口底边，浮窗拉高后多出的空间由任务区吸收。后台监视器每轮扫描重读设置文件中的 provider 与任务名称来源，悬浮窗每次刷新完整重读设置（含 DeepSeek 凭证）；两者都不会保留启动时的数据源副本。设置文件正在被并发写入而暂时无法读取时保留当前内存值（切换数据源本身也会在读取失败时中止，避免写回默认值）。设置文件以临时文件替换的方式原子写入，读取遇到并发写入会短暂重试，因此关闭后重新打开仍按上次选择的数据源启动，不会因为读到半写文件而回退到 Codex 默认值。
+
+`--provider-task-tests` 回归校验统一任务列表：两个数据源的发布按状态与时间合并成一份带 `Source` 的列表、单源重建不影响另一源、切换数据源只广播 `ProviderChanged` 而不清空任务、后台监视器无论当前数据源都持续发布两个来源、两个窗口都显示合并列表及每条任务的来源与模型、默认额度区同时显示两个数据源并可通过设置改为 `active`；同时校验数据源选择在重启后保留、设置文件并发读写不会读到半写内容。
 
 DeepSeek 凭证分别以 `AIMaster.DeepSeek.v1` 为 DPAPI 附加熵保存；API Key 只用于公开余额接口，平台 Token 只用于平台私有用量接口。`DeepSeekClient` 对平台用量采用容错解析：递归收集带日期、Token、成本、模型和 API Key 字段的对象，兼容嵌套结构和按日/按月两种回退；接口失败时保留余额并单独报告用量错误，不阻塞任务列表。`DeepCodeTaskReader` 每秒最多读取一次索引，按 `usagePerModel` 选主模型，并回退到 `~/.deepcode/settings.json` 的 `env.MODEL` 与 `reasoningEffort`。
 
@@ -169,7 +171,7 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -- --reset-tes
 
 1. `dotnet build .\AIMaster.sln -c Release` 无警告、无错误。
 2. 主面板能够同步额度。
-3. 悬浮窗能显示任务、模型、推理强度和额度。
+3. 悬浮窗能显示统一任务列表（含来源与所用模型）、推理强度和两个数据源的额度，且额度区贴底。
 4. 在主屏、副屏分别验证上/左/右靠边收起。
 5. 切换中英文，检查窗口尺寸和右键菜单。
 6. 运行 `build.ps1 -All`，确认两个发布目录和两个 ZIP 均已生成，且 ZIP 中包含 `AIMaster.exe` 和 `START-HERE.txt`。

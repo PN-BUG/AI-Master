@@ -41,7 +41,7 @@ public partial class AiFloatingWindow : Window
 
     private const double DockThreshold = 30;
     private const double PeekSize = 8;
-    private const double BaseWindowHeight = 98;
+    private const double BaseWindowHeight = 120;
     private const double SecondaryTaskRowHeight = 18;
 
     private enum DockEdge { None, Left, Right, Top }
@@ -76,6 +76,7 @@ public partial class AiFloatingWindow : Window
         _resetAttention.Changed += ResetAttention_Changed;
         RenderResetAttention();
         AiTaskSnapshotFeed.Changed += TaskSnapshot_Changed;
+        AiTaskSnapshotFeed.ProviderChanged += TaskFeed_ProviderChanged;
         if (AiTaskSnapshotFeed.Latest is { } latestTasks) TaskSnapshot_Changed(latestTasks);
     }
 
@@ -165,6 +166,7 @@ public partial class AiFloatingWindow : Window
     private async void Window_Closed(object? sender, EventArgs e)
     {
         AiTaskSnapshotFeed.Changed -= TaskSnapshot_Changed;
+        AiTaskSnapshotFeed.ProviderChanged -= TaskFeed_ProviderChanged;
         _timer.Stop();
         _dockHideTimer.Stop();
         SavePlacement();
@@ -203,97 +205,123 @@ public partial class AiFloatingWindow : Window
 
     private void RenderSnapshot(AiFloatingSnapshot snapshot)
     {
-        if (_taskSnapshot is not null && AiTaskSnapshotFeed.Latest is { } shared)
+        if (AiTaskSnapshotFeed.Latest is { } shared)
             snapshot = AiTaskSnapshotFeed.ApplyToFloating(snapshot, shared.Tasks);
         _lastSnapshot = snapshot;
-        var taskName = LocalizationService.LocalizeKnownText(snapshot.TaskName);
-        TaskNameText.Text = taskName;
-        TaskNameText.ToolTip = taskName;
-        TaskStatusText.Text = LocalizedStatus(snapshot.TaskStatus);
-        if (snapshot.IsDeepSeek)
-        {
-            WeeklyQuotaPanel.Visibility = Visibility.Collapsed;
-            QuotaValuesGrid.ColumnDefinitions[1].Width = new GridLength(0);
-            QuotaLabelText.Text = LocalizationService.T(snapshot.QuotaLabel);
-            QuotaUnitText.Visibility = Visibility.Collapsed;
-            QuotaRowGrid.ColumnDefinitions[0].Width = new GridLength(72);
-            var balanceText = snapshot.QuotaText ?? "--";
-            RemainingQuotaText.Text = balanceText;
-            RemainingQuotaText.FontSize = (balanceText.Length > 9 ? 10 : 12) * _fontScale;
-            var detail = string.Join("\n", new[] { snapshot.QuotaDetail, snapshot.QuotaWindow }
-                .Where(item => !string.IsNullOrWhiteSpace(item)));
-            RemainingQuotaText.ToolTip = detail;
-            if (snapshot.QuotaError is not null)
-            {
-                RemainingQuotaText.ToolTip = detail + "\n" +
-                    LocalizationService.L("余额同步暂不可用，将自动重试。", "Balance sync unavailable; retrying automatically.") +
-                    (snapshot.QuotaCapturedAt is { } cachedAt
-                        ? LocalizationService.L($"\n缓存余额采集于 {cachedAt.LocalDateTime:HH:mm:ss}",
-                            $"\nCached balance from {cachedAt.LocalDateTime:HH:mm:ss}")
-                        : string.Empty);
-                RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "WarningText");
-            }
-            else RemainingQuotaText.SetResourceReference(TextBlock.ForegroundProperty, "FloatInk");
-        }
-        else
-        {
-            QuotaLabelText.Text = LocalizationService.L("5h 剩余", "5h left");
-            WeeklyQuotaLabelText.Text = LocalizationService.L("周剩余", "Week left");
-            WeeklyQuotaPanel.Visibility = Visibility.Visible;
-            QuotaValuesGrid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
-            QuotaUnitText.Visibility = Visibility.Visible;
-            QuotaRowGrid.ColumnDefinitions[0].Width = new GridLength(84 * _fontScale);
-            RenderQuotaWindow(RemainingQuotaText, snapshot.FiveHourQuota, snapshot);
-            RenderQuotaWindow(WeeklyQuotaText, snapshot.WeeklyQuota, snapshot);
-        }
-        var modelName = LocalizationService.LocalizeKnownText(snapshot.ModelName);
-        ModelText.Text = modelName;
-        ModelText.ToolTip = modelName;
-        ReasoningText.Text = string.IsNullOrWhiteSpace(snapshot.ReasoningEffort)
-            ? "--"
-            : snapshot.ReasoningEffort.ToUpperInvariant();
-        SyncAgeText.Text = snapshot.QuotaError is null
-            ? snapshot.CapturedAt.LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
-            : LocalizationService.L("额度待同步", "QUOTA RETRY");
         var tasks = snapshot.Tasks.Count > 0
             ? snapshot.Tasks
             : new List<AiThreadSummary>
             {
-                new() { Title = snapshot.TaskName, Status = snapshot.TaskStatus, ModelName = snapshot.ModelName,
-                    ReasoningEffort = snapshot.ReasoningEffort }
+                new() { Title = snapshot.TaskName, Status = snapshot.TaskStatus, Source = snapshot.Provider,
+                    ModelName = snapshot.ModelName, ReasoningEffort = snapshot.ReasoningEffort }
             };
         _displayTasks = tasks;
-        PrimaryTaskRow.Tag = tasks[0].Id;
-        var primaryHasLink = CanOpenTask(tasks[0]);
-        PrimaryTaskRow.Cursor = primaryHasLink ? Cursors.Hand : Cursors.Arrow;
-        PrimaryTaskRow.Style = primaryHasLink ? (Style)FindResource("TaskHoverRow") : null;
+        UpdatePrimaryTaskRow(tasks[0]);
+        UpdateBrand(snapshot);
+        RenderQuotaBand(snapshot);
+        SyncAgeText.Text = SyncAgeTextFor(snapshot);
         if (!_hasSizedForFirstSnapshot)
         {
             _hasSizedForFirstSnapshot = true;
             Height = BaseWindowHeight + _resetBannerHeight + Math.Clamp(tasks.Count - 1, 0, 2) * SecondaryTaskRowHeight;
         }
         RefreshVisibleTaskRows(force: true);
-        ApplyStatusVisual(snapshot.TaskStatus);
+        ApplyStatusVisual(tasks[0].Status);
         RenderResetAttention();
     }
 
-    private void RenderQuotaWindow(TextBlock text, AiLimitWindow? quota, AiFloatingSnapshot snapshot)
+    private void UpdatePrimaryTaskRow(AiThreadSummary task)
+    {
+        TaskStatusText.Text = LocalizedStatus(task.Status);
+        TaskNameText.Text = task.DisplayTitle;
+        TaskNameText.ToolTip = $"{task.DisplayTitle}\n{task.SourceLabel} · {LocalizedStatus(task.Status)} · {task.ModelLabel}";
+        TaskStatusText.ToolTip = TaskNameText.ToolTip;
+        PrimarySourceText.Text = task.SourceLabel;
+        PrimarySourceBadge.ToolTip = task.SourceLabel;
+        PrimarySourceBadge.Background = ThemeBrush(task.IsDeepSeekSource ? "SignalSoft" : "InterruptedSoft");
+        PrimarySourceText.Foreground = ThemeBrush(task.IsDeepSeekSource ? "Signal" : "Interrupted");
+        PrimaryModelText.Text = task.ModelLabel;
+        PrimaryModelText.ToolTip = task.ModelLabel;
+        PrimaryTaskRow.Tag = task.Id;
+        var hasLink = CanOpenTask(task);
+        PrimaryTaskRow.Cursor = hasLink ? Cursors.Hand : Cursors.Arrow;
+        PrimaryTaskRow.Style = hasLink ? (Style)FindResource("TaskHoverRow") : null;
+    }
+
+    /// <summary>The task list is shared by both data sources, so the header names the data source
+    /// whose account and quota the numbers below belong to.</summary>
+    private void UpdateBrand(AiFloatingSnapshot snapshot)
+    {
+        var deepSeek = snapshot.IsDeepSeek;
+        BrandText.Text = deepSeek ? "DEEPSEEK / LIVE" : "CODEX / LIVE";
+        BrandText.ToolTip = LocalizationService.L("当前数据源：", "Active data source: ") + (deepSeek ? "DeepSeek" : "Codex");
+    }
+
+    /// <summary>Paints both data sources' quota; the context menu can limit it to the selected one.</summary>
+    private void RenderQuotaBand(AiFloatingSnapshot snapshot)
+    {
+        var showAll = FloatingQuotaScopes.Normalize(_service.Settings.FloatingQuotaScope) == FloatingQuotaScopes.All;
+        CodexQuotaRow.Visibility = showAll || !snapshot.IsDeepSeek ? Visibility.Visible : Visibility.Collapsed;
+        DeepSeekQuotaRow.Visibility = showAll || snapshot.IsDeepSeek ? Visibility.Visible : Visibility.Collapsed;
+
+        QuotaLabelText.Text = LocalizationService.L("5h 剩余", "5h left");
+        WeeklyQuotaLabelText.Text = LocalizationService.L("周剩余", "Week left");
+        var fiveHour = snapshot.CodexFiveHourQuota ?? snapshot.FiveHourQuota;
+        var weekly = snapshot.CodexWeeklyQuota ?? snapshot.WeeklyQuota;
+        var codexError = snapshot.CodexQuotaError ?? snapshot.QuotaError;
+        var codexCapturedAt = snapshot.CodexQuotaCapturedAt ?? snapshot.QuotaCapturedAt;
+        WeeklyQuotaPanel.Visibility = weekly is null ? Visibility.Collapsed : Visibility.Visible;
+        RenderQuotaWindow(RemainingQuotaText, fiveHour, codexError, codexCapturedAt,
+            "额度窗口未知", "Unknown quota window");
+        RenderQuotaWindow(WeeklyQuotaText, weekly, codexError, codexCapturedAt,
+            "周额度窗口未知", "Weekly quota window unknown");
+
+        var balanceText = snapshot.DeepSeekBalanceText ?? snapshot.QuotaText ?? "--";
+        DeepSeekBalanceText.Text = balanceText;
+        DeepSeekBalanceText.FontSize = (balanceText.Length > 9 ? 10 : 12) * _fontScale;
+        var detail = snapshot.DeepSeekBalanceDetail ?? string.Empty;
+        if (snapshot.DeepSeekBalanceCapturedAt is { } captured)
+            detail += LocalizationService.L($"\n余额采集于 {captured.LocalDateTime:HH:mm:ss}",
+                $"\nBalance captured at {captured.LocalDateTime:HH:mm:ss}");
+        if (snapshot.DeepSeekBalanceError is { } balanceError)
+        {
+            detail += "\n" + LocalizationService.L("余额同步暂不可用，将自动重试。", "Balance sync unavailable; retrying automatically.");
+            DeepSeekBalanceText.ToolTip = detail + "\n" + balanceError;
+            DeepSeekBalanceText.SetResourceReference(TextBlock.ForegroundProperty, "WarningText");
+        }
+        else
+        {
+            DeepSeekBalanceText.ToolTip = detail;
+            DeepSeekBalanceText.SetResourceReference(TextBlock.ForegroundProperty, "FloatInk");
+        }
+    }
+
+    private string SyncAgeTextFor(AiFloatingSnapshot snapshot)
+    {
+        var error = snapshot.IsDeepSeek ? snapshot.DeepSeekBalanceError : snapshot.CodexQuotaError;
+        if (error is not null) return LocalizationService.L("额度待同步", "QUOTA RETRY");
+        var captured = snapshot.IsDeepSeek ? snapshot.DeepSeekBalanceCapturedAt : snapshot.CodexQuotaCapturedAt;
+        return (captured ?? snapshot.CapturedAt).LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+    }
+
+    private void RenderQuotaWindow(TextBlock text, AiLimitWindow? quota, string? error, DateTimeOffset? capturedAt,
+        string unknownZh, string unknownEn)
     {
         text.FontSize = 14 * _fontScale;
         text.Text = quota?.RemainingPercent.ToString("0.#", CultureInfo.InvariantCulture) ?? "--";
         var detail = quota is null
-            ? LocalizationService.L("额度窗口未知", "Unknown quota window")
+            ? LocalizationService.L(unknownZh, unknownEn)
             : $"{quota.DisplayName} · {quota.WindowName}";
         if (quota?.ResetsAt is { } reset)
             detail += LocalizationService.L($"\n{reset.LocalDateTime:M月d日 HH:mm} 重置",
                 $"\nResets {reset.LocalDateTime.ToString("MMM d HH:mm", CultureInfo.InvariantCulture)}");
-        if (snapshot.QuotaCapturedAt is { } captured)
+        if (capturedAt is { } captured)
             detail += LocalizationService.L($"\n额度采集于 {captured.LocalDateTime:HH:mm:ss}",
                 $"\nQuota captured at {captured.LocalDateTime:HH:mm:ss}");
-        if (snapshot.QuotaError is not null)
+        if (error is not null)
             detail += LocalizationService.L("\n额度同步暂不可用，将自动重试。", "\nQuota sync unavailable; retrying automatically.");
         text.ToolTip = detail;
-        text.SetResourceReference(TextBlock.ForegroundProperty, snapshot.QuotaError is null ? "FloatInk" : "WarningText");
+        text.SetResourceReference(TextBlock.ForegroundProperty, error is null ? "FloatInk" : "WarningText");
     }
 
     private void TaskSnapshot_Changed(AiTaskSnapshot snapshot)
@@ -306,8 +334,27 @@ public partial class AiFloatingWindow : Window
         }
         if (_lifetime.IsCancellationRequested || snapshot.Revision <= (_taskSnapshot?.Revision ?? 0)) return;
         _taskSnapshot = snapshot;
-        RenderSnapshot(AiTaskSnapshotFeed.ApplyToFloating(_lastSnapshot ?? new AiFloatingSnapshot(), snapshot.Tasks));
+        // The feed merges every data source, so this publication already is the unified list.
+        var projection = _lastSnapshot ??
+            new AiFloatingSnapshot { Provider = AiProviderModes.Normalize(_service.Settings.Provider) };
+        RenderSnapshot(AiTaskSnapshotFeed.ApplyToFloating(projection, snapshot.Tasks));
         foreach (var task in snapshot.Tasks.Take(8)) TaskMonitorTrace.Record("ui", task.Id, task.Status, snapshot.Revision, "floating");
+    }
+
+    private void TaskFeed_ProviderChanged(string provider)
+    {
+        if (_lifetime.IsCancellationRequested || Dispatcher.HasShutdownStarted) return;
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.InvokeAsync(() => TaskFeed_ProviderChanged(provider));
+            return;
+        }
+        // The dashboard wrote the new provider to the shared settings file. Repaint so the
+        // "only current data source" quota scope follows it, then refresh with the new credentials.
+        _service.ReloadTrackedSettings();
+        _hasSizedForFirstSnapshot = true;
+        if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
+        _ = RefreshAsync(forceRefresh: true);
     }
 
     private void RefreshVisibleTaskRows(bool force = false)
@@ -332,26 +379,50 @@ public partial class AiFloatingWindow : Window
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var dot = new Ellipse { Width = 4, Height = 4, Fill = color, VerticalAlignment = VerticalAlignment.Center };
             var title = new TextBlock
             {
                 Text = task.DisplayTitle, Foreground = ThemeBrush(waitingForUser ? "WarningText" : "FloatingSecondaryInk"), FontSize = 8.5 * _fontScale,
                 FontWeight = waitingForUser ? FontWeights.SemiBold : FontWeights.Normal,
                 TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(5, 0, 5, 0)
+                Margin = new Thickness(5, 0, 3, 0)
             };
             Grid.SetColumn(title, 1);
+            // Every row identifies its data source and the model that task used.
+            var source = new TextBlock
+            {
+                Text = task.SourceShortLabel, Foreground = ThemeBrush(task.IsDeepSeekSource ? "Signal" : "Interrupted"),
+                FontSize = 6.5 * _fontScale, FontWeight = FontWeights.Bold,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 3, 0),
+                ToolTip = task.SourceLabel
+            };
+            Grid.SetColumn(source, 2);
+            var model = new TextBlock
+            {
+                // Row space is scarce: the model name is shown, the reasoning effort stays in the tooltip.
+                Text = task.ModelName ?? "--", Foreground = ThemeBrush("FloatMuted"),
+                FontSize = 6.5 * _fontScale, TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxWidth = 54, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 3, 0),
+                ToolTip = task.ModelLabel
+            };
+            Grid.SetColumn(model, 3);
             var status = new TextBlock
             {
-                Text = LocalizedStatus(task.Status), Foreground = color, FontSize = (waitingForUser ? 7.5 : 6.5) * _fontScale,
+                // Rows are narrow; the compact status keeps the title readable while the tooltip and
+                // the primary badge still carry the full wording.
+                Text = CompactStatus(task.Status), Foreground = color, FontSize = (waitingForUser ? 7.5 : 6.5) * _fontScale,
                 FontWeight = waitingForUser ? FontWeights.Bold : FontWeights.Normal,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            Grid.SetColumn(status, 2);
+            Grid.SetColumn(status, 4);
             row.Children.Add(dot);
             row.Children.Add(title);
+            row.Children.Add(source);
+            row.Children.Add(model);
             row.Children.Add(status);
-            row.ToolTip = $"{task.DisplayTitle}\n{LocalizedStatus(task.Status)} · {task.ModelName ?? "--"} {task.ReasoningEffort?.ToUpperInvariant()}";
+            row.ToolTip = $"{task.DisplayTitle}\n{task.SourceLabel} · {LocalizedStatus(task.Status)}\n{task.ModelLabel}";
             SecondaryTasksPanel.Children.Add(row);
         }
     }
@@ -367,7 +438,7 @@ public partial class AiFloatingWindow : Window
         ? new Uri($"codex://threads/{id:D}")
         : null;
 
-    private bool CanOpenTask(AiThreadSummary task) => _lastSnapshot?.IsDeepSeek == true
+    private bool CanOpenTask(AiThreadSummary task) => task.IsDeepSeekSource
         ? !string.IsNullOrWhiteSpace(task.ProjectPath) && Directory.Exists(task.ProjectPath)
         : BuildTaskUri(task.Id) is not null;
 
@@ -379,7 +450,7 @@ public partial class AiFloatingWindow : Window
         if (task is null) return;
         try
         {
-            if (_lastSnapshot?.IsDeepSeek == true)
+            if (task.IsDeepSeekSource)
             {
                 if (string.IsNullOrWhiteSpace(task.ProjectPath) || !Directory.Exists(task.ProjectPath)) return;
                 e.Handled = true;
@@ -820,6 +891,18 @@ public partial class AiFloatingWindow : Window
         await RefreshAsync();
     }
 
+    private void QuotaScope_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item) return;
+        var settings = _service.ReloadSettings();
+        settings.FloatingQuotaScope = FloatingQuotaScopes.Normalize(item.Tag?.ToString());
+        _service.SaveSettings(settings);
+        UpdateContextMenu();
+        _hasSizedForFirstSnapshot = true;
+        if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
+        _ = RefreshAsync();
+    }
+
     private void FloatingMenu_Opened(object sender, RoutedEventArgs e) => UpdateContextMenu();
 
     private void UpdateContextMenu()
@@ -838,6 +921,12 @@ public partial class AiFloatingWindow : Window
         var taskNameSource = TaskNameSources.Normalize(_service.Settings.TaskNameSource);
         ConversationTitleMenuItem.IsChecked = taskNameSource == TaskNameSources.ConversationTitle;
         LatestUserMessageMenuItem.IsChecked = taskNameSource == TaskNameSources.LatestUserMessage;
+        QuotaScopeMenuItem.Header = english ? "Quota display" : "额度显示";
+        AllQuotaMenuItem.Header = english ? "All data sources" : "全部额度";
+        ActiveQuotaMenuItem.Header = english ? "Selected source only" : "仅当前数据源";
+        var quotaScope = FloatingQuotaScopes.Normalize(_service.Settings.FloatingQuotaScope);
+        AllQuotaMenuItem.IsChecked = quotaScope == FloatingQuotaScopes.All;
+        ActiveQuotaMenuItem.IsChecked = quotaScope == FloatingQuotaScopes.Active;
         RefreshFrequencyMenuItem.Header = english ? "Refresh interval" : "刷新频率";
         foreach (var item in RefreshFrequencyMenuItem.Items.OfType<MenuItem>())
         {
@@ -927,4 +1016,17 @@ public partial class AiFloatingWindow : Window
     }
 
     private static string LocalizedStatus(string status) => LocalizationService.FormatTaskStatus(status);
+
+    /// <summary>Compact row status; the full wording stays in the primary badge and tooltips.</summary>
+    private static string CompactStatus(string status) => status switch
+    {
+        "waitingOnApproval" => LocalizationService.L("待批准", "Approve"),
+        "waitingOnUserInput" => LocalizationService.L("待输入", "Input"),
+        "active" or "inProgress" => LocalizationService.L("运行中", "Running"),
+        "completed" => LocalizationService.L("已完成", "Done"),
+        "failed" or "systemError" => LocalizationService.L("失败", "Failed"),
+        "interrupted" => LocalizationService.L("已中断", "Stopped"),
+        "notLoaded" => "--",
+        _ => LocalizationService.FormatTaskStatus(status)
+    };
 }

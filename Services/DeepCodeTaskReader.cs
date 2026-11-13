@@ -171,6 +171,7 @@ internal sealed class DeepCodeTaskReader
                 Title = entry.Summary ?? "未命名任务",
                 ConversationTitle = entry.Summary,
                 Status = MapStatus(entry.Status),
+                Source = AiProviderModes.DeepSeek,
                 ModelName = model,
                 ReasoningEffort = settings.ReasoningEffort,
                 ProjectPath = entry.ProjectPath,

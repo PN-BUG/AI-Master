@@ -12,6 +12,13 @@ internal sealed class AiManagerService : IAsyncDisposable
     private const int TaskCandidateLimit = 32;
     private const int LocalTaskScanLimit = 64;
     private static readonly SemaphoreSlim TaskRefreshGate = new(1, 1);
+    // Every window of the single application instance shares one settings file. Serialize reads
+    // and atomic replacements so a reader never holds the file open while it is being replaced.
+    private static readonly object SettingsFileSync = new();
+    // Older settings files may not carry a device id yet. Keep one identity per process instead of
+    // generating a new one on every reload, which would fragment the shared usage ledger.
+    private static readonly Lazy<string> FallbackSharedUsageDeviceId =
+        new(() => Guid.NewGuid().ToString("D"));
     private readonly AiManagerRuntime _runtime;
     private readonly bool _ownsRuntime;
     private readonly CodexAppServerClient _client;
@@ -129,6 +136,7 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     public async Task<AiManagerSnapshot> RefreshAsync(CancellationToken cancellationToken = default)
     {
+        ReloadTrackedSettings();
         if (AiProviderModes.IsDeepSeek(Settings.Provider))
             return await RefreshDeepSeekAsync(cancellationToken).ConfigureAwait(false);
         try { await _client.ConnectAsync(cancellationToken); }
@@ -194,6 +202,10 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     private async Task<AiManagerSnapshot> RefreshDeepSeekAsync(CancellationToken cancellationToken)
     {
+        // The dashboard owns the settings object; other windows may have written provider-specific
+        // credentials since it was loaded, so read them once before starting the requests. A failed
+        // read keeps the current values instead of replacing them with defaults.
+        TryReloadSettings();
         var settings = Settings;
         var quotaTask = _deepSeekClient.ReadAsync(settings.DeepSeekApiKey, settings.DeepSeekPlatformToken,
             cancellationToken);
@@ -226,8 +238,8 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     private async Task<DeepCodeSnapshot> ReadDeepCodeSnapshotAsync(CancellationToken cancellationToken)
     {
-        // Codex and Deep Code share one ordered task view, so switching providers can never
-        // interleave two half-published task lists.
+        // Both data sources publish into the unified task view; the feed merges both slots and
+        // stamps each task with its source.
         await TaskRefreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -236,8 +248,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             var snapshot = await Task.Run(() => _deepCodeTaskReader.Read(
                 TaskCandidateLimit, CurrentWeekStart(now), cancellationToken), cancellationToken)
                 .ConfigureAwait(false);
-            if (AiProviderModes.IsDeepSeek(Settings.Provider))
-                AiTaskSnapshotFeed.PublishIfCurrent(snapshot.Tasks, revision);
+            AiTaskSnapshotFeed.PublishIfCurrent(AiProviderModes.DeepSeek, snapshot.Tasks, revision);
             return snapshot;
         }
         finally { TaskRefreshGate.Release(); }
@@ -246,70 +257,15 @@ internal sealed class AiManagerService : IAsyncDisposable
     internal async Task<AiTaskSnapshot> RefreshDeepCodeTaskSnapshotAsync(
         CancellationToken cancellationToken = default)
     {
-        if (!AiProviderModes.IsDeepSeek(Settings.Provider))
-            return AiTaskSnapshotFeed.Latest ?? new AiTaskSnapshot(0, Array.Empty<AiThreadSummary>());
+        ReloadTrackedSettings();
         var snapshot = await ReadDeepCodeSnapshotAsync(cancellationToken).ConfigureAwait(false);
         _lastDeepCodeUsage = snapshot.LocalUsage;
-        return AiTaskSnapshotFeed.Latest ?? new AiTaskSnapshot(0, snapshot.Tasks);
+        return AiTaskSnapshotFeed.Latest ?? new AiTaskSnapshot(0, snapshot.Tasks, AiProviderModes.DeepSeek);
     }
 
-    private async Task<AiFloatingSnapshot> RefreshDeepSeekFloatingAsync(CancellationToken cancellationToken,
-        bool forceRefresh)
+    /// <summary>Refreshes the Codex quota, model catalog and tasks; safe in either data-source mode.</summary>
+    private async Task RefreshCodexFloatingAsync(bool forceRefresh, CancellationToken cancellationToken)
     {
-        var now = DateTimeOffset.Now;
-        var refreshQuota = forceRefresh || now - _floatingDeepSeekAttemptAt >= TimeSpan.FromMinutes(1);
-        if (refreshQuota) _floatingDeepSeekAttemptAt = now;
-
-        Task<AiDeepSeekSnapshot>? quotaTask = refreshQuota
-            ? _deepSeekClient.ReadAsync(Settings.DeepSeekApiKey, Settings.DeepSeekPlatformToken, cancellationToken)
-            : null;
-        var codeTask = ReadDeepCodeSnapshotAsync(cancellationToken);
-
-        if (quotaTask is not null)
-        {
-            try
-            {
-                _floatingDeepSeek = await quotaTask.ConfigureAwait(false);
-                LastDeepSeekError = _floatingDeepSeek.Error;
-                LastDeepSeekUsageError = _floatingDeepSeek.UsageError;
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { LastDeepSeekError = ex.Message; }
-        }
-
-        var code = await codeTask.ConfigureAwait(false);
-        _lastDeepCodeUsage = code.LocalUsage;
-        var visibleTasks = code.Tasks.Take(8).ToList();
-        var focus = visibleTasks.FirstOrDefault();
-        var balance = _floatingDeepSeek?.Balance;
-        return new AiFloatingSnapshot
-        {
-            Provider = AiProviderModes.DeepSeek,
-            QuotaText = balance?.TotalText,
-            QuotaLabel = LocalizationService.L("余额", "Balance"),
-            QuotaDetail = balance is null
-                ? null
-                : LocalizationService.L($"付费 {balance.PaidText} · 赠送 {balance.GrantedText}",
-                    $"Paid {balance.PaidText} · Granted {balance.GrantedText}"),
-            Tasks = visibleTasks,
-            TaskName = focus?.DisplayTitle ?? LocalizationService.L("暂无最近任务", "No recent tasks"),
-            TaskStatus = focus?.Status ?? "notLoaded",
-            TaskStatusText = focus?.StatusText ?? LocalizationService.L("等待任务", "Waiting for a task"),
-            ModelName = focus?.ModelName ?? LocalizationService.L("模型未知", "Unknown model"),
-            ReasoningEffort = focus?.ReasoningEffort,
-            RemainingPercent = null,
-            QuotaWindow = LocalizationService.L("DeepSeek 账户余额", "DeepSeek account balance"),
-            QuotaError = LastDeepSeekError,
-            QuotaCapturedAt = _floatingDeepSeek?.CapturedAt,
-            CapturedAt = DateTimeOffset.Now
-        };
-    }
-
-    public async Task<AiFloatingSnapshot> RefreshFloatingAsync(CancellationToken cancellationToken = default,
-        bool forceRefresh = false)
-    {
-        if (AiProviderModes.IsDeepSeek(Settings.Provider))
-            return await RefreshDeepSeekFloatingAsync(cancellationToken, forceRefresh).ConfigureAwait(false);
         var appServerAvailable = await TryConnectFloatingAsync(cancellationToken, forceRefresh);
         AdoptLatestQuota();
         var now = DateTimeOffset.Now;
@@ -332,9 +288,9 @@ internal sealed class AiManagerService : IAsyncDisposable
                 ["includeHidden"] = true
             }, TimeSpan.FromSeconds(8), cancellationToken)
             : Task.FromResult<JsonElement?>(null);
-        var tasks = await tasksTask;
-        await rateTask;
-        var modelsRoot = await modelsTask;
+        await tasksTask.ConfigureAwait(false);
+        await rateTask.ConfigureAwait(false);
+        var modelsRoot = await modelsTask.ConfigureAwait(false);
         // A dashboard request may have completed while local task/model reads were pending.
         AdoptLatestQuota();
         if (modelsRoot is { } modelsValue)
@@ -342,31 +298,95 @@ internal sealed class AiManagerService : IAsyncDisposable
             _floatingModelsRoot = modelsValue.Clone();
             _floatingModelsAt = now;
         }
+    }
 
-        var visibleTasks = tasks.Take(8).ToList();
-        var focus = visibleTasks.FirstOrDefault();
+    /// <summary>Refreshes the DeepSeek balance and Deep Code tasks; safe in either data-source mode.</summary>
+    private async Task RefreshDeepSeekFloatingAsync(bool forceRefresh, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.Now;
+        var refreshQuota = forceRefresh || now - _floatingDeepSeekAttemptAt >= TimeSpan.FromMinutes(1);
+        if (refreshQuota) _floatingDeepSeekAttemptAt = now;
 
-        var model = ResolveModel(_floatingModelsRoot, focus?.ModelName);
+        Task<AiDeepSeekSnapshot>? quotaTask = refreshQuota
+            ? _deepSeekClient.ReadAsync(Settings.DeepSeekApiKey, Settings.DeepSeekPlatformToken, cancellationToken)
+            : null;
+        var codeTask = ReadDeepCodeSnapshotAsync(cancellationToken);
+        if (quotaTask is not null)
+        {
+            try
+            {
+                _floatingDeepSeek = await quotaTask.ConfigureAwait(false);
+                LastDeepSeekError = _floatingDeepSeek.Error;
+                LastDeepSeekUsageError = _floatingDeepSeek.UsageError;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { LastDeepSeekError = ex.Message; }
+        }
+        var code = await codeTask.ConfigureAwait(false);
+        _lastDeepCodeUsage = code.LocalUsage;
+    }
+
+    public async Task<AiFloatingSnapshot> RefreshFloatingAsync(CancellationToken cancellationToken = default,
+        bool forceRefresh = false)
+    {
+        // The monitor follows the shared settings file: a data-source switch, a new credential or a
+        // task-name preference made in the dashboard must reach this window on its next tick. A
+        // concurrent write can make the file unreadable for a moment; the current values are kept.
+        ReloadTrackedSettings();
+        TryReloadSettings();
+
+        // Both data sources are refreshed so the monitor can show all quotas next to one unified
+        // task list; each source keeps its own throttles and failure state.
+        var codexTask = RefreshCodexFloatingAsync(forceRefresh, cancellationToken);
+        var deepSeekTask = RefreshDeepSeekFloatingAsync(forceRefresh, cancellationToken);
+        await Task.WhenAll(codexTask, deepSeekTask).ConfigureAwait(false);
+        AdoptLatestQuota();
+
+        var tasks = AiTaskSnapshotFeed.Tasks;
+        var focus = tasks.FirstOrDefault();
+        var provider = AiProviderModes.Normalize(Settings.Provider);
         var limits = _floatingLimits;
         var tightest = limits.OrderBy(item => item.RemainingPercent).FirstOrDefault();
+        var model = ResolveModel(_floatingModelsRoot, focus?.ModelName);
+        var balance = _floatingDeepSeek?.Balance;
+        var balanceDetail = balance is null
+            ? null
+            : LocalizationService.L($"付费 {balance.PaidText} · 赠送 {balance.GrantedText}",
+                $"Paid {balance.PaidText} · Granted {balance.GrantedText}");
+        var codexFiveHour = SelectQuotaWindow(limits, 300);
+        var codexWeekly = SelectQuotaWindow(limits, 10080);
+        DateTimeOffset? codexCapturedAt = _floatingLimitsAt == default ? null : _floatingLimitsAt;
+        var deepSeekCapturedAt = _floatingDeepSeek?.CapturedAt;
+        var isDeepSeek = AiProviderModes.IsDeepSeek(provider);
         return new AiFloatingSnapshot
         {
-            Provider = AiProviderModes.Codex,
-            FiveHourQuota = SelectQuotaWindow(limits, 300),
-            WeeklyQuota = SelectQuotaWindow(limits, 10080),
-            Tasks = visibleTasks,
+            Provider = provider,
+            FiveHourQuota = codexFiveHour,
+            WeeklyQuota = codexWeekly,
+            CodexFiveHourQuota = codexFiveHour,
+            CodexWeeklyQuota = codexWeekly,
+            CodexQuotaError = LastQuotaError,
+            CodexQuotaCapturedAt = codexCapturedAt,
+            DeepSeekBalanceText = balance?.TotalText,
+            DeepSeekBalanceDetail = balanceDetail,
+            DeepSeekBalanceError = LastDeepSeekError,
+            DeepSeekBalanceCapturedAt = deepSeekCapturedAt,
+            Tasks = tasks.Take(8).ToList(),
             TaskName = focus?.DisplayTitle ?? LocalizationService.L("暂无最近任务", "No recent tasks"),
             TaskStatus = focus?.Status ?? "notLoaded",
             TaskStatusText = focus?.StatusText ?? LocalizationService.L("等待任务", "Waiting for a task"),
-            ModelName = model.DisplayName ?? focus?.ModelName ?? LocalizationService.L("模型未知", "Unknown model"),
+            ModelName = focus?.ModelName ?? model.DisplayName ?? LocalizationService.L("模型未知", "Unknown model"),
             ReasoningEffort = focus?.ReasoningEffort ?? model.ReasoningEffort,
             RemainingPercent = tightest?.RemainingPercent,
             QuotaWindow = tightest is null
                 ? LocalizationService.L("额度窗口未知", "Unknown quota window")
                 : $"{tightest.DisplayName} · {tightest.WindowName}",
             ResetsAt = tightest?.ResetsAt,
-            QuotaError = LastQuotaError,
-            QuotaCapturedAt = _floatingLimitsAt == default ? null : _floatingLimitsAt,
+            QuotaText = balance?.TotalText,
+            QuotaLabel = LocalizationService.L("余额", "Balance"),
+            QuotaDetail = balanceDetail,
+            QuotaError = isDeepSeek ? LastDeepSeekError : LastQuotaError,
+            QuotaCapturedAt = isDeepSeek ? deepSeekCapturedAt : codexCapturedAt,
             CapturedAt = DateTimeOffset.Now
         };
     }
@@ -395,9 +415,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             var localTasks = await localTasksTask;
             var serverTasks = threadsRoot is { } root ? ParseThreads(root) : new List<AiThreadSummary>();
             var tasks = await BuildTaskSummariesAsync(serverTasks, localTasks, appServerAvailable, cancellationToken);
-            // A provider switch may have happened while this Codex refresh was running.
-            if (AiProviderModes.IsDeepSeek(Settings.Provider)) return tasks;
-            return AiTaskSnapshotFeed.PublishIfCurrent(tasks, taskRevision).Tasks.ToList();
+            return AiTaskSnapshotFeed.PublishIfCurrent(AiProviderModes.Codex, tasks, taskRevision).Tasks.ToList();
         }
         finally
         {
@@ -409,7 +427,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         IEnumerable<AiThreadSummary> localTasks, bool appServerAvailable = true,
         CancellationToken cancellationToken = default)
     {
-        ReloadTaskNameSource();
+        ReloadTrackedSettings();
         // A separately launched app-server may omit sessions owned by the desktop. Merge
         // persisted local sessions before enrichment and apply limits only after final status sorting.
         var candidates = MergeFloatingTasks(serverTasks, localTasks).Where(IsUsefulFloatingTask).ToList();
@@ -426,17 +444,17 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     internal AiTaskSnapshot RefreshLocalTaskSnapshot(string sessionsRoot, CancellationToken cancellationToken = default)
     {
-        if (AiProviderModes.IsDeepSeek(Settings.Provider))
-            return AiTaskSnapshotFeed.Latest ?? new AiTaskSnapshot(0, Array.Empty<AiThreadSummary>());
+        // The unified task view always includes Codex sessions, whichever data source the dashboard
+        // shows; the feed merges it with the Deep Code slot.
+        ReloadTrackedSettings();
         var scanStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-        ReloadTaskNameSource();
         var localTasks = DiscoverLocalTasks(sessionsRoot, LocalTaskScanLimit, TaskCandidateLimit, cancellationToken);
         var changedStates = localTasks.Where(task =>
                 (_monitoredTaskStates.TryGetValue(task.Id, out var previous) && previous != task.Status) ||
                 task.Status == "waitingOnUserInput")
             .Select(task => task.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         cancellationToken.ThrowIfCancellationRequested();
-        var snapshot = AiTaskSnapshotFeed.Update(current =>
+        var snapshot = AiTaskSnapshotFeed.Update(AiProviderModes.Codex, current =>
         {
             var candidates = SortTasksByStatusAndTime(ApplyDesktopStatuses(MergeFloatingTasksCore(current, localTasks, changedStates)))
                 .Take(TaskCandidateLimit).ToList();
@@ -450,18 +468,24 @@ internal sealed class AiManagerService : IAsyncDisposable
         return snapshot;
     }
 
-    private void ReloadTaskNameSource()
+    internal void ReloadTrackedSettings()
     {
+        // Provider and task-name preference are read by long-lived background work; refresh only
+        // those two values so a switch is observed without re-reading protected credentials.
         try
         {
             if (!File.Exists(_settingsPath)) return;
-            using var document = JsonDocument.Parse(File.ReadAllText(_settingsPath));
+            using var document = JsonDocument.Parse(ReadSettingsText());
             if (document.RootElement.ValueKind != JsonValueKind.Object) return;
+            var provider = ReadString(document.RootElement, "provider");
+            if (provider is not null) Settings.Provider = AiProviderModes.Normalize(provider);
+            var quotaScope = ReadString(document.RootElement, "floatingQuotaScope");
+            if (quotaScope is not null) Settings.FloatingQuotaScope = FloatingQuotaScopes.Normalize(quotaScope);
             Settings.TaskNameSource = TaskNameSources.Normalize(ReadString(document.RootElement, "taskNameSource"));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            System.Diagnostics.Debug.WriteLine($"[AiManager] Task name preference unavailable: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[AiManager] Shared settings unavailable: {ex.Message}");
         }
     }
 
@@ -601,6 +625,7 @@ internal sealed class AiManagerService : IAsyncDisposable
                 Status = string.Equals(status, "notLoaded", StringComparison.OrdinalIgnoreCase)
                     ? "completed"
                     : status,
+                Source = AiProviderModes.Codex,
                 ModelName = cursor.ModelName,
                 ReasoningEffort = cursor.ReasoningEffort,
                 RolloutPath = path,
@@ -643,6 +668,7 @@ internal sealed class AiManagerService : IAsyncDisposable
                 Status = changedLocalStates?.Contains(local.Id) == true && server.Status != "waitingOnApproval"
                     ? local.Status
                     : ResolveExecutionStatus(server.Status, local.Status),
+                Source = local.Source,
                 ModelName = local.ModelName ?? server.ModelName,
                 ReasoningEffort = local.ReasoningEffort ?? server.ReasoningEffort,
                 RolloutPath = local.RolloutPath ?? server.RolloutPath,
@@ -660,6 +686,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         ConversationTitle = item.ConversationTitle,
         LatestUserMessage = item.LatestUserMessage,
         Status = item.StatusBeforeDesktopObservation ?? item.Status,
+        Source = item.Source,
         ModelName = item.ModelName,
         ReasoningEffort = item.ReasoningEffort,
         RolloutPath = item.RolloutPath,
@@ -681,6 +708,7 @@ internal sealed class AiManagerService : IAsyncDisposable
                 Id = task.Id, Title = task.Title, ConversationTitle = task.ConversationTitle,
                 LatestUserMessage = task.LatestUserMessage, Status = status,
                 StatusBeforeDesktopObservation = task.StatusBeforeDesktopObservation ?? task.Status,
+                Source = task.Source,
                 ModelName = task.ModelName, ReasoningEffort = task.ReasoningEffort,
                 RolloutPath = task.RolloutPath, ProjectPath = task.ProjectPath, UpdatedAt = task.UpdatedAt
             };
@@ -719,6 +747,7 @@ internal sealed class AiManagerService : IAsyncDisposable
                 ConversationTitle = summary.ConversationTitle,
                 LatestUserMessage = summary.LatestUserMessage,
                 Status = status,
+                Source = summary.Source,
                 ModelName = summary.ModelName,
                 ReasoningEffort = summary.ReasoningEffort,
                 RolloutPath = summary.RolloutPath,
@@ -741,21 +770,55 @@ internal sealed class AiManagerService : IAsyncDisposable
 
     public void SaveSettings(AiManagerSettings settings)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+        var directory = Path.GetDirectoryName(_settingsPath)!;
+        Directory.CreateDirectory(directory);
         settings.Provider = AiProviderModes.Normalize(settings.Provider);
         settings.SharedUsageSyncKeyProtected = LocalSecretProtection.Protect(settings.SharedUsageSyncKey);
         settings.DeepSeekApiKeyProtected = LocalSecretProtection.Protect(
             settings.DeepSeekApiKey, DeepSeekSecretPurpose);
         settings.DeepSeekPlatformTokenProtected = LocalSecretProtection.Protect(
             settings.DeepSeekPlatformToken, DeepSeekSecretPurpose);
-        File.WriteAllText(_settingsPath, JsonSerializer.Serialize(settings));
+        // Replace the file atomically: several windows read the shared settings file while another
+        // one saves, and a half-written file used to parse as defaults (selected Codex, lost keys).
+        var temporaryPath = _settingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        lock (SettingsFileSync)
+        {
+            try
+            {
+                File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings));
+                for (var attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        File.Move(temporaryPath, _settingsPath, overwrite: true);
+                        break;
+                    }
+                    catch (IOException) when (attempt < 4)
+                    {
+                        Thread.Sleep(15);
+                    }
+                }
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    try { File.Delete(temporaryPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                }
+            }
+        }
         Settings = settings;
     }
 
     public AiManagerSettings ReloadSettings()
     {
-        Settings = LoadSettings();
-        return Settings;
+        // Assign under the shared-file lock so a concurrent save cannot land between reading and
+        // publishing the new values (a stale copy could otherwise be saved back later).
+        lock (SettingsFileSync)
+        {
+            Settings = LoadSettings();
+            return Settings;
+        }
     }
 
     public async Task<AiSharedUsageSummary> SyncSharedUsageAsync(
@@ -1270,12 +1333,52 @@ internal sealed class AiManagerService : IAsyncDisposable
         return interrupted;
     }
 
-    private AiManagerSettings LoadSettings()
+    private AiManagerSettings LoadSettings() => ReadSettings() ?? new AiManagerSettings();
+
+    /// <summary>Reloads the whole shared settings file, keeping the current values if it is unreadable.</summary>
+    internal bool TryReloadSettings()
     {
-        try
+        lock (SettingsFileSync)
+        {
+            if (ReadSettings() is not { } settings) return false;
+            Settings = settings;
+            return true;
+        }
+    }
+
+    private AiManagerSettings? ReadSettings()
+    {
+        // Another window may replace the file at this instant; retry a transient I/O or JSON
+        // failure instead of reporting defaults (which would select Codex and drop credentials).
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return ReadSettingsOnce(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                if (attempt >= 2) return null;
+                Thread.Sleep(20);
+            }
+            catch { return null; }
+        }
+    }
+
+    /// <summary>Reads the shared settings text while allowing a concurrent atomic replacement.</summary>
+    private string ReadSettingsText()
+    {
+        lock (SettingsFileSync)
+        {
+            using var stream = new FileStream(_settingsPath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+    }
+
+    private AiManagerSettings? ReadSettingsOnce()
+    {
         {
             if (!File.Exists(_settingsPath)) return new AiManagerSettings();
-            var settings = JsonSerializer.Deserialize<AiManagerSettings>(File.ReadAllText(_settingsPath))
+            var settings = JsonSerializer.Deserialize<AiManagerSettings>(ReadSettingsText())
                            ?? new AiManagerSettings();
             settings.Theme = ThemeModes.Normalize(settings.Theme);
             settings.Provider = AiProviderModes.Normalize(settings.Provider);
@@ -1286,6 +1389,7 @@ internal sealed class AiManagerService : IAsyncDisposable
             if (!double.IsFinite(settings.DeepSeekBalanceWarning) || settings.DeepSeekBalanceWarning < 0)
                 settings.DeepSeekBalanceWarning = 0;
             settings.TaskNameSource = TaskNameSources.Normalize(settings.TaskNameSource);
+            settings.FloatingQuotaScope = FloatingQuotaScopes.Normalize(settings.FloatingQuotaScope);
             settings.FloatingFontScale = FloatingFontScales.Normalize(settings.FloatingFontScale);
             if (settings.FloatingWindowPlacement is { IsValid: false })
                 settings.FloatingWindowPlacement = null;
@@ -1309,15 +1413,11 @@ internal sealed class AiManagerService : IAsyncDisposable
             settings.SharedUsageSyncKey = LocalSecretProtection.Unprotect(settings.SharedUsageSyncKeyProtected);
             settings.SharedUsageDeviceId = Guid.TryParse(settings.SharedUsageDeviceId, out var deviceId)
                 ? deviceId.ToString("D")
-                : Guid.NewGuid().ToString("D");
+                : FallbackSharedUsageDeviceId.Value;
             settings.SharedUsageDeviceName = string.IsNullOrWhiteSpace(settings.SharedUsageDeviceName)
                 ? Environment.MachineName
                 : settings.SharedUsageDeviceName.Trim();
             return settings;
-        }
-        catch
-        {
-            return new AiManagerSettings();
         }
     }
 

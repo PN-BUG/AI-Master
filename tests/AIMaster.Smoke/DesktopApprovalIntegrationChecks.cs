@@ -20,7 +20,8 @@ internal static partial class Program
                 "{\"type\":\"session_meta\",\"payload\":{\"id\":\"thread\",\"thread_source\":\"user\"}}\n" +
                 "{\"type\":\"turn_context\",\"payload\":{\"model\":\"fixture-model\"}}\n" +
                 "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n");
-            AiTaskSnapshotFeed.Publish(Array.Empty<AiThreadSummary>());
+            AiTaskSnapshotFeed.Reset();
+            AiTaskSnapshotFeed.Publish(AiProviderModes.Codex, Array.Empty<AiThreadSummary>());
             var initial = Refresh();
             Check(initial.Status == "inProgress", "local task starts running without desktop approval evidence");
             Check(runtime.DesktopTasks.GetTrackedThreadIds().SequenceEqual(["thread"]),
@@ -32,7 +33,7 @@ internal static partial class Program
             Check(approval.Status == "waitingOnApproval" &&
                   AiTaskSnapshotFeed.ApplyToFloating(new AiFloatingSnapshot(), [approval]).TaskStatus == "waitingOnApproval",
                 "an actual desktop pending request reaches the common task feed and floating status");
-            var guarded = AiTaskSnapshotFeed.PublishIfCurrent([initial], oldRevision);
+            var guarded = AiTaskSnapshotFeed.PublishIfCurrent(AiProviderModes.Codex, [initial], oldRevision);
             Check(guarded.Tasks.Single().Status == "waitingOnApproval", "a delayed regular refresh cannot overwrite the approval feed");
 
             // No command output or rollout append: answering the request alone resumes its status.
@@ -81,7 +82,7 @@ internal static partial class Program
         {
             service.DisposeAsync().AsTask().GetAwaiter().GetResult();
             runtime.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            AiTaskSnapshotFeed.Publish(Array.Empty<AiThreadSummary>());
+            AiTaskSnapshotFeed.Publish(AiProviderModes.Codex, Array.Empty<AiThreadSummary>());
             Directory.Delete(directory, recursive: true);
         }
 
@@ -90,7 +91,7 @@ internal static partial class Program
             var local = service.ReadLocalTask(path, DateTime.UtcNow)!;
             var tasks = service.BuildTaskSummariesAsync(AiTaskSnapshotFeed.Latest?.Tasks ?? [], [local],
                 appServerAvailable: false).GetAwaiter().GetResult();
-            AiTaskSnapshotFeed.Publish(tasks);
+            AiTaskSnapshotFeed.Publish(AiProviderModes.Codex, tasks);
             return tasks.Single();
         }
     }

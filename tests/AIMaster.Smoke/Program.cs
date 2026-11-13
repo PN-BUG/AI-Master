@@ -181,6 +181,12 @@ internal static partial class Program
             app.ExitApplication();
             return 0;
         }
+        if (args.Contains("--provider-task-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyProviderTaskFeed();
+            app.ExitApplication();
+            return 0;
+        }
         if (args.Contains("--rollout-input-tests", StringComparer.OrdinalIgnoreCase))
         {
             VerifyRolloutInputStates();
@@ -233,6 +239,8 @@ internal static partial class Program
         VerifyTaskbarIdentity();
         VerifyQuotaNotifications();
         VerifyDeepSeekSupport();
+        // Data-source isolation of the shared task view; no windows exist yet, so no live subscribers.
+        VerifyProviderTaskFeedWithoutWindows();
         if (args.Contains("--capture-docs", StringComparer.OrdinalIgnoreCase))
         {
             var outputDirectory = args.SkipWhile(arg => !string.Equals(arg, "--output", StringComparison.OrdinalIgnoreCase))
@@ -370,12 +378,12 @@ internal static partial class Program
             "floating text is larger by default");
         Check(floating.FindName("TaskNameText") is TextBlock { FontSize: >= 11.9 },
             "floating task text applies the larger default font scale");
-        Check(floating.MinHeight == 98 && double.IsPositiveInfinity(floating.MaxWidth) &&
+        Check(floating.MinHeight == 120 && double.IsPositiveInfinity(floating.MaxWidth) &&
               Descendants(floating).OfType<Thumb>().Count(item => Equals(item.Style, floating.FindResource("ResizeThumb"))) == 8,
             "floating window exposes eight-direction resize handles without an artificial width cap");
-        Check(AiFloatingWindow.CalculateVisibleTaskCount(98, 8) == 1 &&
-              AiFloatingWindow.CalculateVisibleTaskCount(116, 8) == 2 &&
-              AiFloatingWindow.CalculateVisibleTaskCount(224, 8) == 8,
+        Check(AiFloatingWindow.CalculateVisibleTaskCount(120, 8) == 1 &&
+              AiFloatingWindow.CalculateVisibleTaskCount(138, 8) == 2 &&
+              AiFloatingWindow.CalculateVisibleTaskCount(246, 8) == 8,
             "floating task count follows the available window height");
         Check(AiFloatingWindow.BuildTaskUri("0199c8a0-0a12-7000-8000-0123456789ab")?.AbsoluteUri ==
               "codex://threads/0199c8a0-0a12-7000-8000-0123456789ab" &&

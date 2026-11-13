@@ -455,7 +455,9 @@ public partial class AiManagerWindow : Window
         _theme = ThemeModes.Normalize(theme);
         ThemeService.Apply(Resources, _theme);
         UpdateThemeButton();
-        if (refreshContent && _service.LastSnapshot is { } snapshot)
+        // A refresh that started on the previous data source may still be the last snapshot; only
+        // repaint when it belongs to the selected source, otherwise the dashboard would flip back.
+        if (refreshContent && _service.LastSnapshot is { } snapshot && snapshot.IsProvider(_service.Settings.Provider))
             RenderSnapshot(snapshot);
         else if (refreshContent)
             RenderQuotaWindows(_displayedQuotaLimits);
@@ -1246,6 +1248,7 @@ public partial class AiManagerWindow : Window
             return;
         }
         if (_lifetime.IsCancellationRequested || snapshot.Revision <= (_taskSnapshot?.Revision ?? 0)) return;
+        // The feed already merges every data source, so this publication is the unified list.
         _taskSnapshot = snapshot;
         ThreadList.ItemsSource = snapshot.Tasks.Take(12).ToList();
         foreach (var task in snapshot.Tasks.Take(12)) TaskMonitorTrace.Record("ui", task.Id, task.Status, snapshot.Revision, "main");
@@ -1944,7 +1947,8 @@ public partial class AiManagerWindow : Window
     private void LocalizationService_LanguageChanged(object? sender, EventArgs e)
     {
         UpdateProviderTexts();
-        if (_service.LastSnapshot is { } snapshot) RenderSnapshot(snapshot);
+        if (_service.LastSnapshot is { } snapshot && snapshot.IsProvider(_service.Settings.Provider))
+            RenderSnapshot(snapshot);
         else RenderQuotaWindows(_displayedQuotaLimits);
         RenderResetSignals();
         LocalizationService.Apply(this);

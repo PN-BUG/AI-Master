@@ -98,8 +98,8 @@ internal sealed class DeepSeekClient : IDisposable
         else if (key.Length > 0)
         {
             usageError = LocalizationService.L(
-                "未填写平台 Token，只显示官方 API 余额；填写后可查看用量明细。",
-                "No Platform token configured; only the official API balance is shown.");
+                "未填写平台 Token，只显示官方 API 余额；请在「设置 → DeepSeek 接入」填写平台 Token 后查看用量明细。",
+                "No Platform token configured, so only the official API balance is shown; add the Platform token under Settings → DeepSeek access to view usage details.");
         }
 
         return new AiDeepSeekSnapshot

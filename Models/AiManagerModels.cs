@@ -24,6 +24,16 @@ public static class FloatingFontScales
         double.IsFinite(value) ? Math.Clamp(value, Minimum, Maximum) : Default;
 }
 
+/// <summary>How much quota the floating monitor shows: both data sources, or only the selected one.</summary>
+public static class FloatingQuotaScopes
+{
+    public const string All = "all";
+    public const string Active = "active";
+
+    public static string Normalize(string? value) =>
+        string.Equals(value, Active, StringComparison.OrdinalIgnoreCase) ? Active : All;
+}
+
 public static class SharedUsageResetModes
 {
     public const string Weekly = "weekly";
@@ -112,6 +122,11 @@ public sealed class AiManagerSettings
     /// <summary>Which account dashboard is active: codex or deepseek.</summary>
     [JsonPropertyName("provider")]
     public string Provider { get; set; } = AiProviderModes.Codex;
+
+    /// <summary>Floating monitor quota scope: <c>all</c> shows both data sources, <c>active</c> only
+    /// the selected one. The task list is always unified and identifies each task's source.</summary>
+    [JsonPropertyName("floatingQuotaScope")]
+    public string FloatingQuotaScope { get; set; } = FloatingQuotaScopes.All;
 
     [JsonPropertyName("deepseekApiKeyProtected")]
     public string DeepSeekApiKeyProtected { get; set; } = string.Empty;
@@ -313,6 +328,18 @@ public sealed class AiThreadSummary
     public string? LatestUserMessage { get; init; }
     public string DisplayTitle => LocalizationService.LocalizeKnownText(TaskTitleFormatter.Format(Title, ConversationTitle));
     public string Status { get; init; } = "notLoaded";
+    /// <summary>Data source that produced this task: <c>codex</c> or <c>deepseek</c> (Deep Code).</summary>
+    public string Source { get; init; } = AiProviderModes.Codex;
+    public bool IsDeepSeekSource => AiProviderModes.IsDeepSeek(Source);
+    public string SourceLabel => LocalizationService.T(IsDeepSeekSource ? "DeepSeek" : "Codex");
+    public string SourceShortLabel => IsDeepSeekSource ? "D" : "C";
+    /// <summary>Model and reasoning effort of this task, or "--" when unknown.</summary>
+    public string ModelLabel => string.IsNullOrWhiteSpace(ModelName)
+        ? "--"
+        : string.IsNullOrWhiteSpace(ReasoningEffort)
+            ? ModelName
+            : $"{ModelName} · {ReasoningEffort.ToUpperInvariant()}";
+
     // The desktop observation is temporary; retain the source status for disconnect/revision recovery.
     internal string? StatusBeforeDesktopObservation { get; init; }
     public string? ModelName { get; init; }
@@ -331,6 +358,9 @@ public sealed class AiManagerSnapshot
     public string Provider { get; init; } = AiProviderModes.Codex;
     public AiDeepSeekSnapshot? DeepSeek { get; init; }
     public bool IsDeepSeek => AiProviderModes.IsDeepSeek(Provider);
+    public bool IsProvider(string? provider) =>
+        string.Equals(AiProviderModes.Normalize(Provider), AiProviderModes.Normalize(provider),
+            StringComparison.Ordinal);
     public List<AiLimitWindow> Limits { get; init; } = new();
     public List<AiDailyUsage> DailyUsage { get; init; } = new();
     public List<AiThreadSummary> Threads { get; init; } = new();
@@ -371,6 +401,19 @@ public sealed class AiFloatingSnapshot
     public AiLimitWindow? WeeklyQuota { get; init; }
     public string Provider { get; init; } = AiProviderModes.Codex;
     public bool IsDeepSeek => AiProviderModes.IsDeepSeek(Provider);
+    public bool IsProvider(string? provider) =>
+        string.Equals(AiProviderModes.Normalize(Provider), AiProviderModes.Normalize(provider),
+            StringComparison.Ordinal);
+
+    // Both data sources' quota are carried so the monitor can show them together.
+    public AiLimitWindow? CodexFiveHourQuota { get; init; }
+    public AiLimitWindow? CodexWeeklyQuota { get; init; }
+    public string? CodexQuotaError { get; init; }
+    public DateTimeOffset? CodexQuotaCapturedAt { get; init; }
+    public string? DeepSeekBalanceText { get; init; }
+    public string? DeepSeekBalanceDetail { get; init; }
+    public string? DeepSeekBalanceError { get; init; }
+    public DateTimeOffset? DeepSeekBalanceCapturedAt { get; init; }
     /// <summary>Provider-specific primary value. Codex uses <see cref="RemainingPercent"/>; DeepSeek uses money.</summary>
     public string? QuotaText { get; init; }
     public string QuotaLabel { get; init; } = "剩余额度";

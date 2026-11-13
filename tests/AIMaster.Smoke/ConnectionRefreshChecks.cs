@@ -227,16 +227,15 @@ internal static partial class Program
                       (language == LocalizationService.Chinese ? "周剩余" : "Week left"),
                     "both quota windows have distinct localized labels");
                 floating.Width = 200;
-                floating.Height = 98;
-                var surface = (System.Windows.FrameworkElement)floating.Content;
-                surface.Measure(new System.Windows.Size(200, 98));
-                surface.Arrange(new System.Windows.Rect(0, 0, 200, 98));
+                floating.Height = 150;
+                var surface = (System.Windows.FrameworkElement)floating.Content;                surface.Measure(new System.Windows.Size(200, 150));
+                surface.Arrange(new System.Windows.Rect(0, 0, 200, 150));
                 surface.UpdateLayout();
                 Check(fiveHour.ActualWidth > 0 && weekly.ActualWidth > 0 &&
                       fiveHour.ActualWidth >= fiveHour.DesiredSize.Width && weekly.ActualWidth >= weekly.DesiredSize.Width &&
                       weekly.TranslatePoint(new System.Windows.Point(weekly.ActualWidth, weekly.ActualHeight), surface).X < 200,
                     "both quota numbers fit the compact window at normal and enlarged font sizes");
-                var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(200, 98, 96, 96,
+                var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(200, 150, 96, 96,
                     System.Windows.Media.PixelFormats.Pbgra32);
                 bitmap.Render(surface);
                 var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
@@ -250,9 +249,18 @@ internal static partial class Program
             Check(((TextBlock)floating.FindName("RemainingQuotaText")).Text == "--" &&
                   ((TextBlock)floating.FindName("WeeklyQuotaText")).Text == "87",
                 "missing five-hour data never masquerades as weekly quota or a fresh 100 percent");
-            render.Invoke(floating, [new AiFloatingSnapshot { Provider = AiProviderModes.DeepSeek, QuotaText = "12.30" }]);
-            Check(((System.Windows.FrameworkElement)floating.FindName("WeeklyQuotaPanel")).Visibility == System.Windows.Visibility.Collapsed,
-                "DeepSeek balance mode hides the Codex weekly quota");
+            // Both data sources' quota are shown together, each keeping its own value.
+            render.Invoke(floating, [new AiFloatingSnapshot
+            {
+                Provider = AiProviderModes.DeepSeek,
+                QuotaText = "12.30",
+                CodexFiveHourQuota = snapshot.FiveHourQuota,
+                CodexWeeklyQuota = snapshot.WeeklyQuota
+            }]);
+            Check(((System.Windows.FrameworkElement)floating.FindName("WeeklyQuotaPanel")).Visibility == System.Windows.Visibility.Visible &&
+                  ((TextBlock)floating.FindName("WeeklyQuotaText")).Text == "87" &&
+                  ((TextBlock)floating.FindName("DeepSeekBalanceText")).Text == "12.30",
+                "DeepSeek balance mode keeps the Codex quota windows visible in the same window");
             render.Invoke(floating, [snapshot]);
             Check(((TextBlock)floating.FindName("WeeklyQuotaText")).Text == "87" &&
                   ((System.Windows.FrameworkElement)floating.FindName("WeeklyQuotaPanel")).Visibility == System.Windows.Visibility.Visible,
