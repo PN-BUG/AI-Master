@@ -164,6 +164,18 @@ public sealed class AiManagerSettings
     [JsonPropertyName("floatingQuotaScope")]
     public string FloatingQuotaScope { get; set; } = FloatingQuotaScopes.All;
 
+    [JsonPropertyName("floatingFooterVisible")]
+    public bool FloatingFooterVisible { get; set; } = true;
+
+    [JsonPropertyName("floatingShowFiveHourQuota")]
+    public bool FloatingShowFiveHourQuota { get; set; } = true;
+
+    [JsonPropertyName("floatingShowWeeklyQuota")]
+    public bool FloatingShowWeeklyQuota { get; set; } = true;
+
+    [JsonPropertyName("floatingShowDeepSeekQuota")]
+    public bool FloatingShowDeepSeekQuota { get; set; } = true;
+
     /// <summary>Which text the floating monitor's top line shows; see <see cref="FloatingHeaderStyles"/>.</summary>
     [JsonPropertyName("floatingHeaderStyle")]
     public string FloatingHeaderStyle { get; set; } = FloatingHeaderStyles.QuotaReset;

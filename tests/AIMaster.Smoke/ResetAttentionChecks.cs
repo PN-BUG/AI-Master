@@ -136,8 +136,9 @@ internal static partial class Program
                     Capture(root, width, height, $"floating-{language}-{theme}-{width}-{scale:0.0}");
                 }
             }
+            var compactHeight = floating.MinHeight - ((FrameworkElement)floating.FindName("ResetAttentionPanel")).Height;
             attention.Dismiss();
-            Check(floating.MinHeight == 120 && floatButton.Visibility == Visibility.Collapsed,
+            Check(Math.Abs(floating.MinHeight - compactHeight) < 0.1 && floatButton.Visibility == Visibility.Collapsed,
                 "dismissing restores the compact floating height");
             CaptureState("dismissed");
             // These windows are rendered offline; their Loaded/network handlers never run.

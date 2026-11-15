@@ -25,6 +25,17 @@
                 <MenuItem x:Name="ActiveQuotaMenuItem" Header="仅当前数据源" Tag="active" IsCheckable="True"
                           Click="QuotaScope_Click"/>
             </MenuItem>
+            <MenuItem x:Name="FooterDisplayMenuItem" Header="底栏显示">
+                <MenuItem x:Name="FooterVisibleMenuItem" Header="显示底栏" Tag="visible" IsCheckable="True"
+                          StaysOpenOnClick="True" Click="FooterDisplay_Click"/>
+                <Separator/>
+                <MenuItem x:Name="FooterFiveHourMenuItem" Header="Codex · 5h 剩余" Tag="fiveHour" IsCheckable="True"
+                          StaysOpenOnClick="True" Click="FooterDisplay_Click"/>
+                <MenuItem x:Name="FooterWeeklyMenuItem" Header="Codex · 周剩余" Tag="weekly" IsCheckable="True"
+                          StaysOpenOnClick="True" Click="FooterDisplay_Click"/>
+                <MenuItem x:Name="FooterDeepSeekMenuItem" Header="DeepSeek · 余额 / 套餐" Tag="deepSeek" IsCheckable="True"
+                          StaysOpenOnClick="True" Click="FooterDisplay_Click"/>
+            </MenuItem>
             <MenuItem x:Name="HeaderStyleMenuItem" Header="顶栏显示">
                 <MenuItem x:Name="HeaderStyleQuotaResetItem" Header="额度倒计时" Tag="quotaReset"
                           IsCheckable="True" Click="HeaderStyle_Click"/>
@@ -120,7 +131,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
-                    <RowDefinition Height="1"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
@@ -222,32 +233,47 @@
                     <StackPanel x:Name="SecondaryTasksPanel"/>
                 </StackPanel>
 
-                <Border Grid.Row="4" Background="{DynamicResource Line}"/>
+                <Border x:Name="QuotaDivider" Grid.Row="4" Height="1" Background="{DynamicResource Line}"/>
 
                 <StackPanel x:Name="QuotaBand" Grid.Row="5" Margin="0,3,2,0">
-                    <Grid x:Name="CodexQuotaRow">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock x:Name="QuotaLabelText" Text="5h 剩余" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock x:Name="RemainingQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
-                                           FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="QuotaUnitText" Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
-                                           FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                    <Grid x:Name="QuotaSummaryGrid">
+                        <Grid x:Name="CodexQuotaRow" Margin="0,0,6,0">
+                            <StackPanel>
+                                <TextBlock x:Name="QuotaLabelText" Text="5h 剩余" Foreground="{DynamicResource FloatMuted}"
+                                           FontSize="{DynamicResource FloatFontSmall}" TextTrimming="CharacterEllipsis"/>
+                                <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="RemainingQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
+                                                   FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="QuotaUnitText" Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
+                                                   FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                                    </StackPanel>
+                                </Viewbox>
                             </StackPanel>
+                        </Grid>
+                        <StackPanel x:Name="WeeklyQuotaPanel" Visibility="Collapsed" Margin="0,0,6,0">
+                            <TextBlock x:Name="WeeklyQuotaLabelText" Text="周剩余" Foreground="{DynamicResource FloatMuted}"
+                                       FontSize="{DynamicResource FloatFontSmall}" TextTrimming="CharacterEllipsis"/>
+                            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="WeeklyQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
+                                               FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
+                                               FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                                </StackPanel>
+                            </Viewbox>
                         </StackPanel>
-                        <StackPanel x:Name="WeeklyQuotaPanel" Grid.Column="1" Visibility="Collapsed" Margin="4,0,0,0">
-                            <TextBlock x:Name="WeeklyQuotaLabelText" Text="周剩余" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock x:Name="WeeklyQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
-                                           FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
-                                <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
-                                           FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                        <Grid x:Name="DeepSeekQuotaRow">
+                            <StackPanel>
+                                <TextBlock x:Name="DeepSeekBalanceLabel" Text="余额" Foreground="{DynamicResource FloatMuted}"
+                                           FontSize="{DynamicResource FloatFontSmall}" TextTrimming="CharacterEllipsis"/>
+                                <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
+                                    <TextBlock x:Name="DeepSeekBalanceText" Text="--" Foreground="{DynamicResource FloatInk}"
+                                               FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"
+                                               ToolTip="DeepSeek"/>
+                                </Viewbox>
                             </StackPanel>
-                        </StackPanel>
+                        </Grid>
                     </Grid>
                     <Grid x:Name="GoQuotaRow" Margin="0,3,0,0" Visibility="Collapsed">
                         <Grid.ColumnDefinitions>
@@ -282,17 +308,6 @@
                                            FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
                             </StackPanel>
                         </StackPanel>
-                    </Grid>
-                    <Grid x:Name="DeepSeekQuotaRow" Margin="0,3,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="DeepSeekBalanceLabel" Text="余额" VerticalAlignment="Bottom" Margin="0,0,6,1"
-                                   Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
-                        <TextBlock x:Name="DeepSeekBalanceText" Grid.Column="1" Text="--" Foreground="{DynamicResource FloatInk}"
-                                   FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"
-                                   TextTrimming="CharacterEllipsis" ToolTip="DeepSeek"/>
                     </Grid>
                 </StackPanel>
             </Grid>

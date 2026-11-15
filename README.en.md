@@ -31,6 +31,7 @@ AIMaster is a standalone Windows monitor for Codex and DeepSeek usage and task a
 - Inspect the active model and reasoning effort.
 - Resize and reposition the overlay with persistent placement, click a task to open it in Codex, and adjust text from 100% to 150% in the main-window settings.
 - Switch the overlay's top line via the context menu: quota countdown, today's usage, quota alerts, latest event, seven-day usage sparkline, minimal, or source + clock; the right side always shows data freshness.
+- The footer aligns 5h remaining, weekly remaining, and balance in equal columns. Use “Footer display” in the context menu to choose Codex 5h, weekly quota, DeepSeek balance/plan, or hide the footer entirely; choices persist automatically.
 - Dock and auto-hide the overlay on the top, left, or right edge of any monitor. Refreshing pauses while hidden.
 - Switch between Simplified Chinese and English instantly.
 - Check GitHub Releases automatically, read the latest release notes, or install an available update directly from the app.

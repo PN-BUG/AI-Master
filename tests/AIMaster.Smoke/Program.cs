@@ -141,6 +141,13 @@ internal static partial class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         else app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--floating-footer-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            var output = args.SkipWhile(arg => arg != "--output").Skip(1).FirstOrDefault();
+            VerifyFloatingFooter(output);
+            app.ExitApplication();
+            return 0;
+        }
         if (args.Contains("--floating-header-tests", StringComparer.OrdinalIgnoreCase))
         {
             VerifyFloatingHeaderStyles();
@@ -253,6 +260,7 @@ internal static partial class Program
         VerifyQuotaNotifications();
         VerifyDeepSeekSupport();
         VerifyFloatingHeaderStyles();
+        VerifyFloatingFooter();
         VerifyOpenCodeGoSupport();
         // Data-source isolation of the shared task view; no windows exist yet, so no live subscribers.
         VerifyProviderTaskFeedWithoutWindows();
@@ -402,7 +410,7 @@ internal static partial class Program
             "floating text is larger by default");
         Check(floating.FindName("TaskNameText") is TextBlock { FontSize: >= 11.9 },
             "floating task text applies the larger default font scale");
-        Check(floating.MinHeight == 120 && double.IsPositiveInfinity(floating.MaxWidth) &&
+        Check(floating.MinHeight >= 80 && double.IsPositiveInfinity(floating.MaxWidth) &&
               Descendants(floating).OfType<Thumb>().Count(item => Equals(item.Style, floating.FindResource("ResizeThumb"))) == 8,
             "floating window exposes eight-direction resize handles without an artificial width cap");
         Check(AiFloatingWindow.CalculateVisibleTaskCount(120, 8) == 1 &&

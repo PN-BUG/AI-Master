@@ -21,6 +21,7 @@ public partial class AiFloatingWindow : Window
     private readonly AiManagerService _service;
     private readonly ResetSignalAttention _resetAttention;
     private double _resetBannerHeight;
+    private double _quotaBandHeight = 40;
     private readonly DispatcherTimer _timer = new();
     // 顶栏右侧的“多久前更新”需要每秒重算，但它不触发任何网络/IO。
     private readonly DispatcherTimer _ageTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -63,6 +64,7 @@ public partial class AiFloatingWindow : Window
         ApplyTheme(_service.Settings.Theme);
         _autoCollapse = _service.Settings.FloatingAutoCollapse;
         ApplyFontScale(_service.Settings.FloatingFontScale);
+        RenderQuotaBand(new AiFloatingSnapshot { Provider = _service.Settings.Provider });
         ApplyRefreshInterval(_service.Settings.FloatingRefreshSeconds);
         _timer.Tick += async (_, _) =>
         {
@@ -118,7 +120,11 @@ public partial class AiFloatingWindow : Window
         Resources["FloatFontModel"] = 9d * _fontScale;
         RenderResetAttention();
 
-        if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
+        if (_lastSnapshot is { } snapshot)
+        {
+            RenderQuotaBand(snapshot, resizeWindow: true);
+            RenderSnapshot(snapshot);
+        }
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -229,7 +235,7 @@ public partial class AiFloatingWindow : Window
         if (!_hasSizedForFirstSnapshot)
         {
             _hasSizedForFirstSnapshot = true;
-            Height = BaseWindowHeight + _resetBannerHeight + Math.Clamp(tasks.Count - 1, 0, 2) * SecondaryTaskRowHeight;
+            Height = MinHeight + Math.Clamp(tasks.Count - 1, 0, 2) * SecondaryTaskRowHeight;
         }
         RefreshVisibleTaskRows(force: true);
         ApplyStatusVisual(tasks[0].Status);
@@ -683,7 +689,7 @@ public partial class AiFloatingWindow : Window
     }
 
     /// <summary>Paints both data sources' quota; the context menu can limit it to the selected one.</summary>
-    private void RenderQuotaBand(AiFloatingSnapshot snapshot)
+    private void RenderQuotaBand(AiFloatingSnapshot snapshot, bool resizeWindow = false)
     {
         var showAll = FloatingQuotaScopes.Normalize(_service.Settings.FloatingQuotaScope) == FloatingQuotaScopes.All;
         var inScope = showAll || snapshot.IsDeepSeek;
@@ -691,9 +697,11 @@ public partial class AiFloatingWindow : Window
         // allowance is what actually gates the DeepSeek work, and the floating monitor is opened to
         // see whether that work can continue.
         var goQuota = snapshot.GoQuota;
-        CodexQuotaRow.Visibility = showAll || !snapshot.IsDeepSeek ? Visibility.Visible : Visibility.Collapsed;
-        GoQuotaRow.Visibility = goQuota is not null && inScope ? Visibility.Visible : Visibility.Collapsed;
-        DeepSeekQuotaRow.Visibility = goQuota is null && inScope ? Visibility.Visible : Visibility.Collapsed;
+        var settings = _service.Settings;
+        var codexInScope = showAll || !snapshot.IsDeepSeek;
+        CodexQuotaRow.Visibility = codexInScope && settings.FloatingShowFiveHourQuota ? Visibility.Visible : Visibility.Collapsed;
+        GoQuotaRow.Visibility = goQuota is not null && inScope && settings.FloatingShowDeepSeekQuota ? Visibility.Visible : Visibility.Collapsed;
+        DeepSeekQuotaRow.Visibility = goQuota is null && inScope && settings.FloatingShowDeepSeekQuota ? Visibility.Visible : Visibility.Collapsed;
 
         QuotaLabelText.Text = LocalizationService.L("5h 剩余", "5h left");
         WeeklyQuotaLabelText.Text = LocalizationService.L("周剩余", "Week left");
@@ -701,7 +709,8 @@ public partial class AiFloatingWindow : Window
         var weekly = snapshot.CodexWeeklyQuota ?? snapshot.WeeklyQuota;
         var codexError = snapshot.CodexQuotaError ?? snapshot.QuotaError;
         var codexCapturedAt = snapshot.CodexQuotaCapturedAt ?? snapshot.QuotaCapturedAt;
-        WeeklyQuotaPanel.Visibility = weekly is null ? Visibility.Collapsed : Visibility.Visible;
+        WeeklyQuotaPanel.Visibility = weekly is not null && codexInScope && settings.FloatingShowWeeklyQuota
+            ? Visibility.Visible : Visibility.Collapsed;
         RenderQuotaWindow(RemainingQuotaText, fiveHour, codexError, codexCapturedAt,
             "额度窗口未知", "Unknown quota window");
         RenderQuotaWindow(WeeklyQuotaText, weekly, codexError, codexCapturedAt,
@@ -709,7 +718,7 @@ public partial class AiFloatingWindow : Window
 
         var balanceText = snapshot.DeepSeekBalanceText ?? snapshot.QuotaText ?? "--";
         DeepSeekBalanceText.Text = balanceText;
-        DeepSeekBalanceText.FontSize = (balanceText.Length > 9 ? 10 : 12) * _fontScale;
+        DeepSeekBalanceLabel.Text = LocalizationService.L("余额", "Balance");
         var detail = snapshot.DeepSeekBalanceDetail ?? string.Empty;
         if (snapshot.DeepSeekBalanceCapturedAt is { } captured)
             detail += LocalizationService.L($"\n余额采集于 {captured.LocalDateTime:HH:mm:ss}",
@@ -727,6 +736,59 @@ public partial class AiFloatingWindow : Window
         }
 
         if (goQuota is not null) RenderGoQuota(goQuota, snapshot.GoQuotaError, snapshot.GoQuotaCapturedAt);
+        UpdateFooterLayout(resizeWindow);
+    }
+
+    private void UpdateFooterLayout(bool resizeWindow = false)
+    {
+        var metrics = QuotaSummaryGrid.Children.OfType<FrameworkElement>()
+            .Where(element => element.Visibility == Visibility.Visible).ToArray();
+        if (QuotaSummaryGrid.ColumnDefinitions.Count != metrics.Length)
+        {
+            QuotaSummaryGrid.ColumnDefinitions.Clear();
+            for (var index = 0; index < metrics.Length; index++)
+                QuotaSummaryGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        }
+        for (var index = 0; index < metrics.Length; index++)
+        {
+            Grid.SetColumn(metrics[index], index);
+            metrics[index].Margin = new Thickness(index == 0 ? 0 : 5, 0, index == metrics.Length - 1 ? 0 : 5, 0);
+        }
+        QuotaSummaryGrid.Visibility = metrics.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        GoQuotaRow.Margin = new Thickness(0, metrics.Length > 0 ? 5 : 0, 0, 0);
+        var visible = _service.Settings.FloatingFooterVisible &&
+                      (metrics.Length > 0 || GoQuotaRow.Visibility == Visibility.Visible);
+        QuotaBand.Visibility = QuotaDivider.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        UpdateFooterHeight(resizeWindow);
+    }
+
+    private void UpdateFooterHeight(bool resizeWindow = false)
+    {
+        if (QuotaBand is null) return;
+        // Reserve the measured footer height, including larger fonts and Go's extra row.
+        QuotaBand.Measure(new Size(Math.Max(1, Width - 25), double.PositiveInfinity));
+        var height = QuotaBand.Visibility == Visibility.Visible ? Math.Ceiling(QuotaBand.DesiredSize.Height) + 1 : 0;
+        if (Math.Abs(height - _quotaBandHeight) < 0.1) return;
+        _quotaBandHeight = height;
+        UpdateMinimumHeight(resizeWindow);
+    }
+
+    private void UpdateMinimumHeight(bool resizeWindow = false)
+    {
+        var previous = MinHeight;
+        // The header and shell padding have fixed heights; only the primary task's
+        // text scales. Measuring it avoids reserving an entire scaled block of empty space.
+        PrimaryTaskRow.Measure(new Size(Math.Max(1, Width - 25), double.PositiveInfinity));
+        MinHeight = 17 + 18 + Math.Ceiling(PrimaryTaskRow.DesiredSize.Height) + 12
+            + _quotaBandHeight + _resetBannerHeight;
+        if (Math.Abs(MinHeight - previous) < 0.1) return;
+        if (_hasSizedForFirstSnapshot)
+            Height = Math.Max(MinHeight, Height + (resizeWindow ? MinHeight - previous : 0));
+        if (IsLoaded && !_isDockCollapsed)
+        {
+            var area = GetCurrentMonitorWorkArea();
+            Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height));
+        }
     }
 
     /// <summary>
@@ -830,8 +892,18 @@ public partial class AiFloatingWindow : Window
     private void RefreshVisibleTaskRows(bool force = false)
     {
         if (SecondaryTasksPanel is null) return;
-        var availableHeight = ActualHeight > 0 ? ActualHeight : Height;
-        var visibleTaskCount = CalculateVisibleTaskCount(availableHeight - _resetBannerHeight, _displayTasks.Count);
+        PrimaryTaskRow.Measure(new Size(Math.Max(1, Width - 25), double.PositiveInfinity));
+        var fixedHeight = 18 + 17 + Math.Ceiling(PrimaryTaskRow.DesiredSize.Height)
+            + TaskRowsPanel.Margin.Top + TaskRowsPanel.Margin.Bottom
+            + _quotaBandHeight + _resetBannerHeight + 2;
+        // Saved window height can outlive the tasks it used to hold. Do not leave
+        // a star-sized empty row when every available task already fits.
+        var contentHeight = Math.Max(MinHeight,
+            fixedHeight + Math.Max(0, _displayTasks.Count - 1) * SecondaryTaskRowHeight);
+        if (!_isDockCollapsed && Height > contentHeight + 0.5) Height = contentHeight;
+        var availableHeight = Height;
+        var visibleTaskCount = Math.Min(_displayTasks.Count, 1 + (int)Math.Floor(
+            Math.Max(0, availableHeight - fixedHeight + 0.01) / SecondaryTaskRowHeight));
         if (!force && visibleTaskCount == _visibleTaskCount) return;
         _visibleTaskCount = visibleTaskCount;
 
@@ -958,7 +1030,11 @@ public partial class AiFloatingWindow : Window
         }
     }
 
-    private void Window_SizeChanged(object sender, SizeChangedEventArgs e) => RefreshVisibleTaskRows();
+    private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.WidthChanged) UpdateFooterHeight();
+        RefreshVisibleTaskRows();
+    }
 
     private void ResizeThumb_DragStarted(object sender, DragStartedEventArgs e)
     {
@@ -1388,7 +1464,11 @@ public partial class AiFloatingWindow : Window
         _service.SaveSettings(settings);
         UpdateContextMenu();
         _hasSizedForFirstSnapshot = true;
-        if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
+        if (_lastSnapshot is { } snapshot)
+        {
+            RenderQuotaBand(snapshot, resizeWindow: true);
+            RenderSnapshot(snapshot);
+        }
         _ = RefreshAsync();
     }
 
@@ -1405,6 +1485,29 @@ public partial class AiFloatingWindow : Window
     }
 
     private void FloatingMenu_Opened(object sender, RoutedEventArgs e) => UpdateContextMenu();
+
+    private void FooterDisplay_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item) return;
+        var settings = _service.ReloadSettings();
+        switch (item.Tag?.ToString())
+        {
+            case "visible": settings.FloatingFooterVisible = item.IsChecked; break;
+            case "fiveHour": settings.FloatingShowFiveHourQuota = item.IsChecked; break;
+            case "weekly": settings.FloatingShowWeeklyQuota = item.IsChecked; break;
+            case "deepSeek": settings.FloatingShowDeepSeekQuota = item.IsChecked; break;
+            default: return;
+        }
+        _service.SaveSettings(settings);
+        UpdateContextMenu();
+        if (_lastSnapshot is { } snapshot)
+        {
+            RenderQuotaBand(snapshot, resizeWindow: true);
+            RenderSnapshot(snapshot);
+        }
+        else UpdateFooterLayout(resizeWindow: true);
+        if (IsLoaded) SavePlacement();
+    }
 
     private void UpdateContextMenu()
     {
@@ -1428,6 +1531,15 @@ public partial class AiFloatingWindow : Window
         var quotaScope = FloatingQuotaScopes.Normalize(_service.Settings.FloatingQuotaScope);
         AllQuotaMenuItem.IsChecked = quotaScope == FloatingQuotaScopes.All;
         ActiveQuotaMenuItem.IsChecked = quotaScope == FloatingQuotaScopes.Active;
+        FooterDisplayMenuItem.Header = english ? "Footer display" : "底栏显示";
+        FooterVisibleMenuItem.Header = english ? "Show footer" : "显示底栏";
+        FooterFiveHourMenuItem.Header = english ? "Codex · 5h left" : "Codex · 5h 剩余";
+        FooterWeeklyMenuItem.Header = english ? "Codex · Week left" : "Codex · 周剩余";
+        FooterDeepSeekMenuItem.Header = english ? "DeepSeek · Balance / plan" : "DeepSeek · 余额 / 套餐";
+        FooterVisibleMenuItem.IsChecked = _service.Settings.FloatingFooterVisible;
+        FooterFiveHourMenuItem.IsChecked = _service.Settings.FloatingShowFiveHourQuota;
+        FooterWeeklyMenuItem.IsChecked = _service.Settings.FloatingShowWeeklyQuota;
+        FooterDeepSeekMenuItem.IsChecked = _service.Settings.FloatingShowDeepSeekQuota;
         HeaderStyleMenuItem.Header = english ? "Header text" : "顶栏显示";
         var headerStyle = FloatingHeaderStyles.Normalize(_service.Settings.FloatingHeaderStyle);
         foreach (var item in HeaderStyleMenuItem.Items.OfType<MenuItem>())
@@ -1471,15 +1583,8 @@ public partial class AiFloatingWindow : Window
         ResetAttentionButton.Height = visible ? (hasTime ? 64 : 44) * _fontScale : 0;
         var height = visible ? ResetAttentionButton.Height + (sourceUrl is null ? 0 : 24 * _fontScale) + 2 : 0;
         ResetAttentionPanel.Height = height;
-        var delta = height - _resetBannerHeight;
         _resetBannerHeight = height;
-        MinHeight = BaseWindowHeight + height;
-        if (Math.Abs(delta) > 0.1) Height = Math.Max(MinHeight, Height + delta);
-        if (IsLoaded && !_isDockCollapsed && Math.Abs(delta) > 0.1)
-        {
-            var area = GetCurrentMonitorWorkArea();
-            Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height));
-        }
+        UpdateMinimumHeight(resizeWindow: true);
         RefreshVisibleTaskRows(force: true);
         if (_dockEdge != DockEdge.None) ConfigurePeekHandle();
         if (visible)
