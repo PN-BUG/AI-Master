@@ -100,12 +100,12 @@ public partial class App : WpfApplication
         _exitMenuItem.Click += (_, _) => Dispatcher.Invoke(ExitApplication);
 
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.AddRange([
+        menu.Items.AddRange(new Forms.ToolStripItem[] {
             _showMainMenuItem,
             _showFloatingMenuItem,
             new Forms.ToolStripSeparator(),
             _exitMenuItem
-        ]);
+        });
         _trayIcon = new Forms.NotifyIcon
         {
             Icon = _trayIconImage,

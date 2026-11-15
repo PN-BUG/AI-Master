@@ -30,11 +30,11 @@ The pages contain eleven functional card types (Codex and DeepSeek share the quo
 4. **Usage forecast** charts estimated and projected weekly quota remaining, plus the last seven days of usage. Switch between **Account** and **This device**: account mode includes every device using the account; local mode keeps the account's current remaining quota as its starting point but projects only this device's estimated rate, and changes the seven-day token chart to local records.
 5. **Recent tasks** lists running, waiting, interrupted, paused, and completed tasks.
 6. **Local usage** totals this device's weekly tokens, shows token-weighted top models for the device and each project, and estimates device/project quota attribution from the ratio of local tokens to same-period account tokens; when account history is incomplete, only local tokens are shown.
-7. **Today / hourly usage** shows this device's tokens today, today's estimated share of the account's total weekly quota, and a local-token line chart for hours 00–23. The share is estimated from this week's account token history and weekly-window usage; it stays unavailable when the data is incomplete.
+7. **Today / hourly usage** shows this device's tokens today, today's estimated share of the account's total weekly quota, and a local-token line chart for hours 00�?3. The share is estimated from this week's account token history and weekly-window usage; it stays unavailable when the data is incomplete.
 8. **Guard policy** configures warning and pause thresholds, automatic pausing, and floating-window text size.
 9. **Shared usage** groups devices using the same sync key and shows each device's tokens, group share, top model, session count, and last sync time.
 10. **Reset signals** monitors public reset previews and announcements, with source links and separate detection of official account quota recovery.
-11. **DeepSeek access** configures the DeepSeek API key, optional Platform token, and low-balance warning; credentials are encrypted locally.
+11. **DeepSeek access** configures the DeepSeek API key, optional Platform token, low-balance warning, and optional OpenCode Go plan key; credentials are encrypted locally.
 
 **Sync now** and **Floating monitor** remain at the top. Language, theme, update actions, the website and About stay at the bottom of the navigation rail on every page. Select **Sync now** to reconnect to the active data source and refresh all data. Switching pages preserves unsaved form edits and keeps background monitoring running.
 
@@ -43,9 +43,9 @@ The pages contain eleven functional card types (Codex and DeepSeek share the quo
 The **Data source** buttons at the top of the navigation rail switch between Codex and DeepSeek. The choice is saved immediately and refreshes the dashboard:
 
 - **Codex** reads Codex quota, online tasks, and local session records, exactly like earlier versions.
-- **DeepSeek** reads the DeepSeek account balance and optional usage details; tasks come from Deep Code local session indexes.
+- **DeepSeek** reads the DeepSeek account balance and optional usage details; with an OpenCode Go plan key it reads the plan's 5-hour/week/month allowance instead. Tasks come from Deep Code and DeepSeek desktop local session indexes.
 - Both modes share the windows, overlay, theme, language, and refresh interval. The task lists are unified: Codex and Deep Code tasks appear together, each labeled with its source and model, and switching the data source never hides the other source's history.
-- Codex-only cards (task guard, forecast, reset signals, shared usage, percentage thresholds) are hidden in DeepSeek mode because DeepSeek has no official percentage quota window.
+- Codex-only cards (task guard, forecast, reset signals, shared usage, percentage thresholds) are hidden in DeepSeek mode. The DeepSeek balance itself has no percentage window; percentage quota appears only when an OpenCode Go plan key is configured.
 
 ### Card layout
 
@@ -62,12 +62,13 @@ The **Data source** buttons at the top of the navigation rail switch between Cod
 
 ### Configuration
 
-Open **Settings → DeepSeek access** and fill in:
+Open **Settings �?DeepSeek access** and fill in:
 
 - **API key** (required): reads the balance from the official `https://api.deepseek.com/user/balance` endpoint.
 - **Platform token** (optional): adds today's and last-30-day spend, tokens, request count, and per-model cost from `platform.deepseek.com`. Those routes are private dashboard endpoints rather than documented public APIs and may change; if they fail, the balance is still shown and the card explains that usage details are unavailable.
 - **Low-balance warning**: highlights the balance in the quota card when it falls below this amount; 0 disables it.
-- Both credentials are encrypted with Windows DPAPI and stored only in the local `settings.json`. They are never uploaded, logged, or included in shared usage. Select **Save DeepSeek settings** to apply immediately; when DeepSeek is active, the dashboard also refreshes.
+- **OpenCode Go plan key** (optional): when the work is billed through an OpenCode Go subscription, paste the plan key that starts with `oc_sk_`. The account card and the floating monitor then show the plan's 5-hour, weekly, and monthly allowance instead of leading with the balance; leave it empty to keep the balance view. Get the key from the Go page at opencode.ai/console.
+- All credentials are encrypted with Windows DPAPI and stored only in the local `settings.json`. They are never uploaded, logged, or included in shared usage. Select **Save DeepSeek settings** to apply immediately; when DeepSeek is active, the dashboard also refreshes.
 - The Platform token is the signed-in `platform.deepseek.com` session token. It is independent of the API key, so updating one never invalidates the other.
 
 ### Balance and usage
@@ -76,7 +77,15 @@ Open **Settings → DeepSeek access** and fill in:
 - The card also shows today's spend and tokens, plus the last 30 days (or the current month when the platform falls back to monthly totals).
 - **Today / hourly usage** shows the platform's tokens and spend for today. DeepSeek does not expose hourly buckets, so no hourly chart is drawn.
 - **Local usage** totals tokens from Deep Code local sessions and shows each project's share and top model. Deep Code usage is attributed to the session's last update day; it is not a per-message bill.
-- DeepSeek has no 5-hour or 7-day percentage window, so percentage quota, forecasts, the task guard, and Codex quota notifications are not shown.
+- The DeepSeek balance itself has no 5-hour or 7-day percentage window; with an OpenCode Go plan key, the card and the floating monitor show the plan windows' remaining percentages.
+
+### OpenCode Go plan allowance
+
+- With the plan key configured, AIMaster reads `https://opencode.ai/zen/go/v1/usage` for the used share and reset time of the rolling five-hour, weekly, and monthly windows.
+- The account card shows the tightest window's remaining percentage in large type, lists all three windows' used shares, and names the next reset; the DeepSeek balance stays as reference.
+- Available, low, and nearly-exhausted allowances use the normal, warning, and danger colors with the guard policy's warning and pause thresholds.
+- The floating monitor replaces the DeepSeek balance row with three remaining percentages labeled Go 5h / Go week / Go month. Removing the key restores the balance row immediately.
+- When the allowance read fails, the plan layout stays and explains the error; the balance and usage details keep working.
 
 ### Deep Code tasks
 
@@ -88,11 +97,11 @@ Open **Settings → DeepSeek access** and fill in:
 
 ### DeepSeek desktop tasks
 
-- Conversations kept locally by the DeepSeek desktop app (`%APPDATA%\@deepseek-ai\dsh-desktop`) are read from its Chromium LevelDB; the app is never started or modified.
-- The desktop app stores conversation bodies in the cloud, so locally only the session id, the prompt being typed or already sent, and pending questions remain. Those tasks are therefore named after the first sent prompt and show the last sent prompt.
-- A conversation with an unanswered question shows **awaiting input**; otherwise it shows **completed**. No model or token data is stored locally, so the model shows `--`.
+- Conversations kept locally by the DeepSeek desktop app (`%APPDATA%\@deepseek-ai\dsh-desktop`) and the session projection cache under `~/.dsh` are read; the app is never started or modified.
+- Task status comes from the cache the desktop app writes: an unanswered question shows **awaiting input**, an open turn shows **running**, and a finished turn shows **completed**.
+- Rows show the real conversation title, selected model, project directory and update time; a conversation that has not been checkpointed yet falls back to its local draft and is named after the first sent prompt.
 - Clicking one of these tasks brings the DeepSeek desktop app to the foreground; when it is not running, `dsh://open` starts it.
-- Set `DSH_DESKTOP_HOME` to read a different data directory (tests or a portable copy).
+- Set `DSH_DESKTOP_HOME` for the desktop data directory and `DSH_HOME` for the projection-cache root (tests or a portable copy).
 
 ## Guard policy
 
@@ -101,7 +110,7 @@ Open **Settings → DeepSeek access** and fill in:
 - **Automatic pause** attempts to interrupt running tasks visible to the current App Server connection.
 - **Quota warning notifications** is enabled by default. Uncheck it and select **Save & apply** to disable Windows notifications. The highest usage window triggers one warning and another when it reaches the pause limit. Further refreshes stay quiet until usage falls below the warning line. Notifications include the window, usage and reset time; clicking opens the dashboard. Monitoring continues in the tray after closing the main window. This switch is independent of automatic pause.
 - **Floating font size** adjusts overlay text from 100% to 150%.
-- **Daily account quota warning** is optional. Set 0.1–100% of the total weekly quota as the daily warning and select **Save & apply**. Today's account usage is estimated from token shares in the current Codex weekly cycle across all devices. Cycle boundaries within a day can introduce error; this is not an official daily quota bill. Missing history suppresses alerts.
+- **Daily account quota warning** is optional. Set 0.1�?00% of the total weekly quota as the daily warning and select **Save & apply**. Today's account usage is estimated from token shares in the current Codex weekly cycle across all devices. Cycle boundaries within a day can introduce error; this is not an official daily quota bill. Missing history suppresses alerts.
 - **Use recommendation** fills the average quota share of completed active calendar days in the current cycle plus 20%, rounded up to 0.1%. Today and the partial first cycle day are excluded. Save to apply it. During continuous monitoring, the same daily limit triggers once per local day; the notification switch controls delivery. Daily warnings do not pause tasks.
 
 Live control is scoped to the App Server connection. Tasks running in another Codex window may need to be stopped in that window.
@@ -145,10 +154,10 @@ Select **Floating monitor** in the main window. The overlay stays on top and dis
 
 - the active data source in the header plus the last quota capture time;
 - one recent-task list covering both Codex and Deep Code, each row labeled with its source and the model it used, with the primary task's model and reasoning effort below its title;
-- the Codex five-hour and weekly quota and the DeepSeek balance at the same time, pinned to the bottom of the overlay; extra height goes to the task list;
+- the Codex five-hour and weekly quota and the DeepSeek balance (or the OpenCode Go plan allowance when configured) at the same time, pinned to the bottom of the overlay; extra height goes to the task list;
 - recent tasks according to the overlay height (up to eight).
 
-The **Quota display** item in the context menu switches between **All data sources** (default: Codex quota and DeepSeek balance together) and **Selected source only**; the choice is saved locally.
+The **Quota display** item in the context menu switches between **All data sources** (default: Codex quota and the DeepSeek balance or plan allowance together) and **Selected source only**; the choice is saved locally.
 
 Hover over a task to highlight it; click a Codex task to open it in the Codex desktop app, or a Deep Code task to open its project folder in File Explorer. Rows without an available target are not clickable. Moving or resizing the overlay saves its position and size for the next launch. If the monitor layout changes, it reopens within the visible work area.
 
@@ -173,7 +182,7 @@ Drag the overlay to the top, left, or right edge of the current monitor. It coll
 - **Collapse now / Expand window** switches the docked state manually.
 - **Auto-hide at edge** controls automatic collapsing near a screen edge.
 - **Task name** chooses between the conversation title and the latest user request.
-- **Quota display** selects **All data sources** (default) or **Selected source only**; the former shows Codex five-hour/weekly quota and the DeepSeek balance together.
+- **Quota display** selects **All data sources** (default) or **Selected source only**; the former shows Codex five-hour/weekly quota and the DeepSeek balance (or the plan allowance) together.
 - **Refresh interval** offers 1, 2, 5, 10, or 30 seconds.
 
 Conversation titles work well as stable identifiers. The latest-request mode is useful when following what a long-running task is currently doing. AIMaster falls back to the other available name if the selected source is missing.

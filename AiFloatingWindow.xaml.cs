@@ -22,9 +22,12 @@ public partial class AiFloatingWindow : Window
     private readonly ResetSignalAttention _resetAttention;
     private double _resetBannerHeight;
     private readonly DispatcherTimer _timer = new();
+    // 顶栏右侧的“多久前更新”需要每秒重算，但它不触发任何网络/IO。
+    private readonly DispatcherTimer _ageTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _dockHideTimer = new() { Interval = TimeSpan.FromMilliseconds(820) };
     private readonly CancellationTokenSource _lifetime = new();
     private bool _refreshing;
+    private Exception? _headerError;
     private AiFloatingSnapshot? _lastSnapshot;
     private AiTaskSnapshot? _taskSnapshot;
     private DockEdge _dockEdge;
@@ -65,6 +68,7 @@ public partial class AiFloatingWindow : Window
         {
             if (!_isDockCollapsed) await RefreshAsync();
         };
+        _ageTimer.Tick += (_, _) => UpdateAgeText();
         _dockHideTimer.Tick += (_, _) =>
         {
             _dockHideTimer.Stop();
@@ -126,6 +130,7 @@ public partial class AiFloatingWindow : Window
             Top = workArea.Bottom - Height - 22;
         }
         _timer.Start();
+        _ageTimer.Start();
         await RefreshAsync();
     }
 
@@ -168,6 +173,7 @@ public partial class AiFloatingWindow : Window
         AiTaskSnapshotFeed.Changed -= TaskSnapshot_Changed;
         AiTaskSnapshotFeed.ProviderChanged -= TaskFeed_ProviderChanged;
         _timer.Stop();
+        _ageTimer.Stop();
         _dockHideTimer.Stop();
         SavePlacement();
         // Application/update shutdown must preserve the user's choice to keep it open.
@@ -217,9 +223,9 @@ public partial class AiFloatingWindow : Window
             };
         _displayTasks = tasks;
         UpdatePrimaryTaskRow(tasks[0]);
-        UpdateBrand(snapshot);
         RenderQuotaBand(snapshot);
-        SyncAgeText.Text = SyncAgeTextFor(snapshot);
+        _headerError = null;
+        UpdateHeader(snapshot, tasks);
         if (!_hasSizedForFirstSnapshot)
         {
             _hasSizedForFirstSnapshot = true;
@@ -248,21 +254,446 @@ public partial class AiFloatingWindow : Window
         PrimaryTaskRow.Style = hasLink ? (Style)FindResource("TaskHoverRow") : null;
     }
 
-    /// <summary>The task list is shared by both data sources, so the header names the data source
-    /// whose account and quota the numbers below belong to.</summary>
-    private void UpdateBrand(AiFloatingSnapshot snapshot)
+    /// <summary>
+    /// Paints the configurable top line (see <see cref="FloatingHeaderStyles"/>). Every style shares
+    /// the same row — live dot, style text, data-freshness label — so switching never moves the
+    /// window or hides the chrome buttons.
+    /// </summary>
+    private void UpdateHeader(AiFloatingSnapshot snapshot, IReadOnlyList<AiThreadSummary> tasks)
     {
-        var deepSeek = snapshot.IsDeepSeek;
-        BrandText.Text = deepSeek ? "DEEPSEEK / LIVE" : "CODEX / LIVE";
-        BrandText.ToolTip = LocalizationService.L("当前数据源：", "Active data source: ") + (deepSeek ? "DeepSeek" : "Codex");
+        var style = FloatingHeaderStyles.Normalize(_service.Settings.FloatingHeaderStyle);
+        HeaderTrendPanel.Visibility = Visibility.Collapsed;
+        HeaderTrendPanel.Children.Clear();
+        HeaderSummaryText.Visibility = Visibility.Visible;
+        HeaderSummaryText.Text = string.Empty;
+        var colorKey = "FloatInk";
+
+        switch (style)
+        {
+            case FloatingHeaderStyles.Brand:
+                HeaderSummaryText.Text = snapshot.IsDeepSeek ? "DEEPSEEK / LIVE" : "CODEX / LIVE";
+                colorKey = "FloatSignal";
+                break;
+            case FloatingHeaderStyles.Minimal:
+                HeaderSummaryText.Visibility = Visibility.Collapsed;
+                break;
+            case FloatingHeaderStyles.TodayUsage:
+                var usage = FormatTodayUsage(snapshot);
+                HeaderSummaryText.Text = usage.Text;
+                colorKey = usage.ColorKey;
+                break;
+            case FloatingHeaderStyles.QuotaAlert:
+                // Everything is fine: fall back to the task overview instead of showing an empty alert.
+                HeaderSummaryText.Text = FormatTaskOverview(tasks);
+                colorKey = "FloatMuted";
+                if (FormatQuotaAlert(snapshot, _service.Settings.WarningPercent,
+                        _service.Settings.DeepSeekBalanceWarning) is { } alert)
+                {
+                    HeaderSummaryText.Text = alert.Text;
+                    colorKey = alert.ColorKey;
+                }
+                break;
+            case FloatingHeaderStyles.LatestEvent:
+                HeaderSummaryText.Text = FormatLatestEvent(tasks,
+                    _resetAttention.Pending?.AnnouncedAt,
+                    _resetAttention.Pending is not null ? _resetAttention.Title : null,
+                    DateTimeOffset.Now);
+                break;
+            case FloatingHeaderStyles.UsageTrend:
+                colorKey = RenderHeaderTrend(snapshot);
+                break;
+            default:
+                HeaderSummaryText.Text = FormatQuotaCountdown(snapshot, DateTimeOffset.Now);
+                if (HeaderSummaryText.Text.Length == 0) HeaderSummaryText.Text = FormatTaskOverview(tasks);
+                if (FormatQuotaAlert(snapshot, _service.Settings.WarningPercent,
+                        _service.Settings.DeepSeekBalanceWarning) is { } tight) colorKey = tight.ColorKey;
+                break;
+        }
+
+        HeaderSummaryText.SetResourceReference(TextBlock.ForegroundProperty, colorKey);
+        var tooltip = BuildHeaderTooltip(snapshot, tasks, style);
+        HeaderSummaryText.ToolTip = tooltip;
+        HeaderInfoPanel.ToolTip = tooltip;
+        UpdateAgeText();
+    }
+
+    private void RenderHeaderError(Exception error)
+    {
+        HeaderTrendPanel.Visibility = Visibility.Collapsed;
+        HeaderTrendPanel.Children.Clear();
+        var minimal = FloatingHeaderStyles.Normalize(_service.Settings.FloatingHeaderStyle) ==
+                      FloatingHeaderStyles.Minimal;
+        HeaderSummaryText.Visibility = minimal ? Visibility.Collapsed : Visibility.Visible;
+        HeaderSummaryText.Text = LocalizationService.L("同步异常", "Sync issue");
+        HeaderSummaryText.SetResourceReference(TextBlock.ForegroundProperty, "DangerText");
+        HeaderSummaryText.ToolTip = error.Message;
+        HeaderInfoPanel.ToolTip = error.Message;
+        SyncAgeText.Text = LocalizationService.L("重试中", "RETRY");
+    }
+
+    /// <summary>Recomputes the freshness label; called every second and on every render.</summary>
+    private void UpdateAgeText()
+    {
+        if (_headerError is not null)
+        {
+            SyncAgeText.Text = LocalizationService.L("重试中", "RETRY");
+            return;
+        }
+        if (_lastSnapshot is not { } snapshot)
+        {
+            SyncAgeText.Text = string.Empty;
+            return;
+        }
+        var sourceError = snapshot.IsDeepSeek
+            ? snapshot.GoQuota is not null ? snapshot.GoQuotaError : snapshot.DeepSeekBalanceError
+            : snapshot.CodexQuotaError;
+        if (sourceError is not null)
+        {
+            SyncAgeText.Text = LocalizationService.L("待同步", "STALE");
+            return;
+        }
+        var style = FloatingHeaderStyles.Normalize(_service.Settings.FloatingHeaderStyle);
+        var captured = style is FloatingHeaderStyles.TodayUsage or FloatingHeaderStyles.UsageTrend
+            ? snapshot.LocalUsageCapturedAt ?? CapturedAtFor(snapshot)
+            : CapturedAtFor(snapshot);
+        SyncAgeText.Text = style == FloatingHeaderStyles.Brand
+            ? captured.LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
+            : FormatFreshness(DateTimeOffset.Now - captured);
+    }
+
+    private static DateTimeOffset CapturedAtFor(AiFloatingSnapshot snapshot)
+    {
+        var captured = snapshot.IsDeepSeek
+            ? snapshot.GoQuotaCapturedAt ?? snapshot.DeepSeekBalanceCapturedAt
+            : snapshot.CodexQuotaCapturedAt;
+        return captured ?? snapshot.CapturedAt;
+    }
+
+    /// <summary>Draws the seven-day token sparkline and returns the summary text colour key.</summary>
+    private string RenderHeaderTrend(AiFloatingSnapshot snapshot)
+    {
+        var daily = HeaderDailyTokens(snapshot);
+        if (daily.Count == 0)
+        {
+            HeaderSummaryText.Text = LocalizationService.L("用量加载中", "Loading usage");
+            return "FloatMuted";
+        }
+        var maximum = daily.Max(item => item.Tokens);
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        HeaderTrendPanel.Visibility = Visibility.Visible;
+        HeaderTrendPanel.Children.Clear();
+        foreach (var day in daily)
+        {
+            var ratio = maximum <= 0 ? 0 : day.Tokens / (double)maximum;
+            var bar = new Rectangle
+            {
+                Width = 2,
+                Height = 2 + 9 * ratio,
+                Margin = new Thickness(0, 0, 1.5, 0),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                RadiusX = 1,
+                RadiusY = 1,
+                Fill = ThemeBrush(day.Date == today ? "Signal" : "FloatMuted"),
+                Opacity = day.Date == today ? 1 : 0.55
+            };
+            HeaderTrendPanel.Children.Add(bar);
+        }
+        var todayTokens = daily.FirstOrDefault(item => item.Date == today)?.Tokens ?? 0;
+        HeaderSummaryText.Text = LocalizationService.L($"今日 {FormatTokenCount(todayTokens)}",
+            $"Today {FormatTokenCount(todayTokens)}");
+        return "FloatInk";
+    }
+
+    private string BuildHeaderTooltip(AiFloatingSnapshot snapshot, IReadOnlyList<AiThreadSummary> tasks,
+        string style)
+    {
+        var english = LocalizationService.IsEnglish;
+        var captured = CapturedAtFor(snapshot);
+        var lines = new List<string>
+        {
+            (english ? "Header: " : "顶栏：") + HeaderStyleCaption(style),
+            (english ? "Active source: " : "当前数据源：") + (snapshot.IsDeepSeek ? "DeepSeek" : "Codex"),
+            (english ? "Updated " : "更新时间：") + captured.LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture) +
+            " · " + FormatFreshness(DateTimeOffset.Now - captured),
+            (english ? "Auto refresh: " : "自动刷新：") + (english
+                ? $"{_timer.Interval.TotalSeconds:0} s"
+                : $"{_timer.Interval.TotalSeconds:0} 秒")
+        };
+        var fiveHour = snapshot.CodexFiveHourQuota ?? snapshot.FiveHourQuota;
+        var weekly = snapshot.CodexWeeklyQuota ?? snapshot.WeeklyQuota;
+        if (fiveHour is not null)
+            lines.Add((english ? "5h left " : "5h 剩余 ") +
+                      $"{fiveHour.RemainingPercent:0.#}%" + ResetSuffix(fiveHour));
+        if (weekly is not null)
+            lines.Add((english ? "Week left " : "周剩余 ") +
+                      $"{weekly.RemainingPercent:0.#}%" + ResetSuffix(weekly));
+        if (snapshot.GoQuota is { } goQuota)
+        {
+            foreach (var window in goQuota.Windows)
+                lines.Add(window.ShortLabel + " " + window.RemainingText + " " +
+                          LocalizationService.L("剩余", "left") + ResetSuffix(window));
+        }
+        else if (snapshot.DeepSeekBalance is { } balance)
+            lines.Add((english ? "Balance " : "余额 ") + balance.TotalText);
+        if (snapshot.LocalCodexUsage is { } local)
+            lines.Add(english
+                ? $"Local Codex tokens — today {FormatTokenCount(local.TodayTokens)}, week {FormatTokenCount(local.TotalTokens)}"
+                : $"本机 Codex 会话 — 今日 {FormatTokenCount(local.TodayTokens)}，本周 {FormatTokenCount(local.TotalTokens)}");
+        if (snapshot.DeepSeekUsage is { } deepSeek)
+            lines.Add(english
+                ? $"DeepSeek today {deepSeek.Money(deepSeek.TodayCost)} · {FormatTokenCount(deepSeek.TodayTokens)} tokens"
+                : $"DeepSeek 今日 {deepSeek.Money(deepSeek.TodayCost)} · {FormatTokenCount(deepSeek.TodayTokens)} tokens");
+        lines.Add((english ? "Tasks: " : "任务：") + FormatTaskOverview(tasks));
+        lines.Add(english
+            ? "Right-click → Header text to switch."
+            : "右键 → 顶栏显示 可切换样式。");
+        return string.Join("\n", lines);
+    }
+
+    private static string ResetSuffix(AiLimitWindow quota) =>
+        quota.ResetsAt is { } resetsAt ? " · " + FormatCountdown(resetsAt - DateTimeOffset.Now) : string.Empty;
+
+    private static string ResetSuffix(AiGoQuotaWindow quota) =>
+        quota.ResetsAt is { } resetsAt ? " · " + FormatCountdown(resetsAt - DateTimeOffset.Now) : string.Empty;
+
+    internal static string HeaderStyleCaption(string style) => FloatingHeaderStyles.Normalize(style) switch
+    {
+        FloatingHeaderStyles.Brand => LocalizationService.L("数据源 + 时间", "Source + clock"),
+        FloatingHeaderStyles.TodayUsage => LocalizationService.L("今日消耗", "Today's usage"),
+        FloatingHeaderStyles.QuotaAlert => LocalizationService.L("额度预警", "Quota alerts"),
+        FloatingHeaderStyles.LatestEvent => LocalizationService.L("最近事件", "Latest event"),
+        FloatingHeaderStyles.UsageTrend => LocalizationService.L("7 日用量", "Usage trend"),
+        FloatingHeaderStyles.Minimal => LocalizationService.L("极简", "Minimal"),
+        _ => LocalizationService.L("额度倒计时", "Quota countdown")
+    };
+
+    /// <summary>Remaining quota of the tightest window plus its reset countdown (empty when unknown).</summary>
+    internal static string FormatQuotaCountdown(AiFloatingSnapshot snapshot, DateTimeOffset now)
+    {
+        // A subscription plan reports percentages of its own windows, so the countdown follows
+        // the plan allowance instead of the account balance while a Go snapshot is present.
+        if (snapshot.IsDeepSeek && snapshot.GoQuota?.Tightest is { } goWindow)
+        {
+            var goText = $"{goWindow.ShortLabel} {goWindow.RemainingPercent.ToString("0.#", CultureInfo.InvariantCulture)}%";
+            if (goWindow.ResetsAt is { } goReset) goText += " · " + FormatResetCountdown(goReset - now);
+            return goText;
+        }
+        var fiveHour = snapshot.CodexFiveHourQuota ?? snapshot.FiveHourQuota;
+        var weekly = snapshot.CodexWeeklyQuota ?? snapshot.WeeklyQuota;
+        var quota = new[] { fiveHour, weekly }.Where(item => item is not null)
+            .OrderBy(item => item!.RemainingPercent).FirstOrDefault();
+        if (quota is null) return string.Empty;
+        var weeklySelected = weekly is not null && ReferenceEquals(quota, weekly);
+        // 顶栏只有一行，标签和倒计时都用最短写法；完整说明留在悬停提示里。
+        var label = weeklySelected
+            ? LocalizationService.L("周", "Week")
+            : LocalizationService.L("5h", "5h");
+        var remaining = quota.RemainingPercent.ToString("0.#", CultureInfo.InvariantCulture);
+        var text = $"{label} {remaining}%";
+        if (quota.ResetsAt is { } resetsAt) text += " · " + FormatResetCountdown(resetsAt - now);
+        return text;
+    }
+
+    /// <summary>One-unit countdown for the single-line header; the tooltip keeps exact minutes.</summary>
+    internal static string FormatResetCountdown(TimeSpan span)
+    {
+        if (span <= TimeSpan.Zero) return LocalizationService.L("即将重置", "resetting now");
+        if (span.TotalMinutes < 1) return LocalizationService.L("马上重置", "resets in <1 min");
+        if (span.TotalHours < 1)
+            return LocalizationService.L($"{span.Minutes}m后重置", $"resets in {span.Minutes}m");
+        if (span.TotalDays < 1)
+            return LocalizationService.L($"{(int)span.TotalHours}h后重置", $"resets in {(int)span.TotalHours}h");
+        var days = (int)span.TotalDays;
+        return span.Hours == 0
+            ? LocalizationService.L($"{days}d后重置", $"resets in {days}d")
+            : LocalizationService.L($"{days}d{span.Hours}h后重置", $"resets in {days}d{span.Hours}h");
+    }
+
+    internal static string FormatCountdown(TimeSpan span)
+    {
+        if (span <= TimeSpan.Zero) return LocalizationService.L("即将重置", "resetting now");
+        if (span.TotalMinutes < 1) return LocalizationService.L("不到 1 分钟后重置", "resets in <1 min");
+        if (span.TotalHours < 1)
+            return LocalizationService.L($"{span.Minutes} 分钟后重置", $"resets in {span.Minutes} min");
+        if (span.TotalDays < 1)
+        {
+            var hours = (int)span.TotalHours;
+            return span.Minutes == 0
+                ? LocalizationService.L($"{hours} 小时后重置", $"resets in {hours}h")
+                : LocalizationService.L($"{hours} 小时 {span.Minutes} 分后重置",
+                    $"resets in {hours}h {span.Minutes}m");
+        }
+        var days = (int)span.TotalDays;
+        return span.Hours == 0
+            ? LocalizationService.L($"{days} 天后重置", $"resets in {days}d")
+            : LocalizationService.L($"{days} 天 {span.Hours} 小时后重置", $"resets in {days}d {span.Hours}h");
+    }
+
+    /// <summary>Compact task counts used by the alert style and by the header tooltip.</summary>
+    internal static string FormatTaskOverview(IReadOnlyList<AiThreadSummary> tasks)
+    {
+        var waiting = tasks.Count(task => task.Status is "waitingOnApproval" or "waitingOnUserInput");
+        var running = tasks.Count(task => task.Status is "active" or "inProgress");
+        var errors = tasks.Count(task => task.Status is "failed" or "systemError");
+        var parts = new List<string>();
+        if (errors > 0) parts.Add(LocalizationService.L($"{errors} 异常", $"{errors} failed"));
+        if (waiting > 0) parts.Add(LocalizationService.L($"{waiting} 待确认", $"{waiting} waiting"));
+        if (running > 0) parts.Add(LocalizationService.L($"{running} 运行中", $"{running} running"));
+        if (parts.Count > 0) return string.Join(" · ", parts.Take(2));
+        return tasks.Count == 0
+            ? LocalizationService.L("暂无任务", "No tasks")
+            : LocalizationService.L($"空闲 · {tasks.Count} 个任务", $"Idle · {tasks.Count} tasks");
+    }
+
+    /// <summary>Quota or balance below the configured warning thresholds, or null when all is well.</summary>
+    internal static (string Text, string ColorKey)? FormatQuotaAlert(AiFloatingSnapshot snapshot,
+        double warningPercent, double balanceWarning)
+    {
+        var alerts = new List<string>();
+        var danger = false;
+        if (snapshot.IsDeepSeek && snapshot.GoQuota is { } goQuota)
+        {
+            foreach (var window in goQuota.Windows.Where(window => window.UsedPercent >= warningPercent))
+            {
+                alerts.Add(LocalizationService.L($"{window.ShortLabel} 仅剩 {window.RemainingText}",
+                    $"{window.ShortLabel} {window.RemainingText} left"));
+                if (window.IsExhausted) danger = true;
+            }
+            if (snapshot.GoQuotaError is { } goError && !goQuota.HasAnyData)
+                alerts.Add(LocalizationService.L("套餐额度同步异常", "Plan allowance sync issue"));
+        }
+        else
+        {
+            var weekly = snapshot.CodexWeeklyQuota ?? snapshot.WeeklyQuota;
+            var fiveHour = snapshot.CodexFiveHourQuota ?? snapshot.FiveHourQuota;
+            if (weekly is not null && weekly.UsedPercent >= warningPercent)
+                alerts.Add(LocalizationService.L($"周额度仅剩 {weekly.RemainingPercent:0.#}%",
+                    $"Week {weekly.RemainingPercent:0.#}% left"));
+            if (fiveHour is not null && fiveHour.UsedPercent >= warningPercent)
+                alerts.Add(LocalizationService.L($"5h 额度仅剩 {fiveHour.RemainingPercent:0.#}%",
+                    $"5h {fiveHour.RemainingPercent:0.#}% left"));
+            if (balanceWarning > 0 && snapshot.DeepSeekBalance is { } balance && balance.Total < balanceWarning)
+            {
+                alerts.Add(LocalizationService.L($"余额 {balance.TotalText}", $"Balance {balance.TotalText}"));
+                danger = true;
+            }
+        }
+        if (alerts.Count == 0) return null;
+        return (string.Join(" · ", alerts.Take(2)), danger ? "DangerText" : "WarningText");
+    }
+
+    /// <summary>Today's spend/tokens for the active data source, with a safe fallback to local usage.</summary>
+    internal static (string Text, string ColorKey) FormatTodayUsage(AiFloatingSnapshot snapshot)
+    {
+        var local = snapshot.LocalCodexUsage;
+        var deepSeek = snapshot.DeepSeekUsage;
+        if (snapshot.IsDeepSeek && deepSeek is not null)
+        {
+            var spend = deepSeek.Money(deepSeek.TodayCost);
+            var tokens = FormatTokenCount(deepSeek.TodayTokens);
+            return (LocalizationService.L($"今日 {spend} · {tokens}",
+                $"Today {spend} · {tokens}"), "FloatInk");
+        }
+        if (local is not null)
+        {
+            var today = FormatTokenCount(local.TodayTokens);
+            var week = FormatTokenCount(local.TotalTokens);
+            return (LocalizationService.L($"今日 {today} · 本周 {week}",
+                $"Today {today} · Week {week}"), "FloatInk");
+        }
+        if (deepSeek is not null)
+        {
+            var tokens = FormatTokenCount(deepSeek.TodayTokens);
+            return (LocalizationService.L($"今日 {tokens}", $"Today {tokens}"), "FloatInk");
+        }
+        if (snapshot.DeepSeekBalance is { } balance)
+            return (LocalizationService.L($"余额 {balance.TotalText}", $"Balance {balance.TotalText}"), "FloatInk");
+        return (LocalizationService.L("用量加载中", "Loading usage"), "FloatMuted");
+    }
+
+    /// <summary>The newest task activity or reset announcement, whichever happened last.</summary>
+    internal static string FormatLatestEvent(IReadOnlyList<AiThreadSummary> tasks, DateTimeOffset? resetAt,
+        string? resetTitle, DateTimeOffset now)
+    {
+        var latest = tasks.Where(task => task.UpdatedAt is not null)
+            .OrderByDescending(task => task.UpdatedAt).FirstOrDefault();
+        var taskAt = latest?.UpdatedAt;
+        if (resetAt is not null && (taskAt is null || resetAt >= taskAt))
+        {
+            var title = resetTitle ?? LocalizationService.L("额度重置", "Quota reset");
+            return $"{FormatClock(resetAt.Value, now)} {title}";
+        }
+        if (latest?.UpdatedAt is not { } updatedAt)
+            return LocalizationService.L("暂无最近事件", "No recent event");
+        var prefix = $"{FormatClock(updatedAt, now)} {LocalizationService.FormatTaskStatus(latest.Status)}";
+        return string.IsNullOrWhiteSpace(latest.DisplayTitle) ? prefix : $"{prefix} · {latest.DisplayTitle}";
+    }
+
+    /// <summary>Seven days of local Codex tokens (or DeepSeek platform tokens as a fallback).</summary>
+    internal static IReadOnlyList<AiDailyUsage> HeaderDailyTokens(AiFloatingSnapshot snapshot)
+    {
+        var start = DateOnly.FromDateTime(DateTime.Now).AddDays(-6);
+        var local = snapshot.LocalCodexUsage?.DailyUsage;
+        if (local is not null && local.Any(item => item.Tokens > 0))
+            return local.Where(item => item.Date >= start)
+                .GroupBy(item => item.Date)
+                .Select(group => new AiDailyUsage { Date = group.Key, Tokens = group.Sum(item => item.Tokens) })
+                .OrderBy(item => item.Date)
+                .ToList();
+        var deepSeek = snapshot.DeepSeekUsage?.Daily;
+        if (deepSeek is not null)
+            return deepSeek.Where(item => item.Date >= start)
+                .Select(item => new AiDailyUsage { Date = item.Date, Tokens = item.Tokens })
+                .OrderBy(item => item.Date)
+                .TakeLast(7)
+                .ToList();
+        return Array.Empty<AiDailyUsage>();
+    }
+
+    internal static string FormatFreshness(TimeSpan age)
+    {
+        if (age < TimeSpan.Zero) age = TimeSpan.Zero;
+        if (age.TotalSeconds < 5) return LocalizationService.L("刚刚", "now");
+        if (age.TotalMinutes < 1)
+            return LocalizationService.L($"{age.Seconds} 秒前", $"{age.Seconds}s ago");
+        if (age.TotalHours < 1)
+            return LocalizationService.L($"{age.Minutes} 分钟前", $"{age.Minutes}m ago");
+        return LocalizationService.L($"{age.Hours} 小时前", $"{age.Hours}h ago");
+    }
+
+    internal static string FormatTokenCount(long tokens)
+    {
+        if (tokens >= 1_000_000_000)
+            return (tokens / 1_000_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "B";
+        if (tokens >= 1_000_000)
+            return (tokens / 1_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "M";
+        if (tokens >= 1_000)
+            return (tokens / 1_000d).ToString("0.#", CultureInfo.InvariantCulture) + "K";
+        return tokens.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatClock(DateTimeOffset at, DateTimeOffset now)
+    {
+        var local = at.LocalDateTime;
+        if (local.Date == now.LocalDateTime.Date)
+            return local.ToString("HH:mm", CultureInfo.InvariantCulture);
+        return LocalizationService.IsEnglish
+            ? local.ToString("MMM d HH:mm", CultureInfo.InvariantCulture)
+            : local.ToString("M月d日 HH:mm", CultureInfo.InvariantCulture);
     }
 
     /// <summary>Paints both data sources' quota; the context menu can limit it to the selected one.</summary>
     private void RenderQuotaBand(AiFloatingSnapshot snapshot)
     {
         var showAll = FloatingQuotaScopes.Normalize(_service.Settings.FloatingQuotaScope) == FloatingQuotaScopes.All;
+        var inScope = showAll || snapshot.IsDeepSeek;
+        // A configured OpenCode Go plan replaces the pay-as-you-go balance row: the subscription
+        // allowance is what actually gates the DeepSeek work, and the floating monitor is opened to
+        // see whether that work can continue.
+        var goQuota = snapshot.GoQuota;
         CodexQuotaRow.Visibility = showAll || !snapshot.IsDeepSeek ? Visibility.Visible : Visibility.Collapsed;
-        DeepSeekQuotaRow.Visibility = showAll || snapshot.IsDeepSeek ? Visibility.Visible : Visibility.Collapsed;
+        GoQuotaRow.Visibility = goQuota is not null && inScope ? Visibility.Visible : Visibility.Collapsed;
+        DeepSeekQuotaRow.Visibility = goQuota is null && inScope ? Visibility.Visible : Visibility.Collapsed;
 
         QuotaLabelText.Text = LocalizationService.L("5h 剩余", "5h left");
         WeeklyQuotaLabelText.Text = LocalizationService.L("周剩余", "Week left");
@@ -294,14 +725,53 @@ public partial class AiFloatingWindow : Window
             DeepSeekBalanceText.ToolTip = detail;
             DeepSeekBalanceText.SetResourceReference(TextBlock.ForegroundProperty, "FloatInk");
         }
+
+        if (goQuota is not null) RenderGoQuota(goQuota, snapshot.GoQuotaError, snapshot.GoQuotaCapturedAt);
     }
 
-    private string SyncAgeTextFor(AiFloatingSnapshot snapshot)
+    /// <summary>
+    /// Paints the OpenCode Go allowance: remaining share of the rolling five-hour, weekly and
+    /// monthly windows. A window the endpoint did not report keeps a placeholder so the three
+    /// columns stay aligned while the plan data is retried.
+    /// </summary>
+    private void RenderGoQuota(AiGoQuotaSnapshot quota, string? error, DateTimeOffset? capturedAt)
     {
-        var error = snapshot.IsDeepSeek ? snapshot.DeepSeekBalanceError : snapshot.CodexQuotaError;
-        if (error is not null) return LocalizationService.L("额度待同步", "QUOTA RETRY");
-        var captured = snapshot.IsDeepSeek ? snapshot.DeepSeekBalanceCapturedAt : snapshot.CodexQuotaCapturedAt;
-        return (captured ?? snapshot.CapturedAt).LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        GoRollingLabel.Text = LocalizationService.L("套餐 5h", "Go 5h");
+        GoWeeklyLabel.Text = LocalizationService.L("套餐 周", "Go week");
+        GoMonthlyLabel.Text = LocalizationService.L("套餐 月", "Go month");
+        RenderGoQuotaWindow(GoRollingText, quota.Rolling, error, capturedAt);
+        RenderGoQuotaWindow(GoWeeklyText, quota.Weekly, error, capturedAt);
+        RenderGoQuotaWindow(GoMonthlyText, quota.Monthly, error, capturedAt);
+    }
+
+    private void RenderGoQuotaWindow(TextBlock text, AiGoQuotaWindow? window, string? error,
+        DateTimeOffset? capturedAt)
+    {
+        text.FontSize = 14 * _fontScale;
+        text.Text = window?.RemainingPercent.ToString("0.#", CultureInfo.InvariantCulture) ?? "--";
+        if (window is null)
+        {
+            text.ToolTip = error ?? LocalizationService.L("套餐额度尚未同步", "Plan allowance not loaded yet");
+            text.SetResourceReference(TextBlock.ForegroundProperty,
+                error is null ? "FloatMuted" : "WarningText");
+            return;
+        }
+
+        var detail = $"{LocalizationService.L("OpenCode Go 套餐", "OpenCode Go plan")} · " +
+                     $"{window.ShortLabel} · {window.WindowName}" +
+                     $"\n{window.UsedText} · {window.RemainingText} " +
+                     LocalizationService.L("剩余", "left");
+        if (window.ResetsAt is { } reset)
+            detail += LocalizationService.L($"\n{reset.LocalDateTime:M月d日 HH:mm} 重置",
+                $"\nResets {reset.LocalDateTime.ToString("MMM d HH:mm", CultureInfo.InvariantCulture)}");
+        if (capturedAt is { } captured)
+            detail += LocalizationService.L($"\n额度采集于 {captured.LocalDateTime:HH:mm:ss}",
+                $"\nQuota captured at {captured.LocalDateTime:HH:mm:ss}");
+        if (error is not null)
+            detail += "\n" + error;
+        text.ToolTip = detail;
+        text.SetResourceReference(TextBlock.ForegroundProperty,
+            error is not null || window.IsExhausted ? "WarningText" : "FloatInk");
     }
 
     private void RenderQuotaWindow(TextBlock text, AiLimitWindow? quota, string? error, DateTimeOffset? capturedAt,
@@ -557,7 +1027,8 @@ public partial class AiFloatingWindow : Window
             ? LocalizationService.L($"{provider} 响应较慢，将自动重试", $"{provider} is responding slowly; retrying automatically")
             : LocalizationService.L($"{provider} 状态暂时不可用", $"{provider} status is temporarily unavailable");
         TaskNameText.ToolTip = ex.Message;
-        SyncAgeText.Text = "RETRY";
+        _headerError = ex;
+        RenderHeaderError(ex);
         ApplyStatusVisual("systemError");
     }
 
@@ -696,6 +1167,7 @@ public partial class AiFloatingWindow : Window
 
         _isDockCollapsed = true;
         _timer.Stop();
+        _ageTimer.Stop();
         ConfigurePeekHandle();
         PeekHandle.Visibility = Visibility.Visible;
         if (animate)
@@ -718,6 +1190,7 @@ public partial class AiFloatingWindow : Window
         if (IsLoaded)
         {
             _timer.Start();
+            _ageTimer.Start();
             _ = RefreshAsync();
         }
         if (animate)
@@ -919,6 +1392,18 @@ public partial class AiFloatingWindow : Window
         _ = RefreshAsync();
     }
 
+    private async void HeaderStyle_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item) return;
+        var settings = _service.ReloadSettings();
+        settings.FloatingHeaderStyle = FloatingHeaderStyles.Normalize(item.Tag?.ToString());
+        _service.SaveSettings(settings);
+        UpdateContextMenu();
+        if (_lastSnapshot is { } snapshot) RenderSnapshot(snapshot);
+        // Usage-based styles need the local/official usage the service loads lazily.
+        if (IsLoaded && !_isDockCollapsed) await RefreshAsync();
+    }
+
     private void FloatingMenu_Opened(object sender, RoutedEventArgs e) => UpdateContextMenu();
 
     private void UpdateContextMenu()
@@ -943,6 +1428,13 @@ public partial class AiFloatingWindow : Window
         var quotaScope = FloatingQuotaScopes.Normalize(_service.Settings.FloatingQuotaScope);
         AllQuotaMenuItem.IsChecked = quotaScope == FloatingQuotaScopes.All;
         ActiveQuotaMenuItem.IsChecked = quotaScope == FloatingQuotaScopes.Active;
+        HeaderStyleMenuItem.Header = english ? "Header text" : "顶栏显示";
+        var headerStyle = FloatingHeaderStyles.Normalize(_service.Settings.FloatingHeaderStyle);
+        foreach (var item in HeaderStyleMenuItem.Items.OfType<MenuItem>())
+        {
+            item.Header = HeaderStyleCaption(item.Tag?.ToString() ?? string.Empty);
+            item.IsChecked = FloatingHeaderStyles.Normalize(item.Tag?.ToString()) == headerStyle;
+        }
         RefreshFrequencyMenuItem.Header = english ? "Refresh interval" : "刷新频率";
         foreach (var item in RefreshFrequencyMenuItem.Items.OfType<MenuItem>())
         {

@@ -76,8 +76,11 @@ public sealed class AiDeepSeekSnapshot
 {
     public AiDeepSeekBalance? Balance { get; init; }
     public AiDeepSeekUsage? Usage { get; init; }
+    /// <summary>OpenCode Go allowance when a Go key is configured; null keeps the balance view.
+    /// The presence of this snapshot, not its success, selects the subscription layout.</summary>
+    public AiGoQuotaSnapshot? GoQuota { get; init; }
     public string? Error { get; init; }
     public string? UsageError { get; init; }
-    public bool HasAnyData => Balance is not null || Usage is not null;
+    public bool HasAnyData => Balance is not null || Usage is not null || GoQuota is not null;
     public DateTimeOffset CapturedAt { get; init; } = DateTimeOffset.Now;
 }

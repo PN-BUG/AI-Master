@@ -23,11 +23,13 @@ internal static class DeepSeekDesktopPaths
 }
 
 /// <summary>
-/// Reads the conversations the DeepSeek Harness desktop app keeps in its Chromium LocalStorage
-/// LevelDB. The app keeps its conversation history in the cloud, so locally only the session ids
-/// and the prompt text the user is typing survive; tasks therefore name themselves after the first
-/// prompt and carry no model, token or project data. Only local files are read, with a shared lock
-/// so a running app may keep writing; nothing is written or started.
+/// Reads the tasks of the DeepSeek Harness desktop app from its two local, read-only stores. The
+/// harness session-projection cache supplies the real task state (generated title, selected model,
+/// open turn, pending questions, project and update time), while Chromium LocalStorage keeps the
+/// session ids and the prompt text the user has typed but not yet sent. The cache wins when both
+/// describe a conversation; LocalStorage still contributes conversations it has not checkpointed.
+/// Only local files are read, with shared locks so a running app may keep writing; nothing is
+/// written or started.
 /// </summary>
 internal sealed class DeepSeekDesktopTaskReader
 {
@@ -39,6 +41,7 @@ internal sealed class DeepSeekDesktopTaskReader
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly string _levelDbDirectory;
+    private readonly DeepSeekHarnessSessionReader _sessionReader;
     private readonly Func<DateTimeOffset> _clock;
     private readonly TimeSpan _cacheWindow;
     private readonly object _sync = new();
@@ -46,9 +49,11 @@ internal sealed class DeepSeekDesktopTaskReader
     private DateTimeOffset _cachedAt;
 
     public DeepSeekDesktopTaskReader(string? levelDbDirectory = null,
-        Func<DateTimeOffset>? clock = null, TimeSpan? cacheWindow = null)
+        Func<DateTimeOffset>? clock = null, TimeSpan? cacheWindow = null,
+        string? sessionCacheDirectory = null)
     {
         _levelDbDirectory = levelDbDirectory ?? DeepSeekDesktopPaths.GetLevelDbDirectory();
+        _sessionReader = new DeepSeekHarnessSessionReader(sessionCacheDirectory, clock, cacheWindow);
         _clock = clock ?? (() => DateTimeOffset.Now);
         _cacheWindow = cacheWindow ?? TimeSpan.FromSeconds(1);
     }
@@ -65,13 +70,50 @@ internal sealed class DeepSeekDesktopTaskReader
         }
         if (cached is not null) return Limit(cached, limit);
 
-        var tasks = BuildTasks(ReadEntries(cancellationToken));
+        // The harness projection cache is the accurate local task state (title, model, open turn,
+        // pending questions); LocalStorage remains the fallback for conversations it has not
+        // checkpointed yet and for the prompt text the user has not sent.
+        var tasks = MergeTasks(BuildTasks(ReadEntries(cancellationToken)),
+            _sessionReader.Read(limit, cancellationToken));
         lock (_sync)
         {
             _cached = tasks;
             _cachedAt = now;
         }
         return Limit(tasks, limit);
+    }
+
+    /// <summary>The checkpointed session wins over its LocalStorage draft; the draft only fills
+    /// text the checkpoint does not carry yet.</summary>
+    private static List<AiThreadSummary> MergeTasks(List<AiThreadSummary> storedTasks,
+        IReadOnlyList<AiThreadSummary> checkpointedTasks)
+    {
+        var merged = new Dictionary<string, AiThreadSummary>(StringComparer.OrdinalIgnoreCase);
+        foreach (var task in storedTasks) merged[task.Id] = task;
+        foreach (var task in checkpointedTasks)
+        {
+            if (!merged.TryGetValue(task.Id, out var stored))
+            {
+                merged[task.Id] = task;
+                continue;
+            }
+            merged[task.Id] = new AiThreadSummary
+            {
+                Id = task.Id,
+                Title = string.IsNullOrWhiteSpace(task.Title) ? stored.Title : task.Title,
+                ConversationTitle = task.ConversationTitle ?? stored.ConversationTitle,
+                LatestUserMessage = task.LatestUserMessage ?? stored.LatestUserMessage,
+                Status = task.Status,
+                Source = task.Source,
+                ModelName = task.ModelName ?? stored.ModelName,
+                ReasoningEffort = task.ReasoningEffort ?? stored.ReasoningEffort,
+                RolloutPath = task.RolloutPath ?? stored.RolloutPath,
+                ProjectPath = task.ProjectPath ?? stored.ProjectPath,
+                OpenUri = task.OpenUri ?? stored.OpenUri,
+                UpdatedAt = task.UpdatedAt ?? stored.UpdatedAt
+            };
+        }
+        return AiManagerService.SortTasksByStatusAndTime(merged.Values).ToList();
     }
 
     private static IReadOnlyList<AiThreadSummary> Limit(List<AiThreadSummary> tasks, int limit) =>
@@ -189,11 +231,28 @@ internal sealed class DeepSeekDesktopTaskReader
     }
 
     /// <summary>
-    /// Chromium writes LocalStorage values as UTF-16 code units behind an alignment byte, while
-    /// other builds write UTF-8; accept whichever reading starts like the JSON this reader expects.
+    /// Chromium tags every LocalStorage value with its encoding: <c>0</c> for UTF-16LE and <c>1</c>
+    /// for Latin-1, which is what JSON made only of ASCII characters uses. Ignoring that tag dropped
+    /// every ASCII-only record: English prompts disappeared, and the empty
+    /// <c>{"progressByRequest":{}}</c> write that clears an answered question was never seen, so a
+    /// task could stay stuck on "waiting for input". Untagged values are still read by prefix probing.
     /// </summary>
     internal static string? DecodeValue(byte[] value)
     {
+        if (value.Length == 0) return null;
+        if (value[0] == 0 && value.Length % 2 == 1)
+        {
+            var text = Encoding.Unicode.GetString(value, 1, value.Length - 1);
+            if (text.StartsWith('{') || text.StartsWith('[')) return text;
+        }
+        else if (value[0] == 1)
+        {
+            var latin1 = Encoding.Latin1.GetString(value, 1, value.Length - 1);
+            if (latin1.StartsWith('{') || latin1.StartsWith('[')) return latin1;
+            var utf8Tagged = Encoding.UTF8.GetString(value, 1, value.Length - 1);
+            if (utf8Tagged.StartsWith('{') || utf8Tagged.StartsWith('[')) return utf8Tagged;
+        }
+
         for (var start = 0; start <= 2 && start < value.Length; start++)
         {
             var text = Encoding.Unicode.GetString(value, start, value.Length - start);

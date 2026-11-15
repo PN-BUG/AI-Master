@@ -16,7 +16,7 @@ AIMaster 是一个可独立运行的 Windows Codex 与 DeepSeek 用量及任务�
 
 - 在左侧“数据源”中切换 Codex 与 DeepSeek，两个账户面板互不干扰。
 - 显示 Codex 总额度、7 天窗口、5 小时窗口与重置时间。
-- 显示 DeepSeek 账户余额、付费/赠送构成、今日与近 30 天消耗和 Token；可设置余额预警线。
+- 显示 DeepSeek 账户余额、付费/赠送构成、今日与近 30 天消耗和 Token；可设置余额预警线。填写 OpenCode Go 套餐 Key 后，账户卡片与悬浮窗改为显示套餐的 5 小时、周、月剩余额度。
 - 读取 Deep Code（DeepSeek 官方编程 CLI）的本机会话索引，显示任务状态、模型、推理强度与 Token 用量，无需 CLI 正在运行。
 - 自动追踪 [codex-reset.com](https://codex-reset.com/) 的重置预告与公告，新事件发送 Windows 通知；用官方账号额度变化单独检测额度恢复。
 - 根据近期消耗速度预测额度是否会提前耗尽。
@@ -31,6 +31,7 @@ AIMaster 是一个可独立运行的 Windows Codex 与 DeepSeek 用量及任务�
 - 任务名称可选择显示 Codex 对话标题或该任务最后发送的用户内容。
 - 显示任务当前使用的模型与推理强度。
 - 悬浮窗可自由调整尺寸并保存位置；任务行可点击直达 Codex，字号可在主窗口设置中调整。
+- 浮窗顶栏可在右键菜单选择显示内容：额度倒计时、今日消耗、额度预警、最近事件、7 日用量条、极简或数据源 + 时间；右侧同时显示数据新鲜度。
 - 支持多显示器靠边收起；收起时停止刷新，悬停展开后立即刷新。
 - 支持手动刷新、1/2/5/10/30 秒刷新频率和右键自动收起开关。
 - 支持简体中文与英文即时切换。
@@ -60,7 +61,7 @@ AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“�
 
 - Windows 10 1809 或更新版本（含 Windows 11）。
 - 使用 Codex 数据源时：已安装并登录 Codex；`codex` 命令在 PATH 中，或使用标准的 Codex Desktop 安装位置。
-- 使用 DeepSeek 数据源时：在“设置 → DeepSeek 接入”填写 DeepSeek API Key；平台 Token 可选，用于读取用量明细；任务列表需要本机使用过 Deep Code。
+- 使用 DeepSeek 数据源时：在“设置 → DeepSeek 接入”填写 DeepSeek API Key；平台 Token 可选，用于读取用量明细；任务列表需要本机使用过 Deep Code。若 DeepSeek 工作改由 opencode Go 套餐计费，填写该套餐的 API Key 后即可显示套餐额度，无需余额。
 - 读取 Codex 额度和在线任务时，Codex App Server 需要可用。
 
 ## 悬浮窗
@@ -72,7 +73,7 @@ AIMaster 启动时会静默检查 GitHub Release，也可点击主窗口的“�
 - 拖到任意显示器边缘可自动收起。
 - 收起时只保留 8 px 感应条并停止后台刷新。
 - 鼠标悬停感应条会展开并立即刷新。
-- 右键可立即刷新、切换收起状态、选择任务名称来源、开启或关闭靠边自动收起、修改刷新频率。
+- 右键可立即刷新、切换收起状态、选择顶栏显示内容、选择任务名称来源、开启或关闭靠边自动收起、修改刷新频率。
 - 拖动边缘或角落调整尺寸，按高度显示最多 8 个最近任务；位置和尺寸会保存。
 - 悬停任务行可高亮，单击可在 Codex 桌面端打开对应任务。
 - 浮窗字号可在主窗口“保护策略”中按 100–150% 调整。
@@ -88,7 +89,7 @@ AIMaster 启动本机的 `codex app-server --listen stdio://` 并使用 Codex �
 
 当 App Server 暂时不可用时，任务列表会从 `%USERPROFILE%\.codex\sessions` 中的本地会话记录降级读取。设置保存在 `%LOCALAPPDATA%\AIMaster\settings.json`。第一次启动会自动迁移旧版 `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` 设置。
 
-DeepSeek 数据源使用 API Key 调用官方 `https://api.deepseek.com/user/balance` 读取余额；可选的平台 Token 用于读取 `platform.deepseek.com` 的今日与近 30 天用量。平台用量接口不是公开文档接口，可能随平台改版失效，失败时仍显示余额。两种凭证只保存在本机设置中，使用 Windows DPAPI 加密，不上传、不写入日志。Deep Code 任务只读取 `%USERPROFILE%\.deepcode\projects\*\sessions-index.json` 本地索引，不启动或修改 Deep Code。
+DeepSeek 数据源使用 API Key 调用官方 `https://api.deepseek.com/user/balance` 读取余额；可选的平台 Token 用于读取 `platform.deepseek.com` 的今日与近 30 天用量。平台用量接口不是公开文档接口，可能随平台改版失效，失败时仍显示余额。填写 OpenCode Go 套餐 Key 后，改用 `https://opencode.ai/zen/go/v1/usage` 读取套餐滚动 5 小时、周、月窗口的已用比例与重置时间，余额只作参考。三种凭证只保存在本机设置中，使用 Windows DPAPI 加密，不上传、不写入日志。Deep Code 任务只读取 `%USERPROFILE%\.deepcode\projects\*\sessions-index.json` 本地索引，不启动或修改 Deep Code。
 
 “对话标题”来自 Codex 的任务元数据；“最后发送内容”从对应任务最近一条真实用户消息中提取。附件说明、环境信息等注入文本不会作为任务名。DeepSeek 模式使用 Deep Code 会话摘要作为任务名。
 

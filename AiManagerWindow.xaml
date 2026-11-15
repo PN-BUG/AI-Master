@@ -889,7 +889,7 @@
                         </Grid>
                         </StackPanel>
                         <TextBlock x:Name="DeepSeekPolicyNote" Visibility="Collapsed"
-                                   Text="DeepSeek 按账户余额计费，没有百分比额度窗口；预警线、暂停线、消耗预测与重置信号仅对 Codex 生效。"
+                                   Text="DeepSeek 默认按账户余额计费；填写 OpenCode Go 套餐 Key 后，账户额度与浮窗改为显示套餐 5h/周/月剩余。预警线、暂停线、消耗预测与重置信号仅对 Codex 生效。"
                                    Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
                         </StackPanel>
                         </Border>
@@ -916,6 +916,15 @@
                                 <TextBlock x:Name="DeepSeekPlatformTokenHelp"
                                            Text="获取方法：登录 platform.deepseek.com 后按 F12 打开开发者工具 → 网络(Network) → 任意 /api/ 请求 → 复制请求头 Authorization 的 Bearer 值。"
                                            Foreground="{DynamicResource Subtle}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                <Border Height="1" Background="{DynamicResource Line}" Margin="0,12,0,12"/>
+                                <TextBlock Text="OpenCode Go 套餐 Key（可选）" Foreground="{DynamicResource Ink}" FontSize="12" Margin="0,0,0,6"/>
+                                <PasswordBox x:Name="OpenCodeGoApiKeyBox" Background="{DynamicResource InputSurface}"
+                                             Foreground="{DynamicResource Ink}" BorderBrush="{DynamicResource LineStrong}"
+                                             BorderThickness="1" Padding="9,6"/>
+                                <TextBlock Text="填写后，浮窗与“账户额度”显示 OpenCode Go 套餐的 5h/周/月剩余，不再显示 DeepSeek 余额；留空则继续显示余额。"
+                                           Foreground="{DynamicResource Subtle}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                <TextBlock Text="获取方法：登录 opencode.ai/console → Go → API Key，复制 oc_sk_ 开头的完整密钥。"
+                                           Foreground="{DynamicResource Subtle}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
                                 <Grid Margin="0,12,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="220"/><ColumnDefinition Width="86"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="余额预警线" Foreground="{DynamicResource Ink}" TextWrapping="Wrap"
@@ -927,13 +936,15 @@
                                            FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                 <TextBlock x:Name="DeepSeekSettingsStatusText" Foreground="{DynamicResource Signal}"
                                            FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0"/>
-                                <TextBlock Text="设置保存在本机；API Key 与平台 Token 使用 Windows DPAPI 加密。"
+                                <TextBlock Text="设置保存在本机；API Key、平台 Token 与 OpenCode Go Key 使用 Windows DPAPI 加密。"
                                            Foreground="{DynamicResource Subtle}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                 <WrapPanel Margin="0,10,0,0">
                                     <Button x:Name="SaveDeepSeekButton" Content="保存 DeepSeek 配置" Style="{StaticResource SignalButton}"
                                             Height="30" Margin="0,0,8,6" Click="SaveDeepSeek_Click"/>
                                     <Button Content="打开 DeepSeek 平台" Style="{StaticResource ActionButton}"
-                                            Height="30" Margin="0,0,0,6" Click="OpenDeepSeekPlatform_Click"/>
+                                            Height="30" Margin="0,0,8,6" Click="OpenDeepSeekPlatform_Click"/>
+                                    <Button Content="打开 OpenCode 控制台" Style="{StaticResource ActionButton}"
+                                            Height="30" Margin="0,0,0,6" Click="OpenOpenCodeConsole_Click"/>
                                 </WrapPanel>
                             </StackPanel>
                         </Border>

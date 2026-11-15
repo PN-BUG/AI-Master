@@ -76,7 +76,8 @@ public partial class AiManagerWindow
 
         if (_deepSeekMode)
         {
-            RemainingCaptionText.Text = LocalizationService.T("可用余额");
+            var goPlan = !string.IsNullOrWhiteSpace(_service.Settings.OpenCodeGoApiKey);
+            RemainingCaptionText.Text = LocalizationService.T(goPlan ? "套餐剩余" : "可用余额");
             RemainingUnitText.Visibility = Visibility.Collapsed;
             MainUsageBar.Visibility = Visibility.Collapsed;
             RemainingText.FontSize = 38;
@@ -105,8 +106,12 @@ public partial class AiManagerWindow
 
     internal void UpdateProviderCardTitles()
     {
+        // A configured OpenCode Go key turns the DeepSeek account card into the plan allowance card.
+        var quotaTitle = _deepSeekMode
+            ? (string.IsNullOrWhiteSpace(_service.Settings.OpenCodeGoApiKey) ? "账户余额" : "套餐额度")
+            : "账户额度";
         if (_dashboardCards.TryGetValue("quota", out var quota))
-            quota.HeaderTitle.Text = LocalizationService.T(_deepSeekMode ? "账户余额" : "账户额度");
+            quota.HeaderTitle.Text = LocalizationService.T(quotaTitle);
         if (_dashboardCards.TryGetValue("settings", out var settings))
             settings.HeaderTitle.Text = LocalizationService.T(_deepSeekMode ? "应用设置" : "保护策略");
         if (_dashboardCards.TryGetValue("dailyUsage", out var daily))
@@ -135,10 +140,24 @@ public partial class AiManagerWindow
         var settings = _service.Settings;
         DeepSeekApiKeyBox.Password = settings.DeepSeekApiKey;
         DeepSeekPlatformTokenBox.Password = settings.DeepSeekPlatformToken;
+        OpenCodeGoApiKeyBox.Password = settings.OpenCodeGoApiKey;
         DeepSeekBalanceWarningBox.Text = settings.DeepSeekBalanceWarning.ToString("0.##", CultureInfo.InvariantCulture);
-        DeepSeekSettingsStatusText.Text = string.IsNullOrWhiteSpace(settings.DeepSeekApiKey)
-            ? L("尚未配置 API Key", "No API key configured")
-            : L("已保存 API Key", "API key saved");
+        DeepSeekSettingsStatusText.Text = DescribeDeepSeekCredentials(settings);
+    }
+
+    private static string DescribeDeepSeekCredentials(AiManagerSettings settings)
+    {
+        var hasDeepSeek = !string.IsNullOrWhiteSpace(settings.DeepSeekApiKey);
+        var hasGo = !string.IsNullOrWhiteSpace(settings.OpenCodeGoApiKey);
+        return (hasDeepSeek, hasGo) switch
+        {
+            (false, false) => LocalizationService.L("尚未配置 API Key", "No API key configured"),
+            (true, true) => LocalizationService.L("已保存 DeepSeek 与 OpenCode Go 配置",
+                "DeepSeek and OpenCode Go credentials saved"),
+            (false, true) => LocalizationService.L("已配置 OpenCode Go，账户额度显示套餐额度",
+                "OpenCode Go configured; the account card shows the plan allowance"),
+            _ => LocalizationService.L("已保存 API Key", "API key saved")
+        };
     }
 
     private async void SaveDeepSeek_Click(object sender, RoutedEventArgs e)
@@ -153,13 +172,12 @@ public partial class AiManagerWindow
         var settings = _service.ReloadSettings();
         settings.DeepSeekApiKey = DeepSeekApiKeyBox.Password.Trim();
         settings.DeepSeekPlatformToken = DeepSeekPlatformTokenBox.Password.Trim();
+        settings.OpenCodeGoApiKey = OpenCodeGoApiKeyBox.Password.Trim();
         settings.DeepSeekBalanceWarning = warning;
         try
         {
             _service.SaveSettings(settings);
-            var status = string.IsNullOrWhiteSpace(settings.DeepSeekApiKey)
-                ? L("尚未配置 API Key", "No API key configured")
-                : L("DeepSeek 配置已保存", "DeepSeek settings saved");
+            var status = DescribeDeepSeekCredentials(settings);
             DeepSeekSettingsStatusText.Text = status;
             SetFooterStatus(status);
         }
@@ -198,12 +216,58 @@ public partial class AiManagerWindow
         }
     }
 
+    private void OpenOpenCodeConsole_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(OpenCodeGoClient.ConsoleUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            SetFooterStatus(L("无法打开 OpenCode 控制台：", "Unable to open the OpenCode Console: ") + ex.Message,
+                warning: true);
+        }
+    }
+
     private void RenderDeepSeekSnapshot(AiManagerSnapshot snapshot)
     {
         _deepSeekMode = true;
         var deepSeek = snapshot.DeepSeek;
         var balance = deepSeek?.Balance;
+        var goQuota = deepSeek?.GoQuota;
         var settings = _service.Settings;
+
+        LimitItems.ItemsSource = null;
+        LimitsCard.Visibility = Visibility.Collapsed;
+        ThreadList.ItemsSource = _taskSnapshot is not null && AiTaskSnapshotFeed.Latest is { } shared
+            ? shared.Tasks.Take(12).ToList()
+            : snapshot.Threads;
+
+        RenderLocalUsage(snapshot.LocalUsage, snapshot.DailyUsage, null);
+        if (deepSeek?.Usage is { } detailed)
+        {
+            DailyUsageTokensText.Text = FormatTokens(detailed.TodayTokens);
+            DailyUsageShareText.Text = L(
+                $"今日 {detailed.Money(detailed.TodayCost)} · {detailed.PeriodLabel} {detailed.Money(detailed.PeriodCost)}",
+                $"Today {detailed.Money(detailed.TodayCost)} · {detailed.PeriodLabel} {detailed.Money(detailed.PeriodCost)}");
+            DailyUsageShareText.Foreground = ThemeBrush("Signal");
+        }
+        else
+        {
+            DailyUsageTokensText.Text = FormatTokens(snapshot.LocalUsage.TodayTokens);
+            DailyUsageShareText.Text = deepSeek?.UsageError ?? L("DeepSeek 平台用量不可用", "DeepSeek Platform usage unavailable");
+            DailyUsageShareText.Foreground = ThemeBrush("Muted");
+        }
+        DailyUsageChartPanel.Visibility = Visibility.Collapsed;
+        DailyUsageEmptyText.Visibility = Visibility.Collapsed;
+
+        // A configured OpenCode Go key means the work is billed against the subscription, so the
+        // account card leads with the plan allowance; the DeepSeek balance only stays as context.
+        if (goQuota is not null)
+        {
+            RenderGoQuotaSummary(goQuota, balance, settings);
+            return;
+        }
 
         RemainingCaptionText.Text = LocalizationService.T("可用余额");
         RemainingUnitText.Visibility = Visibility.Collapsed;
@@ -260,35 +324,88 @@ public partial class AiManagerWindow
             QuotaStateBadge.ToolTip = deepSeek?.Error;
         }
 
-        LimitItems.ItemsSource = null;
-        LimitsCard.Visibility = Visibility.Collapsed;
-        ThreadList.ItemsSource = _taskSnapshot is not null && AiTaskSnapshotFeed.Latest is { } shared
-            ? shared.Tasks.Take(12).ToList()
-            : snapshot.Threads;
-
-        RenderLocalUsage(snapshot.LocalUsage, snapshot.DailyUsage, null);
-        if (deepSeek?.Usage is { } detailed)
-        {
-            DailyUsageTokensText.Text = FormatTokens(detailed.TodayTokens);
-            DailyUsageShareText.Text = L(
-                $"今日 {detailed.Money(detailed.TodayCost)} · {detailed.PeriodLabel} {detailed.Money(detailed.PeriodCost)}",
-                $"Today {detailed.Money(detailed.TodayCost)} · {detailed.PeriodLabel} {detailed.Money(detailed.PeriodCost)}");
-            DailyUsageShareText.Foreground = ThemeBrush("Signal");
-        }
-        else
-        {
-            DailyUsageTokensText.Text = FormatTokens(snapshot.LocalUsage.TodayTokens);
-            DailyUsageShareText.Text = deepSeek?.UsageError ?? L("DeepSeek 平台用量不可用", "DeepSeek Platform usage unavailable");
-            DailyUsageShareText.Foreground = ThemeBrush("Muted");
-        }
-        DailyUsageChartPanel.Visibility = Visibility.Collapsed;
-        DailyUsageEmptyText.Visibility = Visibility.Collapsed;
-
         SetFooterStatus(balance is { } footerBalance
             ? L($"余额 {footerBalance.TotalText} · 数据来自 DeepSeek 官方接口。",
                 $"Balance {footerBalance.TotalText} · Data from the official DeepSeek API.")
             : deepSeek?.Error ?? LocalizationService.T("等待 DeepSeek 数据"),
             warning: balance is null || balance.Total <= 0 || !balance.IsAvailable);
+    }
+
+    /// <summary>
+    /// Renders the OpenCode Go allowance on the account card: the tightest of the plan's windows is
+    /// the headline, the remaining windows share one line, and the DeepSeek balance stays as a
+    /// footnote so a depleted balance no longer hides the subscription's real headroom.
+    /// </summary>
+    private void RenderGoQuotaSummary(AiGoQuotaSnapshot goQuota, AiDeepSeekBalance? balance,
+        AiManagerSettings settings)
+    {
+        RemainingCaptionText.Text = LocalizationService.T("套餐剩余");
+        RemainingUnitText.Visibility = Visibility.Visible;
+        MainUsageBar.Visibility = Visibility.Visible;
+        ResetCreditText.Visibility = Visibility.Collapsed;
+        ResetCreditText.Text = string.Empty;
+
+        var tightest = goQuota.Tightest;
+        RemainingText.Text = tightest is null
+            ? "--"
+            : tightest.RemainingPercent.ToString("0.#", CultureInfo.InvariantCulture);
+        RemainingText.FontSize = 48;
+        // Other quota meters fill with the used share, so the plan meter follows the same rule.
+        MainUsageBar.Value = tightest?.UsedPercent ?? 0;
+
+        if (tightest is null)
+        {
+            QuotaStateText.Text = LocalizationService.T("套餐同步暂不可用");
+            QuotaStateText.Foreground = ThemeBrush("WarningText");
+            QuotaStateBadge.Background = ThemeBrush("WarningSoft");
+            MainUsedText.Text = goQuota.Error ?? L("等待 OpenCode Go 套餐数据",
+                "Waiting for OpenCode Go plan data");
+        }
+        else
+        {
+            if (tightest.UsedPercent >= settings.PausePercent)
+            {
+                QuotaStateText.Text = LocalizationService.T("套餐额度即将用尽");
+                QuotaStateText.Foreground = ThemeBrush("DangerText");
+                QuotaStateBadge.Background = ThemeBrush("DangerSoft");
+            }
+            else if (tightest.UsedPercent >= settings.WarningPercent)
+            {
+                QuotaStateText.Text = LocalizationService.T("套餐额度偏低");
+                QuotaStateText.Foreground = ThemeBrush("WarningText");
+                QuotaStateBadge.Background = ThemeBrush("WarningSoft");
+            }
+            else
+            {
+                QuotaStateText.Text = LocalizationService.T("套餐额度充足");
+                QuotaStateText.Foreground = ThemeBrush("SignalText");
+                QuotaStateBadge.Background = ThemeBrush("SignalSoft");
+            }
+            MainUsedText.Text = L(
+                $"{tightest.ShortLabel} 为主窗口 · 已用 {goQuota.UsedSummary}",
+                $"Tightest window {tightest.ShortLabel} · used {goQuota.UsedSummary}");
+        }
+
+        var next = goQuota.Windows
+            .Where(window => window.ResetsAt is not null)
+            .OrderBy(window => window.ResetsAt)
+            .FirstOrDefault();
+        var resetText = next is null
+            ? LocalizationService.T("尚未读取到重置时间")
+            : L($"{next.ShortLabel} · {LocalizationService.FormatResetTime(next.ResetsAt)}",
+                $"{next.ShortLabel} · {LocalizationService.FormatResetTime(next.ResetsAt)}");
+        MainResetText.Text = balance is null
+            ? resetText
+            : resetText + L($"\nDeepSeek 余额 {balance.TotalText}（套餐有效时仅作参考）",
+                $"\nDeepSeek balance {balance.TotalText} (reference only while the plan is active)");
+
+        QuotaStateBadge.ToolTip = goQuota.Error;
+        SetFooterStatus(tightest is null
+                ? goQuota.Error ?? LocalizationService.T("等待 OpenCode Go 套餐数据")
+                : L($"OpenCode Go 套餐 {goQuota.RemainingSummary} · 数据来自 opencode.ai。",
+                    $"OpenCode Go plan {goQuota.RemainingSummary} · Data from opencode.ai."),
+            warning: tightest is null || goQuota.Error is not null ||
+                     tightest.UsedPercent >= settings.WarningPercent);
     }
 
     private static string BuildDeepSeekUsageText(AiDeepSeekUsage usage)

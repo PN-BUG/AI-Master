@@ -141,6 +141,18 @@ internal static partial class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         else app.InitializeComponent();
         LocalizationService.Initialize(LocalizationService.English);
+        if (args.Contains("--floating-header-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyFloatingHeaderStyles();
+            app.ExitApplication();
+            return 0;
+        }
+        if (args.Contains("--opencode-go-tests", StringComparer.OrdinalIgnoreCase))
+        {
+            VerifyOpenCodeGoSupport();
+            app.ExitApplication();
+            return 0;
+        }
         if (args.Contains("--deepseek-ui-tests", StringComparer.OrdinalIgnoreCase))
         {
             VerifyDeepSeekUi();
@@ -240,6 +252,8 @@ internal static partial class Program
         VerifyTaskbarIdentity();
         VerifyQuotaNotifications();
         VerifyDeepSeekSupport();
+        VerifyFloatingHeaderStyles();
+        VerifyOpenCodeGoSupport();
         // Data-source isolation of the shared task view; no windows exist yet, so no live subscribers.
         VerifyProviderTaskFeedWithoutWindows();
         if (args.Contains("--capture-docs", StringComparer.OrdinalIgnoreCase))
@@ -248,6 +262,15 @@ internal static partial class Program
                 .Skip(1)
                 .FirstOrDefault() ?? Path.Combine(Environment.CurrentDirectory, "docs", "images");
             DocumentationScreenshotCapture.Capture(outputDirectory);
+            app.ExitApplication();
+            return 0;
+        }
+        if (args.Contains("--capture-header-styles", StringComparer.OrdinalIgnoreCase))
+        {
+            var outputDirectory = args.SkipWhile(arg => !string.Equals(arg, "--output", StringComparison.OrdinalIgnoreCase))
+                .Skip(1)
+                .FirstOrDefault() ?? Path.Combine(Environment.CurrentDirectory, "docs", "images");
+            DocumentationScreenshotCapture.CaptureHeaderStyles(outputDirectory);
             app.ExitApplication();
             return 0;
         }
@@ -531,6 +554,13 @@ internal static partial class Program
             Directory.CreateDirectory(directory);
             Environment.SetEnvironmentVariable(name, directory);
         }
+
+        // The harness session cache is the machine's real chat history even when the desktop
+        // profile is isolated, so always point the DeepSeek task source at an empty home.
+        var harnessHome = Path.Combine(Path.GetTempPath(),
+            $"AIMaster-smoke-dsh-home-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(harnessHome);
+        Environment.SetEnvironmentVariable("DSH_HOME", harnessHome);
     }
 
     private static void VerifyUpdaterPreparation()

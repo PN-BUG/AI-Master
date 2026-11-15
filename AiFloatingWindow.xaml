@@ -25,6 +25,22 @@
                 <MenuItem x:Name="ActiveQuotaMenuItem" Header="仅当前数据源" Tag="active" IsCheckable="True"
                           Click="QuotaScope_Click"/>
             </MenuItem>
+            <MenuItem x:Name="HeaderStyleMenuItem" Header="顶栏显示">
+                <MenuItem x:Name="HeaderStyleQuotaResetItem" Header="额度倒计时" Tag="quotaReset"
+                          IsCheckable="True" Click="HeaderStyle_Click"/>
+                <MenuItem x:Name="HeaderStyleTodayUsageItem" Header="今日消耗" Tag="todayUsage"
+                          IsCheckable="True" Click="HeaderStyle_Click"/>
+                <MenuItem x:Name="HeaderStyleQuotaAlertItem" Header="额度预警" Tag="quotaAlert"
+                          IsCheckable="True" Click="HeaderStyle_Click"/>
+                <MenuItem x:Name="HeaderStyleLatestEventItem" Header="最近事件" Tag="latestEvent"
+                          IsCheckable="True" Click="HeaderStyle_Click"/>
+                <MenuItem x:Name="HeaderStyleUsageTrendItem" Header="7 日用量" Tag="usageTrend"
+                          IsCheckable="True" Click="HeaderStyle_Click"/>
+                <MenuItem x:Name="HeaderStyleMinimalItem" Header="极简" Tag="minimal"
+                          IsCheckable="True" Click="HeaderStyle_Click"/>
+                <MenuItem x:Name="HeaderStyleBrandItem" Header="数据源 + 时间" Tag="brand"
+                          IsCheckable="True" Click="HeaderStyle_Click"/>
+            </MenuItem>
             <Separator/>
             <MenuItem x:Name="RefreshFrequencyMenuItem" Header="刷新频率">
                 <MenuItem Header="1 秒" Tag="1" IsCheckable="True" Click="RefreshFrequency_Click"/>
@@ -110,14 +126,24 @@
 
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="{DynamicResource FloatSignal}" Margin="0,0,6,0"/>
-                        <TextBlock x:Name="BrandText" Text="CODEX / LIVE" Foreground="{DynamicResource FloatSignal}" FontFamily="Cascadia Mono"
-                                   FontWeight="SemiBold" FontSize="{DynamicResource FloatFontBrand}"/>
-                        <TextBlock x:Name="SyncAgeText" Text="连接中" Foreground="{DynamicResource FloatMuted}"
-                                   FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontSmall}" Margin="6,0,0,0"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <!-- 顶栏文本由“顶栏显示”菜单切换；内容随数据源、额度和用量实时重排。 -->
+                    <Grid x:Name="HeaderInfoPanel" VerticalAlignment="Center" ToolTipService.ShowDuration="30000">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Ellipse x:Name="StatusDot" Width="6" Height="6" Fill="{DynamicResource FloatSignal}" VerticalAlignment="Center"/>
+                        <StackPanel x:Name="HeaderTrendPanel" Grid.Column="1" Orientation="Horizontal"
+                                    VerticalAlignment="Center" Margin="5,0,0,0" Visibility="Collapsed"/>
+                        <TextBlock x:Name="HeaderSummaryText" Grid.Column="2" Text="正在连接" Foreground="{DynamicResource FloatInk}"
+                                   FontFamily="Cascadia Mono" FontWeight="SemiBold" FontSize="{DynamicResource FloatFontBrand}"
+                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="5,0,4,0"/>
+                    </Grid>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock x:Name="SyncAgeText" Text="" Foreground="{DynamicResource FloatMuted}"
+                                   FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontSmall}"
+                                   Margin="0,0,5,0" VerticalAlignment="Center"/>
                         <Button x:Name="RefreshButton" Content="↻" ToolTip="立即刷新" Style="{StaticResource ChromeButton}" Click="RefreshNow_Click"/>
                         <Button x:Name="PinButton" Content="●" ToolTip="取消置顶" Style="{StaticResource ChromeButton}" Click="PinButton_Click"/>
                         <Button Content="×" ToolTip="关闭悬浮窗" Style="{StaticResource ChromeButton}" Click="CloseButton_Click"/>
@@ -217,6 +243,40 @@
                             <TextBlock x:Name="WeeklyQuotaLabelText" Text="周剩余" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock x:Name="WeeklyQuotaText" Text="--" Foreground="{DynamicResource FloatInk}"
+                                           FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
+                                <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
+                                           FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                    <Grid x:Name="GoQuotaRow" Margin="0,3,0,0" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock x:Name="GoRollingLabel" Text="套餐 5h" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="GoRollingText" Text="--" Foreground="{DynamicResource FloatInk}"
+                                           FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
+                                <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
+                                           FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                            <TextBlock x:Name="GoWeeklyLabel" Text="套餐 周" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="GoWeeklyText" Text="--" Foreground="{DynamicResource FloatInk}"
+                                           FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
+                                <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
+                                           FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Margin="4,0,0,0">
+                            <TextBlock x:Name="GoMonthlyLabel" Text="套餐 月" Foreground="{DynamicResource FloatMuted}" FontSize="{DynamicResource FloatFontSmall}"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="GoMonthlyText" Text="--" Foreground="{DynamicResource FloatInk}"
                                            FontFamily="Cascadia Mono" FontSize="{DynamicResource FloatFontQuota}" FontWeight="SemiBold"/>
                                 <TextBlock Text="%" Foreground="{DynamicResource FloatMuted}" FontFamily="Cascadia Mono"
                                            FontSize="{DynamicResource FloatFontPercent}" Margin="1,0,0,2" VerticalAlignment="Bottom"/>

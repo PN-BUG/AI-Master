@@ -7,6 +7,7 @@
 - Windows Forms `Screen` API（多显示器工作区定位）
 - Codex App Server JSONL 协议
 - DeepSeek HTTP API（余额）与 Deep Code 本地会话索引
+- OpenCode Go 用量接口（可选套餐额度，`https://opencode.ai/zen/go/v1/usage`）
 
 项目不依赖 SoftwareToolkit 源码。Windows 应用通知使用 `Microsoft.Toolkit.Uwp.Notifications` 7.1.3，目标系统为 Windows 10 1809 或更新版本。
 
@@ -48,6 +49,8 @@ dotnet run --project .\tests\AIMaster.Smoke\AIMaster.Smoke.csproj -c Release
 开机自启定向回归使用 `--startup-tests`；界面与中英文离线截图使用 `--startup-ui-tests --output .\artifacts\startup`。两者仅操作随机命名的测试注册表项，不修改真实 Windows 启动项。注册表保存当前程序路径，界面读取注册表状态，不随设置备份或设备同步迁移。
 
 DeepSeek 定向回归使用 `--deepseek-tests`（余额、平台用量、Deep Code 索引、凭证加密、快照聚合）和 `--deepseek-ui-tests`（DeepSeek/Codex 两种模式的主面板渲染与卡片显隐）。两者都不访问网络：HTTP 响应由测试内的 `HttpMessageHandler` 桩提供，Deep Code 索引写入临时目录。`--capture-deepseek-preview` 会把带演示数据的 DeepSeek 主面板渲染到临时目录并打印 PNG 路径，用于人工检查布局。
+
+OpenCode Go 套餐额度定向回归使用 `--opencode-go-tests`：校验用量响应解析（三档窗口、字符串百分比、Unix 时间戳、部分窗口）、Key 缺失/失效错误、Key 的 DPAPI 往返、DeepSeek 刷新附带套餐快照，以及浮窗与主面板在“有套餐显示额度、无套餐显示余额”之间的切换。测试不访问网络，全部使用桩 HTTP 响应。
 
 任务栏身份定向回归使用 `--taskbar-tests`，通过临时目录中的真实 `.lnk` 验证旧固定快捷方式迁移、参数与图标保留、其他安装路径隔离、损坏/锁定快捷方式容错及重复启动，同时运行通知中心回归；不修改用户真实固定项。应用在创建窗口和托盘之前，将进程和指向当前 EXE 的已有任务栏固定快捷方式同步到通知注册的 `AppUserModelID`，并通知 Shell 更新。不会自动新增固定项。
 
@@ -123,19 +126,20 @@ WPF 窗口
           -> 本地 JSONL 流式投影 -> %USERPROFILE%\.codex\sessions（统计、任务元数据及有限的用户输入）
       -> DeepSeekClient         -> https://api.deepseek.com/user/balance（API Key 余额）
                                 -> https://platform.deepseek.com/api/v0/...（可选平台 Token 用量）
+      -> OpenCodeGoClient       -> https://opencode.ai/zen/go/v1/usage（可选 Go 套餐 5h/周/月额度）
       -> DeepCodeTaskReader     -> %USERPROFILE%\.deepcode\projects\*\sessions-index.json（只读任务索引与 Token）
       -> SharedUsageClient     -> https://www.woliux.com/api/v1/aimaster/sync（可选设备周汇总）
   -> AiManagerSnapshot / AiFloatingSnapshot
   -> 主面板与悬浮窗渲染
 ```
 
-数据源由 `AiManagerSettings.Provider`（`codex` / `deepseek`）决定，`AiManagerService.RefreshAsync`、`RefreshFloatingAsync` 和本地任务监视器都按该值选择凭证与额度接口。DeepSeek 路径不依赖 App Server 或 Codex 桌面管道；Codex 路径不读取 DeepSeek 凭证。任务列表不受数据源限制：`AiTaskSnapshotFeed` 为两个数据源各保留一个槽位，任何一方扫描到新内容都会合并排序后发布一份统一列表，每条任务带 `Source`，因此 Codex 与 Deep Code 的任务在同一个列表里显示（主面板标注来源与模型，悬浮窗用 C/D 徽标和模型文字标注）。数据源切换只改变额度、凭证与“当前数据源”标识：主面板写入设置后调用 `AiTaskSnapshotFeed.ActivateProvider` 广播 `ProviderChanged`，两个窗口重新读取设置并以新凭证刷新，任务列表保持不空，因此不再出现 Codex 与 DeepSeek 列表交替闪烁。悬浮窗的额度区默认同时显示 Codex 的 5 小时/周额度与 DeepSeek 余额（`AiManagerSettings.FloatingQuotaScope` = `all`），也可在右键菜单中改为 `active` 仅显示当前数据源的额度；额度区固定贴住窗口底边，浮窗拉高后多出的空间由任务区吸收。后台监视器每轮扫描重读设置文件中的 provider 与任务名称来源，悬浮窗每次刷新完整重读设置（含 DeepSeek 凭证）；两者都不会保留启动时的数据源副本。设置文件正在被并发写入而暂时无法读取时保留当前内存值（切换数据源本身也会在读取失败时中止，避免写回默认值）。设置文件以临时文件替换的方式原子写入，读取遇到并发写入会短暂重试，因此关闭后重新打开仍按上次选择的数据源启动，不会因为读到半写文件而回退到 Codex 默认值。
+数据源由 `AiManagerSettings.Provider`（`codex` / `deepseek`）决定，`AiManagerService.RefreshAsync`、`RefreshFloatingAsync` 和本地任务监视器都按该值选择凭证与额度接口。DeepSeek 路径不依赖 App Server 或 Codex 桌面管道；Codex 路径不读取 DeepSeek 凭证。任务列表不受数据源限制：`AiTaskSnapshotFeed` 为两个数据源各保留一个槽位，任何一方扫描到新内容都会合并排序后发布一份统一列表，每条任务带 `Source`，因此 Codex 与 Deep Code 的任务在同一个列表里显示（主面板标注来源与模型，悬浮窗用 C/D 徽标和模型文字标注）。数据源切换只改变额度、凭证与“当前数据源”标识：主面板写入设置后调用 `AiTaskSnapshotFeed.ActivateProvider` 广播 `ProviderChanged`，两个窗口重新读取设置并以新凭证刷新，任务列表保持不空，因此不再出现 Codex 与 DeepSeek 列表交替闪烁。悬浮窗的额度区默认同时显示 Codex 的 5 小时/周额度与 DeepSeek 余额（`AiManagerSettings.FloatingQuotaScope` = `all`），配置 OpenCode Go 套餐 Key 后余额一行由套餐 5h/周/月三档剩余百分比替换，也可在右键菜单中改为 `active` 仅显示当前数据源的额度；额度区固定贴住窗口底边，浮窗拉高后多出的空间由任务区吸收。后台监视器每轮扫描重读设置文件中的 provider 与任务名称来源，悬浮窗每次刷新完整重读设置（含 DeepSeek 凭证）；两者都不会保留启动时的数据源副本。设置文件正在被并发写入而暂时无法读取时保留当前内存值（切换数据源本身也会在读取失败时中止，避免写回默认值）。设置文件以临时文件替换的方式原子写入，读取遇到并发写入会短暂重试，因此关闭后重新打开仍按上次选择的数据源启动，不会因为读到半写文件而回退到 Codex 默认值。
 
 `--provider-task-tests` 回归校验统一任务列表：两个数据源的发布按状态与时间合并成一份带 `Source` 的列表、单源重建不影响另一源、切换数据源只广播 `ProviderChanged` 而不清空任务、后台监视器无论当前数据源都持续发布两个来源、两个窗口都显示合并列表及每条任务的来源与模型、默认额度区同时显示两个数据源并可通过设置改为 `active`；同时校验数据源选择在重启后保留、设置文件并发读写不会读到半写内容。
 
-DeepSeek 凭证分别以 `AIMaster.DeepSeek.v1` 为 DPAPI 附加熵保存；API Key 只用于公开余额接口，平台 Token 只用于平台私有用量接口。`DeepSeekClient` 对平台用量采用容错解析：递归收集带日期、Token、成本、模型和 API Key 字段的对象，兼容嵌套结构和按日/按月两种回退；接口失败时保留余额并单独报告用量错误，不阻塞任务列表。`DeepCodeTaskReader` 每秒最多读取一次索引，按 `usagePerModel` 选主模型，并回退到 `~/.deepcode/settings.json` 的 `env.MODEL` 与 `reasoningEffort`。
+DeepSeek 凭证分别以 `AIMaster.DeepSeek.v1` 为 DPAPI 附加熵保存；API Key 只用于公开余额接口，平台 Token 只用于平台私有用量接口，OpenCode Go 套餐 Key 只用于套餐用量接口。`DeepSeekClient` 对平台用量采用容错解析：递归收集带日期、Token、成本、模型和 API Key 字段的对象，兼容嵌套结构和按日/按月两种回退；接口失败时保留余额并单独报告用量错误，不阻塞任务列表。`OpenCodeGoClient` 读取 `usage.rolling/weekly/monthly` 三档窗口的 `status`、`percent`（已用比例）与 `resetsAt`，缺失窗口直接省略，全部缺失才视为解析失败；余额读取与套餐读取相互独立，任何一侧失败都不影响另一侧显示。`DeepCodeTaskReader` 每秒最多读取一次索引，按 `usagePerModel` 选主模型，并回退到 `~/.deepcode/settings.json` 的 `env.MODEL` 与 `reasoningEffort`。
 
-DeepSeek 数据源的任务由两个本地来源合并进同一个 feed 槽位：Deep Code 的 `sessions-index.json` 和 DeepSeek 桌面版（`%APPDATA%\@deepseek-ai\dsh-desktop\Local Storage\leveldb`）的 Chromium LevelDB。`DeepSeekDesktopTaskReader` 只读该目录（`DSH_DESKTOP_HOME` 可覆盖），共享锁读取正在写入的日志，解析 LevelDB 的 WAL 分片记录、WriteBatch、`.ldb` 表的块索引与 Snappy 压缩块；桌面版把对话正文放在云端，本地只有会话 ID、草稿/已发送提示词和待回答问题，因此任务以第一条已发送提示词命名、最后一条作为最新消息，有未回答问题时为 `waitingOnUserInput`，模型显示为 `--`，点击通过 `dsh://open` 唤起桌面版。两处监视器（Deep Code 索引与桌面版 leveldb）任一变化都会重读并发布合并后的列表；冒烟测试通过 `DEEPCODE_HOME` 与 `DSH_DESKTOP_HOME` 指向空目录，避免依赖真实历史。
+DeepSeek 数据源的任务由两个本地来源合并进同一个 feed 槽位：Deep Code 的 `sessions-index.json` 和 DeepSeek 桌面版的任务状态。桌面版把对话正文放在云端，其 Chromium LocalStorage（`%APPDATA%\@deepseek-ai\dsh-desktop\Local Storage\leveldb`，`DSH_DESKTOP_HOME` 可覆盖）只有会话 ID、草稿/已发送提示词和待回答问题；这些记录按 Chromium 的编码标记（0 = UTF-16LE，1 = Latin-1）解码，忽略标记会漏掉纯 ASCII 记录（例如清空“待回答问题”的写入），所以标记必须保留。真正判断任务状态的是桌面版本体写出的会话投影缓存（`~/.dsh/storages/session_projcache/sessions/session-<id>.json`，`DSH_HOME` 可覆盖，`DeepSeekHarnessSessionReader` 只读）：其中 `title` 是生成的会话标题，`modelSelection.lastUsed.model` 是所选模型，`approvalState.turnOpen`/`sessionStats.openStep` 表示回合是否仍在进行，`userQuestions.questions.active` 表示是否有待回答的提问。因此有提问时为 `waitingOnUserInput`，回合未结束（或步骤进行中）时为 `inProgress`，否则为 `completed`；任务同时显示真实标题、模型、项目路径与更新时间。任务 ID 以 `session-` 开头的才是用户会话，子代理会话使用纯 GUID 文件名，必须忽略；缓存落后于会话日志（最多一个刷写间隔），损坏或格式不兼容的记录直接跳过并回退到 LocalStorage。两处监视器（Deep Code 索引与桌面版 leveldb）任一变化都会重读并发布合并后的列表；冒烟测试通过 `DEEPCODE_HOME`、`DSH_DESKTOP_HOME` 与 `DSH_HOME` 指向空目录，避免依赖真实历史。
 
 App Server 请求使用独立超时；任务、模型或历史用量等可选请求失败时，不应阻止本地任务降级和已有额度信息显示。
 

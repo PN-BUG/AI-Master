@@ -147,8 +147,26 @@ public static class LocalizationService
             "To get it: sign in to platform.deepseek.com, press F12 to open DevTools → Network, open any /api/ request, and copy the Authorization Bearer value from its request headers.",
         ["余额预警线"] = "Low balance warning",
         ["余额低于此值时高亮提示；0 表示关闭。"] = "Highlights the balance when it falls below this value; 0 disables the warning.",
-        ["DeepSeek 按账户余额计费，没有百分比额度窗口；预警线、暂停线、消耗预测与重置信号仅对 Codex 生效。"] =
-            "DeepSeek bills against an account balance and has no percentage quota window; thresholds, the guard, forecasts, and reset signals apply to Codex only.",
+        ["OpenCode Go 套餐 Key（可选）"] = "OpenCode Go plan key (optional)",
+        ["填写后，浮窗与“账户额度”显示 OpenCode Go 套餐的 5h/周/月剩余，不再显示 DeepSeek 余额；留空则继续显示余额。"] =
+            "When set, the floating monitor and the account card show the OpenCode Go 5h/week/month allowance instead of the DeepSeek balance; leave it empty to keep the balance.",
+        ["获取方法：登录 opencode.ai/console → Go → API Key，复制 oc_sk_ 开头的完整密钥。"] =
+            "To get it: sign in to opencode.ai/console → Go → API Key and copy the full key that starts with oc_sk_.",
+        ["设置保存在本机；API Key、平台 Token 与 OpenCode Go Key 使用 Windows DPAPI 加密。"] =
+            "Settings stay on this device; the API key, Platform token, and OpenCode Go key are encrypted with Windows DPAPI.",
+        ["打开 OpenCode 控制台"] = "Open OpenCode Console",
+        ["已保存 DeepSeek 与 OpenCode Go 配置"] = "DeepSeek and OpenCode Go credentials saved",
+        ["已配置 OpenCode Go，账户额度显示套餐额度"] =
+            "OpenCode Go configured; the account card shows the plan allowance",
+        ["套餐额度"] = "PLAN QUOTA", ["套餐剩余"] = "PLAN LEFT",
+        ["套餐额度充足"] = "Plan allowance available", ["套餐额度偏低"] = "Plan allowance low",
+        ["套餐额度即将用尽"] = "Plan allowance nearly used",
+        ["套餐同步暂不可用"] = "Plan sync unavailable",
+        ["尚未读取到重置时间"] = "No reset time yet",
+        ["等待 OpenCode Go 套餐数据"] = "Waiting for OpenCode Go plan data",
+        ["DeepSeek 默认按账户余额计费；填写 OpenCode Go 套餐 Key 后，账户额度与浮窗改为显示套餐 5h/周/月剩余。预警线、暂停线、消耗预测与重置信号仅对 Codex 生效。"] =
+            "DeepSeek bills against an account balance; a configured OpenCode Go key switches the account card and the floating monitor to the plan's 5h/week/month allowance. Thresholds, the guard, forecasts, and reset signals apply to Codex only.",
+        ["套餐 5h"] = "Go 5h", ["套餐 周"] = "Go week", ["套餐 月"] = "Go month",
         ["读取 ~/.deepcode 中由 Deep Code 写入的本地会话索引；无需 Deep Code 正在运行。"] =
             "Reads the local session indexes Deep Code writes under ~/.deepcode; Deep Code does not need to be running.",
         ["DeepSeek 平台未提供分时用量；此卡显示当日总量。"] =

@@ -34,6 +34,42 @@ public static class FloatingQuotaScopes
         string.Equals(value, Active, StringComparison.OrdinalIgnoreCase) ? Active : All;
 }
 
+/// <summary>What the floating monitor's top line shows. Every value is a selectable style in the
+/// monitor's context menu; the quota countdown is the default because remaining quota and the next
+/// reset are what the monitor is opened for.</summary>
+public static class FloatingHeaderStyles
+{
+    /// <summary>Data-source brand plus the absolute capture clock (the original header).</summary>
+    public const string Brand = "brand";
+    /// <summary>Remaining quota of the tightest window plus its reset countdown.</summary>
+    public const string QuotaReset = "quotaReset";
+    /// <summary>Today's tokens (or DeepSeek spend) and this week's local total.</summary>
+    public const string TodayUsage = "todayUsage";
+    /// <summary>Quota/balance warning text, falling back to the task overview when everything is fine.</summary>
+    public const string QuotaAlert = "quotaAlert";
+    /// <summary>The most recent task event or reset announcement.</summary>
+    public const string LatestEvent = "latestEvent";
+    /// <summary>A seven-day usage sparkline plus today's total.</summary>
+    public const string UsageTrend = "usageTrend";
+    /// <summary>Only the live dot and the freshness label.</summary>
+    public const string Minimal = "minimal";
+
+    public static string Normalize(string? value) => value switch
+    {
+        Brand => Brand,
+        TodayUsage => TodayUsage,
+        QuotaAlert => QuotaAlert,
+        LatestEvent => LatestEvent,
+        UsageTrend => UsageTrend,
+        Minimal => Minimal,
+        _ => QuotaReset
+    };
+
+    /// <summary>True when the style needs local/official usage, which the service loads lazily.</summary>
+    public static bool NeedsUsage(string? value) =>
+        Normalize(value) is TodayUsage or UsageTrend;
+}
+
 public static class SharedUsageResetModes
 {
     public const string Weekly = "weekly";
@@ -128,6 +164,10 @@ public sealed class AiManagerSettings
     [JsonPropertyName("floatingQuotaScope")]
     public string FloatingQuotaScope { get; set; } = FloatingQuotaScopes.All;
 
+    /// <summary>Which text the floating monitor's top line shows; see <see cref="FloatingHeaderStyles"/>.</summary>
+    [JsonPropertyName("floatingHeaderStyle")]
+    public string FloatingHeaderStyle { get; set; } = FloatingHeaderStyles.QuotaReset;
+
     [JsonPropertyName("deepseekApiKeyProtected")]
     public string DeepSeekApiKeyProtected { get; set; } = string.Empty;
 
@@ -143,6 +183,15 @@ public sealed class AiManagerSettings
     /// <summary>Notify visually below this balance; 0 disables the low-balance state.</summary>
     [JsonPropertyName("deepseekBalanceWarning")]
     public double DeepSeekBalanceWarning { get; set; }
+
+    /// <summary>OpenCode Go plan key. When present the DeepSeek account area shows the plan's
+    /// 5-hour, weekly and monthly allowance instead of the pay-as-you-go balance, because that
+    /// subscription is what the coding work is actually billed against.</summary>
+    [JsonPropertyName("openCodeGoApiKeyProtected")]
+    public string OpenCodeGoApiKeyProtected { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string OpenCodeGoApiKey { get; set; } = string.Empty;
 
     [JsonPropertyName("sharedUsageEnabled")]
     public bool SharedUsageEnabled { get; set; }
@@ -417,6 +466,18 @@ public sealed class AiFloatingSnapshot
     public string? DeepSeekBalanceDetail { get; init; }
     public string? DeepSeekBalanceError { get; init; }
     public DateTimeOffset? DeepSeekBalanceCapturedAt { get; init; }
+    /// <summary>OpenCode Go allowance when a Go key is configured; null keeps the balance row.
+    /// The floating monitor shows the quota band instead of the balance while this is set.</summary>
+    public AiGoQuotaSnapshot? GoQuota { get; init; }
+    public string? GoQuotaError { get; init; }
+    public DateTimeOffset? GoQuotaCapturedAt { get; init; }
+    /// <summary>Numeric balance, used by the quota-alert header style; null until the account is read.</summary>
+    public AiDeepSeekBalance? DeepSeekBalance { get; init; }
+    /// <summary>Official DeepSeek platform usage (today's tokens/cost); null without a platform token.</summary>
+    public AiDeepSeekUsage? DeepSeekUsage { get; init; }
+    /// <summary>Local Codex session usage, loaded only when the header style needs it.</summary>
+    public AiLocalUsageSummary? LocalCodexUsage { get; init; }
+    public DateTimeOffset? LocalUsageCapturedAt { get; init; }
     /// <summary>Provider-specific primary value. Codex uses <see cref="RemainingPercent"/>; DeepSeek uses money.</summary>
     public string? QuotaText { get; init; }
     public string QuotaLabel { get; init; } = "剩余额度";

@@ -24,6 +24,8 @@ internal sealed class AiManagerService : IAsyncDisposable
     private readonly CodexAppServerClient _client;
     private readonly DeepSeekClient _deepSeekClient;
     private readonly bool _ownsDeepSeekClient;
+    private readonly OpenCodeGoClient _openCodeGoClient;
+    private readonly bool _ownsOpenCodeGoClient;
     private readonly DeepCodeTaskReader _deepCodeTaskReader;
     private readonly DeepSeekDesktopTaskReader _deepSeekDesktopTaskReader;
     private readonly SharedUsageClient _sharedUsageClient;
@@ -59,7 +61,13 @@ internal sealed class AiManagerService : IAsyncDisposable
     private DateTimeOffset _floatingModelsAttemptAt;
     private AiDeepSeekSnapshot? _floatingDeepSeek;
     private DateTimeOffset _floatingDeepSeekAttemptAt;
+    private AiGoQuotaSnapshot? _floatingGoQuota;
+    private DateTimeOffset _floatingGoQuotaAttemptAt;
     private AiLocalUsageSummary? _lastDeepCodeUsage;
+    private AiLocalUsageSummary? _floatingLocalUsage;
+    private DateTimeOffset _floatingLocalUsageAt;
+    // 悬浮窗顶栏的用量样式按分钟刷新即可：本地会话扫描是增量读取，但仍会遍历会话目录。
+    private static readonly TimeSpan FloatingUsageRefreshInterval = TimeSpan.FromMinutes(1);
     internal const string DeepSeekSecretPurpose = "AIMaster.DeepSeek.v1";
 
     internal abstract class CachedCursor
@@ -111,13 +119,16 @@ internal sealed class AiManagerService : IAsyncDisposable
         AiManagerRuntime? runtime = null,
         DeepSeekClient? deepSeekClient = null,
         DeepCodeTaskReader? deepCodeTaskReader = null,
-        DeepSeekDesktopTaskReader? deepSeekDesktopTaskReader = null)
+        DeepSeekDesktopTaskReader? deepSeekDesktopTaskReader = null,
+        OpenCodeGoClient? openCodeGoClient = null)
     {
         _runtime = runtime ?? new AiManagerRuntime();
         _ownsRuntime = runtime is null;
         _client = _runtime.Client;
         _deepSeekClient = deepSeekClient ?? new DeepSeekClient();
         _ownsDeepSeekClient = deepSeekClient is null;
+        _openCodeGoClient = openCodeGoClient ?? new OpenCodeGoClient();
+        _ownsOpenCodeGoClient = openCodeGoClient is null;
         _deepCodeTaskReader = deepCodeTaskReader ?? new DeepCodeTaskReader();
         _deepSeekDesktopTaskReader = deepSeekDesktopTaskReader ?? new DeepSeekDesktopTaskReader();
         _rolloutCursors = _runtime.RolloutCursors;
@@ -135,6 +146,7 @@ internal sealed class AiManagerService : IAsyncDisposable
     public string? LastQuotaError { get; private set; }
     public string? LastDeepSeekError { get; private set; }
     public string? LastDeepSeekUsageError { get; private set; }
+    public string? LastGoQuotaError { get; private set; }
     internal string AccountResetStatePath => Path.Combine(Path.GetDirectoryName(_settingsPath)!, "account-reset-state.json");
 
     public async Task<AiManagerSnapshot> RefreshAsync(CancellationToken cancellationToken = default)
@@ -212,6 +224,9 @@ internal sealed class AiManagerService : IAsyncDisposable
         var settings = Settings;
         var quotaTask = _deepSeekClient.ReadAsync(settings.DeepSeekApiKey, settings.DeepSeekPlatformToken,
             cancellationToken);
+        // The plan allowance is independent of the DeepSeek balance request; each one keeps its
+        // own error state so a broken credential never hides the other half of the account view.
+        var goQuotaTask = ReadGoQuotaAsync(settings, cancellationToken);
         var codeTask = ReadDeepSeekTasksAsync(cancellationToken);
         AiDeepSeekSnapshot? deepSeek = null;
         try { deepSeek = await quotaTask.ConfigureAwait(false); }
@@ -220,6 +235,8 @@ internal sealed class AiManagerService : IAsyncDisposable
         {
             LastDeepSeekError = ex.Message;
         }
+        var goQuota = await goQuotaTask.ConfigureAwait(false);
+        if (goQuota is not null) deepSeek = AttachGoQuota(deepSeek, goQuota);
         var code = await codeTask.ConfigureAwait(false);
         _lastDeepCodeUsage = code.LocalUsage;
         if (deepSeek is not null) _floatingDeepSeek = deepSeek;
@@ -238,6 +255,41 @@ internal sealed class AiManagerService : IAsyncDisposable
         };
         return LastSnapshot;
     }
+
+    private async Task<AiGoQuotaSnapshot?> ReadGoQuotaAsync(AiManagerSettings settings,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(settings.OpenCodeGoApiKey))
+        {
+            LastGoQuotaError = null;
+            return null;
+        }
+        try
+        {
+            var snapshot = await _openCodeGoClient.ReadAsync(settings.OpenCodeGoApiKey, cancellationToken)
+                .ConfigureAwait(false);
+            LastGoQuotaError = snapshot.Error;
+            return snapshot;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            LastGoQuotaError = ex.Message;
+            return new AiGoQuotaSnapshot { Error = ex.Message };
+        }
+    }
+
+    /// <summary>Copies the plan allowance onto the balance snapshot without dropping either half.</summary>
+    private static AiDeepSeekSnapshot AttachGoQuota(AiDeepSeekSnapshot? source, AiGoQuotaSnapshot goQuota) =>
+        new()
+        {
+            Balance = source?.Balance,
+            Usage = source?.Usage,
+            Error = source?.Error,
+            UsageError = source?.UsageError,
+            CapturedAt = source?.CapturedAt ?? goQuota.CapturedAt,
+            GoQuota = goQuota
+        };
 
     /// <summary>Reads every DeepSeek task source and publishes them as one slot.</summary>
     private async Task<DeepCodeSnapshot> ReadDeepSeekTasksAsync(CancellationToken cancellationToken)
@@ -331,10 +383,22 @@ internal sealed class AiManagerService : IAsyncDisposable
     {
         var now = DateTimeOffset.Now;
         var refreshQuota = forceRefresh || now - _floatingDeepSeekAttemptAt >= TimeSpan.FromMinutes(1);
+        var refreshGoQuota = forceRefresh || now - _floatingGoQuotaAttemptAt >= TimeSpan.FromMinutes(1);
         if (refreshQuota) _floatingDeepSeekAttemptAt = now;
+        if (refreshGoQuota) _floatingGoQuotaAttemptAt = now;
+        var hasGoKey = !string.IsNullOrWhiteSpace(Settings.OpenCodeGoApiKey);
+        if (!hasGoKey)
+        {
+            // Removing the key switches the monitor back to the pay-as-you-go balance row.
+            _floatingGoQuota = null;
+            LastGoQuotaError = null;
+        }
 
         Task<AiDeepSeekSnapshot>? quotaTask = refreshQuota
             ? _deepSeekClient.ReadAsync(Settings.DeepSeekApiKey, Settings.DeepSeekPlatformToken, cancellationToken)
+            : null;
+        Task<AiGoQuotaSnapshot?>? goQuotaTask = refreshGoQuota && hasGoKey
+            ? ReadGoQuotaAsync(Settings, cancellationToken)
             : null;
         var codeTask = ReadDeepSeekTasksAsync(cancellationToken);
         if (quotaTask is not null)
@@ -347,6 +411,20 @@ internal sealed class AiManagerService : IAsyncDisposable
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { LastDeepSeekError = ex.Message; }
+        }
+        if (goQuotaTask is not null)
+        {
+            try
+            {
+                _floatingGoQuota = await goQuotaTask.ConfigureAwait(false);
+                LastGoQuotaError = _floatingGoQuota?.Error;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                LastGoQuotaError = ex.Message;
+                _floatingGoQuota = new AiGoQuotaSnapshot { Error = ex.Message };
+            }
         }
         var code = await codeTask.ConfigureAwait(false);
         _lastDeepCodeUsage = code.LocalUsage;
@@ -367,6 +445,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         var deepSeekTask = RefreshDeepSeekFloatingAsync(forceRefresh, cancellationToken);
         await Task.WhenAll(codexTask, deepSeekTask).ConfigureAwait(false);
         AdoptLatestQuota();
+        var localUsage = await LoadFloatingUsageIfNeededAsync(cancellationToken).ConfigureAwait(false);
 
         var tasks = AiTaskSnapshotFeed.Tasks;
         var focus = tasks.FirstOrDefault();
@@ -384,6 +463,11 @@ internal sealed class AiManagerService : IAsyncDisposable
         DateTimeOffset? codexCapturedAt = _floatingLimitsAt == default ? null : _floatingLimitsAt;
         var deepSeekCapturedAt = _floatingDeepSeek?.CapturedAt;
         var isDeepSeek = AiProviderModes.IsDeepSeek(provider);
+        // The Go snapshot only counts while a key is configured: removing the key must restore the
+        // balance row immediately, even before the balance itself is re-read.
+        var goQuota = string.IsNullOrWhiteSpace(Settings.OpenCodeGoApiKey)
+            ? null
+            : _floatingDeepSeek?.GoQuota ?? _floatingGoQuota;
         return new AiFloatingSnapshot
         {
             Provider = provider,
@@ -397,6 +481,13 @@ internal sealed class AiManagerService : IAsyncDisposable
             DeepSeekBalanceDetail = balanceDetail,
             DeepSeekBalanceError = LastDeepSeekError,
             DeepSeekBalanceCapturedAt = deepSeekCapturedAt,
+            DeepSeekBalance = balance,
+            DeepSeekUsage = _floatingDeepSeek?.Usage,
+            GoQuota = goQuota,
+            GoQuotaError = LastGoQuotaError,
+            GoQuotaCapturedAt = goQuota?.CapturedAt,
+            LocalCodexUsage = localUsage,
+            LocalUsageCapturedAt = localUsage is null ? null : _floatingLocalUsageAt,
             Tasks = tasks.Take(8).ToList(),
             TaskName = focus?.DisplayTitle ?? LocalizationService.L("暂无最近任务", "No recent tasks"),
             TaskStatus = focus?.Status ?? "notLoaded",
@@ -421,6 +512,33 @@ internal sealed class AiManagerService : IAsyncDisposable
         limits.Where(item => item.WindowDurationMinutes == minutes)
             .OrderByDescending(item => item.LimitId.Equals("codex", StringComparison.OrdinalIgnoreCase))
             .ThenBy(item => item.RemainingPercent).FirstOrDefault();
+
+    /// <summary>
+    /// Supplies local session usage for the header styles that show it. Scanning stays off the UI
+    /// thread and is throttled, so a 1-second monitor tick does not re-read the sessions tree.
+    /// </summary>
+    private async Task<AiLocalUsageSummary?> LoadFloatingUsageIfNeededAsync(CancellationToken cancellationToken)
+    {
+        if (!FloatingHeaderStyles.NeedsUsage(Settings.FloatingHeaderStyle)) return _floatingLocalUsage;
+        if (_floatingLocalUsage is not null &&
+            DateTimeOffset.Now - _floatingLocalUsageAt < FloatingUsageRefreshInterval) return _floatingLocalUsage;
+        try
+        {
+            // DiscoverLocalUsage reuses the shared cursors, so only new bytes are parsed on each scan.
+            _floatingLocalUsage = await Task.Run(() => DiscoverLocalUsage(cancellationToken), cancellationToken)
+                .ConfigureAwait(false);
+            _floatingLocalUsageAt = DateTimeOffset.Now;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AiManager] Floating usage unavailable: {ex.Message}");
+        }
+        return _floatingLocalUsage;
+    }
 
     private async Task<List<AiThreadSummary>> RefreshTaskSummariesAsync(bool appServerAvailable,
         CancellationToken cancellationToken)
@@ -806,6 +924,8 @@ internal sealed class AiManagerService : IAsyncDisposable
             settings.DeepSeekApiKey, DeepSeekSecretPurpose);
         settings.DeepSeekPlatformTokenProtected = LocalSecretProtection.Protect(
             settings.DeepSeekPlatformToken, DeepSeekSecretPurpose);
+        settings.OpenCodeGoApiKeyProtected = LocalSecretProtection.Protect(
+            settings.OpenCodeGoApiKey, DeepSeekSecretPurpose);
         // Replace the file atomically: several windows read the shared settings file while another
         // one saves, and a half-written file used to parse as defaults (selected Codex, lost keys).
         var temporaryPath = _settingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -1414,10 +1534,13 @@ internal sealed class AiManagerService : IAsyncDisposable
                 settings.DeepSeekApiKeyProtected, DeepSeekSecretPurpose);
             settings.DeepSeekPlatformToken = LocalSecretProtection.Unprotect(
                 settings.DeepSeekPlatformTokenProtected, DeepSeekSecretPurpose);
+            settings.OpenCodeGoApiKey = LocalSecretProtection.Unprotect(
+                settings.OpenCodeGoApiKeyProtected, DeepSeekSecretPurpose);
             if (!double.IsFinite(settings.DeepSeekBalanceWarning) || settings.DeepSeekBalanceWarning < 0)
                 settings.DeepSeekBalanceWarning = 0;
             settings.TaskNameSource = TaskNameSources.Normalize(settings.TaskNameSource);
             settings.FloatingQuotaScope = FloatingQuotaScopes.Normalize(settings.FloatingQuotaScope);
+            settings.FloatingHeaderStyle = FloatingHeaderStyles.Normalize(settings.FloatingHeaderStyle);
             settings.FloatingFontScale = FloatingFontScales.Normalize(settings.FloatingFontScale);
             if (settings.FloatingWindowPlacement is { IsValid: false })
                 settings.FloatingWindowPlacement = null;
@@ -1920,6 +2043,7 @@ internal sealed class AiManagerService : IAsyncDisposable
         {
             _sharedUsageClient.Dispose();
             if (_ownsDeepSeekClient) _deepSeekClient.Dispose();
+            if (_ownsOpenCodeGoClient) _openCodeGoClient.Dispose();
             if (_ownsRuntime) await _runtime.DisposeAsync();
         }
         finally { _sharedUsageGate.Release(); }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using AIMaster.Models;
 using AIMaster.Services;
 
@@ -13,6 +14,7 @@ internal static partial class Program
         VerifyDeepSeekDesktopLogReader();
         VerifySnappyCodec();
         VerifyLevelDbTableReader();
+        VerifyDeepSeekHarnessSessionCache();
         VerifyDeepSeekDesktopMergesIntoFeed();
         VerifyDeepSeekDesktopActivation();
     }
@@ -85,11 +87,137 @@ internal static partial class Program
             Check(withUtf8.Any(task => task.Id == "session-33333333-3333-3333-3333-333333333333" &&
                                        task.Title == "UTF-8 会话"),
                 "local-storage values are accepted in both UTF-16 and UTF-8 encodings");
+
+            // Chromium tags ASCII-only JSON with byte 1 (Latin-1). These writes include the empty
+            // question state that clears an answered prompt, so they must be decoded too.
+            WriteLevelDbLog(Path.Combine(levelDb, "000005.log"),
+            [
+                ("_dsh-app://app dsh.conversation.session-66666666-6666-6666-6666-666666666666",
+                    DesktopLatin1Value("""{"draft":{"text":"English prompt","references":[]}}""")),
+                ("_dsh-app://app dsh.user-questions.drafts.v1.session-66666666-6666-6666-6666-666666666666",
+                    DesktopLatin1Value("""{"progressByRequest":{}}"""))
+            ]);
+            var withLatin1 = reader.Read(60);
+            var english = withLatin1.SingleOrDefault(task =>
+                task.Id == "session-66666666-6666-6666-6666-666666666666");
+            Check(english is { Title: "English prompt", Status: "completed" },
+                "Latin-1-tagged LocalStorage JSON (ASCII-only prompts and empty question states) is decoded");
         }
         finally
         {
             try { Directory.Delete(root, recursive: true); } catch (IOException) { }
         }
+    }
+
+    /// <summary>
+    /// The harness checkpoints one projection record per session; it carries the generated title,
+    /// selected model and open-turn/question state the LocalStorage drafts cannot express, so it
+    /// decides the task status instead of guessing from drafts alone.
+    /// </summary>
+    private static void VerifyDeepSeekHarnessSessionCache()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "AIMaster-dsh-cache-" + Guid.NewGuid().ToString("N"));
+        var levelDb = Path.Combine(root, "leveldb");
+        var sessions = Path.Combine(root, "storages", "session_projcache", "sessions");
+        Directory.CreateDirectory(levelDb);
+        Directory.CreateDirectory(sessions);
+        try
+        {
+            var now = DateTimeOffset.Parse("2026-11-13T18:00:00+08:00");
+            var messageAt = now.ToUnixTimeMilliseconds();
+            const string running = "session-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+            const string waiting = "session-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+            const string finished = "session-cccccccc-cccc-cccc-cccc-cccccccccccc";
+            const string draftOnly = "session-dddddddd-dddd-dddd-dddd-dddddddddddd";
+            const string subagent = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+            File.WriteAllText(Path.Combine(sessions, running + ".json"),
+                SessionCacheJson("修复登录跳转", turnOpen: true, openStep: false, question: false,
+                    cwd: "E:\\work", messageAtMs: messageAt));
+            File.WriteAllText(Path.Combine(sessions, waiting + ".json"),
+                SessionCacheJson("确认发布范围", turnOpen: true, openStep: false, question: true,
+                    cwd: "E:\\work", messageAtMs: messageAt - 60_000));
+            File.WriteAllText(Path.Combine(sessions, finished + ".json"),
+                SessionCacheJson("整理文档", turnOpen: false, openStep: false, question: false,
+                    cwd: "E:\\docs", messageAtMs: messageAt - 120_000));
+            File.WriteAllText(Path.Combine(sessions, subagent + ".json"),
+                SessionCacheJson("子代理任务", turnOpen: true, openStep: true, question: false,
+                    cwd: "E:\\work", messageAtMs: messageAt));
+            File.WriteAllText(Path.Combine(sessions, "session-damaged.json"), "{ not json");
+
+            // LocalStorage still reports a pending question for the running session and carries a
+            // conversation the harness has not checkpointed; the checkpoint must win on status.
+            var prefix = DesktopSessionPrefix(running);
+            WriteLevelDbLog(Path.Combine(levelDb, "000003.log"),
+            [
+                (prefix + "dsh.conversation." + running,
+                    DesktopLatin1Value("""{"draft":{"text":"修复登录跳转","references":[]}}""")),
+                (prefix + "dsh.conversation." + draftOnly,
+                    DesktopLatin1Value("""{"draft":{"text":"English draft only","references":[]}}""")),
+                (prefix + "dsh.user-questions.drafts.v1." + running,
+                    DesktopLatin1Value("""{"progressByRequest":{"question:1":{"wait":"editing"}}}"""))
+            ]);
+
+            var reader = new DeepSeekDesktopTaskReader(levelDb, () => now, TimeSpan.Zero, sessions);
+            var tasks = reader.Read(60);
+            Check(tasks.Count == 4 && tasks.All(task => task.Source == AiProviderModes.DeepSeek),
+                "checkpointed harness sessions and LocalStorage-only conversations share the DeepSeek task list");
+            var runningTask = tasks.Single(task => task.Id == running);
+            Check(runningTask.Status == "inProgress" && runningTask.Title == "修复登录跳转" &&
+                  runningTask.ModelName == "deepseek-v4.1-flash" &&
+                  runningTask.ProjectPath == "E:\\work" &&
+                  runningTask.UpdatedAt == DateTimeOffset.FromUnixTimeMilliseconds(messageAt),
+                "an open harness turn reports running instead of a stale draft question, with title, model, project and update time");
+            Check(tasks.Single(task => task.Id == waiting).Status == "waitingOnUserInput",
+                "an active harness question reports waiting for input");
+            Check(tasks.Single(task => task.Id == finished).Status == "completed",
+                "a closed harness turn reports completed");
+            Check(tasks.Single(task => task.Id == draftOnly).Status == "completed",
+                "a conversation only in LocalStorage keeps its typed prompt and falls back to completed");
+            Check(tasks[0].Id == waiting && tasks[1].Id == running,
+                "waiting and running tasks sort ahead of finished ones");
+            Check(tasks.All(task => task.Id != subagent && task.Id != "session-damaged"),
+                "subagent sessions and unreadable checkpoint records are ignored");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>One checkpoint record shaped like the harness's row/val projection format.</summary>
+    private static string SessionCacheJson(string title, bool turnOpen, bool openStep, bool question,
+        string cwd, long messageAtMs, bool blank = false)
+    {
+        var questions = question
+            ? """{"questions":{"active":[{"callId":"question:1"}],"settled":[]}}"""
+            : """{"questions":{"active":[],"settled":[]}}""";
+        var stats = openStep
+            ? """{"openStep":{"turn":1,"step":2,"startTime":0}}"""
+            : """{"openStep":null}""";
+        var quotedTitle = JsonSerializer.Serialize(title);
+        return $$"""
+            {
+              "version": 7,
+              "record": {
+                "identity": { "formatVersion": 4, "createdAt": {{messageAtMs}},
+                  "cwd": {{JsonSerializer.Serialize(cwd)}}, "isSeeded": false, "inheritedEventCount": 0 },
+                "rows": {
+                  "title": { "ver": 1, "seq": 7, "val": {{quotedTitle}} },
+                  "modelSelection": { "ver": 3, "seq": 7,
+                    "val": { "lastUsed": { "provider": "opencode-go", "model": "deepseek-v4.1-flash" }, "pending": null } },
+                  "approvalState": { "ver": 1, "seq": 7,
+                    "val": { "policy": "ask", "turnOpen": {{(turnOpen ? "true" : "false")}} } },
+                  "sessionStats": { "ver": 1, "seq": 7, "val": {{stats}} },
+                  "userQuestions": { "ver": 2, "seq": 7, "val": {{questions}} },
+                  "turnOutline": { "ver": 2, "seq": 7,
+                    "val": { "turns": [ { "turn": 1, "seq": 4, "prompt": {{quotedTitle}}, "response": "" } ], "draft": "" } },
+                  "timeContext": { "ver": 3, "seq": 7, "val": { "lastMessageTime": {{messageAtMs}} } },
+                  "sessionListMetadata": { "ver": 1, "seq": 7,
+                    "val": { "blank": {{(blank ? "true" : "false")}}, "lastPromptAt": {{messageAtMs}} } }
+                }
+              }
+            }
+            """;
     }
 
     private static void VerifySnappyCodec()
@@ -187,6 +315,16 @@ internal static partial class Program
     {
         var text = Encoding.Unicode.GetBytes(json);
         var buffer = new byte[text.Length + 1];
+        Array.Copy(text, 0, buffer, 1, text.Length);
+        return buffer;
+    }
+
+    /// <summary>ASCII-only JSON is tagged 1 (Latin-1) instead of 0 (UTF-16).</summary>
+    private static byte[] DesktopLatin1Value(string json)
+    {
+        var text = Encoding.UTF8.GetBytes(json);
+        var buffer = new byte[text.Length + 1];
+        buffer[0] = 1;
         Array.Copy(text, 0, buffer, 1, text.Length);
         return buffer;
     }

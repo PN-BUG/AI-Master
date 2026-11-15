@@ -16,7 +16,7 @@ AIMaster is a standalone Windows monitor for Codex and DeepSeek usage and task a
 
 - Switch between Codex and DeepSeek from the data-source selector; each account keeps its own dashboard state.
 - View total Codex quota, 7-day and 5-hour windows, usage percentages, and reset times.
-- View the DeepSeek account balance with paid/granted credit, today's and last-30-day spend and tokens, plus a configurable low-balance warning.
+- View the DeepSeek account balance with paid/granted credit, today's and last-30-day spend and tokens, plus a configurable low-balance warning. With an OpenCode Go plan key configured, the account card and the floating monitor show the plan's 5-hour, weekly, and monthly allowance instead.
 - Read Deep Code (DeepSeek's official coding CLI) local session indexes for task status, model, reasoning effort, and token usage, even when the CLI is not running.
 - Monitor reset previews and announcements from [codex-reset.com](https://codex-reset.com/), notify on new events, and detect account quota recovery separately from official account data.
 - Forecast the remaining weekly quota from Monday through Sunday, switching between the whole account's consumption rate and a projection based only on this device's rate.
@@ -30,6 +30,7 @@ AIMaster is a standalone Windows monitor for Codex and DeepSeek usage and task a
 - Use either the Codex conversation title or the latest user request as the displayed task name.
 - Inspect the active model and reasoning effort.
 - Resize and reposition the overlay with persistent placement, click a task to open it in Codex, and adjust text from 100% to 150% in the main-window settings.
+- Switch the overlay's top line via the context menu: quota countdown, today's usage, quota alerts, latest event, seven-day usage sparkline, minimal, or source + clock; the right side always shows data freshness.
 - Dock and auto-hide the overlay on the top, left, or right edge of any monitor. Refreshing pauses while hidden.
 - Switch between Simplified Chinese and English instantly.
 - Check GitHub Releases automatically, read the latest release notes, or install an available update directly from the app.
@@ -55,7 +56,7 @@ Updates replace files in the running executable's directory and restart from tha
 
 - Windows 10 version 1809 or later (including Windows 11).
 - For the Codex data source: Codex installed and signed in. The `codex` command should be on `PATH`, or Codex Desktop should use its standard installation location.
-- For the DeepSeek data source: a DeepSeek API key entered under Settings → DeepSeek access. A Platform token is optional and adds usage details; the task list requires Deep Code to have been used on this device.
+- For the DeepSeek data source: a DeepSeek API key entered under Settings → DeepSeek access. A Platform token is optional and adds usage details; the task list requires Deep Code to have been used on this device. If the work is billed through an OpenCode Go plan instead, add that plan key to show the plan allowance without a balance.
 - Codex App Server available for live Codex quota and online task data.
 
 ## Floating monitor
@@ -67,7 +68,7 @@ Open it with **Floating monitor** in the main window:
 - Drag it to the top, left, or right screen edge to auto-hide it.
 - Only an 8 px hover strip remains while hidden, and background refreshing pauses.
 - Hover over the strip to expand and refresh immediately.
-- Right-click to refresh, collapse or expand, select the task-name source, enable auto-hide, or change the refresh interval.
+- Right-click to refresh, collapse or expand, pick the header content, select the task-name source, enable auto-hide, or change the refresh interval.
 - Resize the overlay from its edges or corners to show up to eight recent tasks; position and size persist across launches.
 - Hover over a task row to highlight it, or click it to open the task in Codex Desktop.
 - Closing the main window hides it to the Windows system tray. Click the tray icon to restore it, or use its menu to open the floating monitor or exit AIMaster.
@@ -82,7 +83,7 @@ Shared usage is disabled by default. When enabled, only weekly device aggregates
 
 When App Server data is unavailable, AIMaster falls back to local session records under `%USERPROFILE%\.codex\sessions` for the task list. Settings are stored in `%LOCALAPPDATA%\AIMaster\settings.json`. Existing `%LOCALAPPDATA%\SoftwareToolkit\ai-manager.json` settings are migrated on first launch.
 
-The DeepSeek data source uses an API key against the official `https://api.deepseek.com/user/balance` endpoint. An optional Platform token adds today's and last-30-day usage from `platform.deepseek.com`; those usage routes are private dashboard endpoints and may change, in which case the balance is still shown. Both credentials are stored only in the local settings file, encrypted with Windows DPAPI, and are never uploaded or logged. Deep Code tasks are read only from local indexes under `%USERPROFILE%\.deepcode\projects\*\sessions-index.json`; Deep Code is never started or modified.
+The DeepSeek data source uses an API key against the official `https://api.deepseek.com/user/balance` endpoint. An optional Platform token adds today's and last-30-day usage from `platform.deepseek.com`; those usage routes are private dashboard endpoints and may change, in which case the balance is still shown. When an OpenCode Go plan key is configured, the account view instead reads `https://opencode.ai/zen/go/v1/usage` for the used share and reset time of the plan's rolling five-hour, weekly, and monthly windows, and the balance becomes reference only. All credentials are stored only in the local settings file, encrypted with Windows DPAPI, and are never uploaded or logged. Deep Code tasks are read only from local indexes under `%USERPROFILE%\.deepcode\projects\*\sessions-index.json`; Deep Code is never started or modified.
 
 The conversation-title mode uses Codex task metadata. The latest-request mode extracts the most recent real user message while excluding injected attachment notes and environment metadata. DeepSeek mode uses the Deep Code session summary as the task name.
 

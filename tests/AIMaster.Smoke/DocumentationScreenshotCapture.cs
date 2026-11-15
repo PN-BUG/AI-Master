@@ -23,6 +23,100 @@ internal static class DocumentationScreenshotCapture
         Console.WriteLine($"Documentation screenshots written to {Path.GetFullPath(outputDirectory)}");
     }
 
+    /// <summary>Renders every selectable floating-monitor header style for visual review.</summary>
+    public static void CaptureHeaderStyles(string outputDirectory)
+    {
+        Directory.CreateDirectory(outputDirectory);
+        LocalizationService.SetLanguage(LocalizationService.Chinese);
+        var now = new DateTimeOffset(2026, 11, 14, 11, 30, 0, TimeSpan.FromHours(8));
+        var workspace = Path.Combine(Path.GetTempPath(), "aimaster-header-styles-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workspace);
+        try
+        {
+            var service = new AiManagerService(settingsPath: Path.Combine(workspace, "settings.json"));
+            var attention = new ResetSignalAttention(Path.Combine(workspace, "reset-attention.json"));
+            var floating = new AiFloatingWindow(service, attention);
+            floating.Width = 236;
+            var snapshot = CreateHeaderStyleSnapshot(now);
+            foreach (var style in new[]
+                     {
+                         FloatingHeaderStyles.QuotaReset, FloatingHeaderStyles.QuotaAlert,
+                         FloatingHeaderStyles.TodayUsage, FloatingHeaderStyles.UsageTrend,
+                         FloatingHeaderStyles.LatestEvent, FloatingHeaderStyles.Minimal,
+                         FloatingHeaderStyles.Brand
+                     })
+            {
+                service.Settings.FloatingHeaderStyle = style;
+                Invoke(floating, "RenderSnapshot", snapshot);
+                Render(floating.Content as FrameworkElement ?? floating, 236, 190,
+                    Path.Combine(outputDirectory, $"floating-header-{style}.png"));
+            }
+            DetachLanguageChanged(floating);
+        }
+        finally
+        {
+            try { Directory.Delete(workspace, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+        Console.WriteLine($"Header style screenshots written to {Path.GetFullPath(outputDirectory)}");
+    }
+
+    private static AiFloatingSnapshot CreateHeaderStyleSnapshot(DateTimeOffset now)
+    {
+        var today = DateOnly.FromDateTime(now.LocalDateTime);
+        var tasks = new List<AiThreadSummary>
+        {
+            new() { Id = "demo-1", Title = "做一份抖音平台游戏的调研报告", Status = "inProgress",
+                Source = AiProviderModes.DeepSeek, ModelName = "deepseek-v4.1-flash", UpdatedAt = now },
+            new() { Id = "demo-2", Title = "ds 当前使用的是 opencode 的 go 套餐", Status = "inProgress",
+                Source = AiProviderModes.DeepSeek, ModelName = "deepseek-v4.1-flash", UpdatedAt = now.AddMinutes(-3) },
+            new() { Id = "demo-3", Title = "aimaster ds 任务状态显示有问题", Status = "inProgress",
+                Source = AiProviderModes.DeepSeek, ModelName = "deepseek-v4.1-flash", UpdatedAt = now.AddMinutes(-9) },
+            new() { Id = "demo-4", Title = "参考这个 bluemood.xiaomy.net 的页面", Status = "completed",
+                Source = AiProviderModes.Codex, ModelName = "gpt-6.1-sol", UpdatedAt = now.AddMinutes(-26) },
+            new() { Id = "demo-5", Title = "为什么有人注册验证成功，点击却失败", Status = "waitingOnUserInput",
+                Source = AiProviderModes.Codex, ModelName = "gpt-6.1-sol", UpdatedAt = now.AddMinutes(-48) }
+        };
+        var fiveHour = new AiLimitWindow
+        {
+            LimitId = "codex", UsedPercent = 0, WindowDurationMinutes = 300, ResetsAt = now.AddHours(2)
+        };
+        var weekly = new AiLimitWindow
+        {
+            LimitId = "codex", UsedPercent = 99, WindowDurationMinutes = 10080, ResetsAt = now.AddHours(1.7)
+        };
+        return new AiFloatingSnapshot
+        {
+            Provider = AiProviderModes.DeepSeek,
+            Tasks = tasks,
+            TaskName = tasks[0].Title,
+            TaskStatus = tasks[0].Status,
+            TaskStatusText = tasks[0].StatusText,
+            ModelName = tasks[0].ModelName ?? "deepseek-v4.1-flash",
+            FiveHourQuota = fiveHour,
+            WeeklyQuota = weekly,
+            CodexFiveHourQuota = fiveHour,
+            CodexWeeklyQuota = weekly,
+            CodexQuotaCapturedAt = now.AddSeconds(-14),
+            DeepSeekBalanceText = "¥0.06",
+            DeepSeekBalance = new AiDeepSeekBalance { Total = 0.06 },
+            DeepSeekBalanceCapturedAt = now.AddSeconds(-14),
+            LocalCodexUsage = new AiLocalUsageSummary
+            {
+                PeriodStart = today.AddDays(-6),
+                PeriodEnd = today,
+                TotalTokens = 1_200_000,
+                TodayTokens = 128_400,
+                DailyUsage = Enumerable.Range(0, 7).Select(offset => new AiDailyUsage
+                {
+                    Date = today.AddDays(offset - 6),
+                    Tokens = new long[] { 96_000, 210_000, 154_000, 320_000, 410_000, 248_000, 128_400 }[offset]
+                }).ToList()
+            },
+            LocalUsageCapturedAt = now.AddSeconds(-3),
+            CapturedAt = now
+        };
+    }
+
     private static void CaptureLanguage(string language, string suffix, string outputDirectory)
     {
         LocalizationService.SetLanguage(language);
