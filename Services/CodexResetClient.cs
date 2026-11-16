@@ -115,9 +115,12 @@ internal sealed class CodexResetClient : IDisposable
         var events = new List<CodexResetEvent>();
         foreach (var row in rows.EnumerateArray())
         {
-            // Use only the published contract. Classifier guesses and banked resets are not resets.
-            if (Text(row, "group") != "reset" || Text(row, "announcement_state") != "announced") continue;
-            var item = Event(row, "announcement", "id", "announced_at");
+            // Banked grants have their own contract; announcement_state describes global resets.
+            var banked = Text(row, "group") == "credits" && Text(row, "reset_kind") == "banked";
+            if (!banked && (Text(row, "group") != "reset" || Text(row, "announcement_state") != "announced")) continue;
+            var kind = banked ? Text(row, "source") == "observed" && Text(row, "banked_state") == "available"
+                ? "banked-observed" : "banked" : "announcement";
+            var item = Event(row, kind, "id", "announced_at");
             if (item is not null && item.AnnouncedAt <= now + TimeSpan.FromMinutes(5)) events.Add(item);
         }
 
@@ -150,7 +153,9 @@ internal sealed class CodexResetClient : IDisposable
         var id = Text(row, idField);
         var at = Date(row, timeField);
         var summary = Text(row, "summary");
-        var url = SafeSourceUrl(Text(row, "url"));
+        // Monitoring-account observations have no tweet URL. Link back to the feed site.
+        var url = Text(row, "url") is null && kind == "banked-observed"
+            ? "https://codex-reset.com/" : SafeSourceUrl(Text(row, "url"));
         return string.IsNullOrWhiteSpace(id) || at is null || string.IsNullOrWhiteSpace(summary) || url is null
             ? null : new CodexResetEvent(id, kind, at.Value, summary, url, Text(row, "localized_summary"));
     }

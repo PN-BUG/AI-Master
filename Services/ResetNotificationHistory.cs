@@ -41,7 +41,7 @@ internal sealed class ResetNotificationHistory
 
     public CodexResetEvent? FindCatchUp(CodexResetSnapshot snapshot, DateTimeOffset now) =>
         snapshot.IsStale || snapshot.Error is not null ? null : snapshot.AlertEvents
-            .Where(item => item.Kind is "signal" or "announcement" && CanCatchUp(item.AnnouncedAt, now))
+            .Where(item => (item.Kind is "signal" or "announcement" || item.IsBanked) && CanCatchUp(item.AnnouncedAt, now))
             .OrderByDescending(item => item.AnnouncedAt).FirstOrDefault();
 
     private bool IsToday(DateTimeOffset at, DateTimeOffset now) => at <= now &&

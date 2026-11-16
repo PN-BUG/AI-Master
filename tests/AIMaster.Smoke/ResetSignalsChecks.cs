@@ -17,6 +17,7 @@ internal static partial class Program
 {
     private static void VerifyResetSignals(string[] args)
     {
+        VerifyBankedResetNotices();
         if (args.Contains("--reset-live", StringComparer.OrdinalIgnoreCase))
         {
             using var publicClient = new CodexResetClient();
@@ -46,7 +47,7 @@ internal static partial class Program
         }
         var baseline = Parse(Feed());
         Check(!baseline.IsStale && baseline.Events.Count == 1 && baseline.Signal is null,
-            "only published reset announcements count; forecast probability and banked grants do not alert");
+            "only published reset contracts count; forecast probability and unrelated credits do not alert");
         var previousLanguage = LocalizationService.CurrentLanguage;
         try
         {

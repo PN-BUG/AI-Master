@@ -39,7 +39,7 @@ internal sealed class ResetSignalAttention
     public void Observe(CodexResetSnapshot snapshot)
     {
         if (snapshot.IsStale || snapshot.Error is not null) return;
-        var latest = snapshot.AlertEvents.Where(item => IsRecent(item.AnnouncedAt, snapshot.CheckedAt))
+        var latest = snapshot.AlertEvents.Where(item => item.IsRecentAlert(snapshot.CheckedAt))
             .OrderByDescending(item => item.AnnouncedAt).ThenByDescending(item => Rank(item.Kind)).FirstOrDefault();
         if (latest is not null) Observe(latest);
     }
@@ -85,6 +85,7 @@ internal sealed class ResetSignalAttention
     {
         "recovery" => LocalizationService.L("账号额度已恢复", "Account quota recovered"),
         "announcement" => LocalizationService.L("收到重置公告", "Reset announced"),
+        "banked" or "banked-observed" => Pending.KindText,
         _ => LocalizationService.L("最新重置预告", "New reset preview")
     };
     public string DismissText => LocalizationService.L("已知晓 · 点击隐藏", "Dismiss reminder");

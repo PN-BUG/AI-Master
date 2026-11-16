@@ -18,7 +18,7 @@ AIMaster is a standalone Windows monitor for Codex and DeepSeek usage and task a
 - View total Codex quota, 7-day and 5-hour windows, usage percentages, and reset times.
 - View the DeepSeek account balance with paid/granted credit, today's and last-30-day spend and tokens, plus a configurable low-balance warning. With an OpenCode Go plan key configured, the account card and the floating monitor show the plan's 5-hour, weekly, and monthly allowance instead.
 - Read Deep Code (DeepSeek's official coding CLI) local session indexes for task status, model, reasoning effort, and token usage, even when the CLI is not running.
-- Monitor reset previews and announcements from [codex-reset.com](https://codex-reset.com/), notify on new events, and detect account quota recovery separately from official account data.
+- Monitor reset previews, announcements, and BANKED reset grants from [codex-reset.com](https://codex-reset.com/), notify on new events, and detect account quota recovery separately from official account data. Banked notices have a seven-day reminder window; monitoring-account observations do not confirm delivery to your account.
 - Forecast the remaining weekly quota from Monday through Sunday, switching between the whole account's consumption rate and a projection based only on this device's rate.
 - Track this device's weekly Codex tokens and token-weighted top model, estimate device/project quota attribution from same-period account token history, and show each project's top model without assigning multi-device usage entirely to the current machine.
 - Show today's local tokens, their estimated share of the account's total weekly quota, and an hourly usage line chart from 00 through 23.

@@ -37,7 +37,7 @@ internal sealed class CodexResetTracker
         File.Move(temporary, _path, overwrite: true);
         _seen = next;
         return baseline || !notify ? [] : unseen
-            .Where(item => snapshot.CheckedAt - item.AnnouncedAt <= TimeSpan.FromHours(24))
+            .Where(item => item.IsRecentAlert(snapshot.CheckedAt))
             .OrderByDescending(item => item.AnnouncedAt).ToList();
     }
 }
